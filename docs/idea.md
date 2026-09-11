@@ -113,3 +113,19 @@ still open:
   homogeneous list than acquisition buyers), or find another entry point.
 - Pricing model — per-seat subscription, per-audit usage fee, or a hybrid.
 - Whether the client-facing portal is core to v1 or a later addition.
+
+## Correction (2026-09-11, from `docs/research/distribution.md`)
+
+The first open question above does not survive as written: DueDilio's provider network page
+(`duedilio.com/our-network/`) shows only first name, last initial, specialty, and region — by the
+marketplace's own stated design, providers are not contactable without going through DueDilio as an
+intermediary. **"200+ contactable providers" was never a usable go-to-market list; it was only ever
+evidence that the category and price point are real** (their published $500–5,000 "Website Review"
+price band, cited above, still stands as that evidence). The underlying distribution logic survives
+in a weaker, slower form — a smaller list of consultants/firms who already publicly advertise
+technology/IT due diligence, findable through professional-association directories (IBBA, AM&AA) and
+direct search/LinkedIn discovery rather than through DueDilio itself. See `docs/research/
+distribution.md` for the full channel analysis and `docs/roadmap.md` Phase 0 / `docs/releases.md`
+§4 for how this changes the go-to-market plan. This correction does not touch the core reframe
+(software sold to consultants, not buyers) — only the specific mechanism originally assumed for
+reaching them.

@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: closecheck
+      POSTGRES_PASSWORD: closecheck_dev
+      POSTGRES_DB: closecheck
+    ports:
+      # Mapped to an uncommon host port: this is a shared dev machine with other unrelated Postgres
+      # instances/containers already using 5432 and 5433, which would otherwise silently intercept
+      # connections meant for this container.
+      - "55432:5432"
+    volumes:
+      - closecheck_pg_data:/var/lib/postgresql/data
+
+volumes:
+  closecheck_pg_data:

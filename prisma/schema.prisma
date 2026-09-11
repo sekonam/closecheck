@@ -1,0 +1,307 @@
+// CloseCheck domain model — see docs/spec.md §3 for the definitions this mirrors.
+//
+// Tenant isolation (docs/spec.md §8, the load-bearing non-functional requirement) is enforced at
+// TWO layers, deliberately redundant:
+//   1. Every tenant-owned table carries `orgId` and the application layer (src/lib/db/scoped.ts)
+//      never issues a query without it.
+//   2. Postgres row-level security policies (prisma/migrations/*_rls/migration.sql) enforce the same
+//      boundary at the database layer, so a bug in (1) cannot leak across tenants on its own.
+// Do not add a tenant-owned table without both.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime app connection — MUST be a least-privilege role (closecheck_app), never the migration
+  // superuser. See prisma/migrations/*_least_privilege_app_role and scripts/verify-rls.ts: RLS is
+  // silently bypassed for any superuser/BYPASSRLS role, which is exactly what the Docker Postgres
+  // bootstrap role is.
+  url       = env("DATABASE_URL")
+  // Schema migrations run against this instead — needs elevated privileges (CREATE TABLE, ALTER,
+  // CREATE ROLE, GRANT) that the app role deliberately does not have.
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & auth
+// ---------------------------------------------------------------------------
+
+model ConsultantOrg {
+  id            String   @id @default(cuid())
+  name          String
+  // Whitelabel brand kit — spec.md §6. Logo is a URL into object storage, not inline bytes.
+  brandLogoUrl  String?
+  brandColorHex String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users             User[]
+  engagements       Engagement[]
+  audits            Audit[]
+  findings          Finding[]
+  evidence          Evidence[]
+  reports           Report[]
+  clientPortalLinks ClientPortalLink[]
+
+  @@map("consultant_orgs")
+}
+
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
+model User {
+  id           String        @id @default(cuid())
+  orgId        String
+  org          ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  email        String        @unique
+  passwordHash String
+  name         String?
+  role         UserRole      @default(OWNER)
+  createdAt    DateTime      @default(now())
+
+  @@index([orgId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Engagement & Audit — spec.md §3
+// ---------------------------------------------------------------------------
+
+enum DealStage {
+  PRE_LOI
+  POST_LOI
+  CLOSING
+  CLOSED
+  DEAD
+}
+
+model Engagement {
+  id              String        @id @default(cuid())
+  orgId           String
+  org             ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  businessName    String
+  // Target domain for Tier A automated checks (src/lib/audit/tierA.ts) — e.g. "example-restaurant.com".
+  // Optional because an Engagement can be created before this is known; Tier A automation is simply
+  // unavailable until it's set.
+  primaryDomain   String?
+  dealStage       DealStage     @default(PRE_LOI)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  // spec.md §8: document retention is tied to the Engagement lifecycle. Set when dealStage moves to
+  // CLOSED or DEAD; a background job purges uploaded documents past this date. Null = not scheduled.
+  documentPurgeAt DateTime?
+
+  audits Audit[]
+
+  @@index([orgId])
+  @@map("engagements")
+}
+
+// ---------------------------------------------------------------------------
+// Template & checklist definition — spec.md §4-5
+// ---------------------------------------------------------------------------
+
+enum Tier {
+  A
+  B
+  C
+}
+
+enum CheckMethod {
+  AUTOMATED
+  MANUAL
+}
+
+// Product-owned, shared content — NOT scoped to an org. Consultants select a Template; they never
+// edit it in place. See docs/spec.md §5 and .claude/skills/audit-methodology/SKILL.md.
+model Template {
+  id          String   @id @default(cuid())
+  slug        String // e.g. "restaurant-online-ordering" — stable across versions
+  version     Int      @default(1)
+  name        String
+  description String?
+  isActive    Boolean  @default(true) // new Audits pick the active version for a slug
+  createdAt   DateTime @default(now())
+
+  items  TemplateItem[]
+  audits Audit[]
+
+  @@unique([slug, version])
+  @@map("templates")
+}
+
+model TemplateItem {
+  id            String      @id @default(cuid())
+  templateId    String
+  template      Template    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  tier          Tier
+  method        CheckMethod
+  title         String
+  description   String?
+  // Stable key used by the Tier A automation runner (src/lib/audit/tierA) to know which checker to
+  // invoke for AUTOMATED items — not meaningful for MANUAL items.
+  automationKey String?
+  sortOrder     Int         @default(0)
+
+  findings Finding[]
+
+  @@index([templateId])
+  @@map("template_items")
+}
+
+// ---------------------------------------------------------------------------
+// Audit & Finding — spec.md §3-4, §6 (severity roll-up)
+// ---------------------------------------------------------------------------
+
+enum AuditStatus {
+  IN_PROGRESS
+  COMPLETE
+}
+
+model Audit {
+  id                        String        @id @default(cuid())
+  orgId                     String
+  org                       ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  engagementId              String
+  engagement                Engagement    @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  templateId                String
+  template                  Template      @relation(fields: [templateId], references: [id])
+  status                    AuditStatus   @default(IN_PROGRESS)
+  // spec.md §6: consultant override of the computed overall rating. The computed value is never
+  // replaced by this — it is always recomputed and shown alongside the override, never persisted
+  // as if it were the same field.
+  overallRatingOverride     Severity?
+  overallRatingOverrideNote String?
+  createdAt                 DateTime      @default(now())
+  updatedAt                 DateTime      @updatedAt
+
+  findings Finding[]
+  reports  Report[]
+
+  @@index([orgId])
+  @@index([engagementId])
+  @@map("audits")
+}
+
+enum Severity {
+  GREEN
+  YELLOW
+  RED
+}
+
+enum FindingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  PASS
+  FAIL
+  NOT_APPLICABLE
+  BLOCKED
+}
+
+model Finding {
+  id             String        @id @default(cuid())
+  orgId          String
+  org            ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  auditId        String
+  audit          Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  templateItemId String
+  templateItem   TemplateItem  @relation(fields: [templateItemId], references: [id])
+  status         FindingStatus @default(NOT_STARTED)
+  severity       Severity?
+  note           String?
+  // Structured fields captured for Tier B document-derived findings (spec.md §4) — e.g.
+  // { transferable: "unclear", penaltyAmount: "5000", penaltyBasis: "flat" }. Kept as JSON because
+  // the structured fields differ per checklist item, not because the schema is unmodeled — see
+  // spec.md §4's Tier B table for the fields each item actually needs.
+  structuredData Json?
+  updatedAt      DateTime      @updatedAt
+
+  evidence Evidence[]
+
+  @@unique([auditId, templateItemId])
+  @@index([orgId])
+  @@index([auditId])
+  @@map("findings")
+}
+
+enum EvidenceKind {
+  DOCUMENT // Tier B upload
+  NOTE // free-text evidence, no file
+  SCREENSHOT
+}
+
+model Evidence {
+  id         String        @id @default(cuid())
+  orgId      String
+  org        ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  findingId  String
+  finding    Finding       @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  kind       EvidenceKind
+  // Object storage key/URL, not inline bytes — spec.md §8 (encrypted at rest, access-controlled per
+  // Engagement). Null for NOTE-kind evidence.
+  storageKey String?
+  text       String?
+  createdAt  DateTime      @default(now())
+
+  @@index([orgId])
+  @@index([findingId])
+  @@map("evidence")
+}
+
+// ---------------------------------------------------------------------------
+// Report — spec.md §6-7
+// ---------------------------------------------------------------------------
+
+model Report {
+  id                      String        @id @default(cuid())
+  orgId                   String
+  org                     ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  auditId                 String
+  audit                   Audit         @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  // Snapshot of computed severity roll-up at generation time, so a Report reflects "the state at the
+  // stated date" (spec.md §6 disclaimer language) even if the Audit's findings change afterward.
+  computedOverallSeverity Severity
+  generatedAt             DateTime      @default(now())
+  pdfStorageKey           String?
+
+  portalLinks ClientPortalLink[]
+
+  @@index([orgId])
+  @@index([auditId])
+  @@map("reports")
+}
+
+// spec.md §7 — Phase 3, modeled now so the schema doesn't need a later migration for the shape
+// decision (magic-link, no buyer account) that's already made. Not exposed by any route yet.
+model ClientPortalLink {
+  id        String        @id @default(cuid())
+  orgId     String
+  org       ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reportId  String
+  report    Report        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  token     String        @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime      @default(now())
+
+  accessLog PortalAccessLogEntry[]
+
+  @@index([orgId])
+  @@map("client_portal_links")
+}
+
+// spec.md §8 — audit logging of report access, needed once the portal ships.
+model PortalAccessLogEntry {
+  id       String           @id @default(cuid())
+  linkId   String
+  link     ClientPortalLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  viewedAt DateTime         @default(now())
+  ipHash   String?
+
+  @@index([linkId])
+  @@map("portal_access_log")
+}
