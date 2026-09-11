@@ -26,15 +26,32 @@ export interface FindingForRollup {
   templateItem: { tier: Tier };
 }
 
+export interface Coverage {
+  rated: number;
+  total: number;
+}
+
 export interface RollupResult {
   perTier: Record<Tier, Severity>;
   overall: Severity;
+  /**
+   * How many findings actually carry a severity, per tier and overall — found via UI testing
+   * (running the app end-to-end, not just unit tests): a brand-new audit with zero rated findings
+   * rolls up to GREEN (worstSeverity's documented empty-list default), which reads as "verified
+   * safe" when really nothing has been checked yet. Callers (the audit page, the PDF report) MUST
+   * show this alongside the severity badge — never render `overall`/`perTier` without it — so
+   * "GREEN because nothing's rated" is visually distinct from "GREEN because it passed."
+   */
+  perTierCoverage: Record<Tier, Coverage>;
+  overallCoverage: Coverage;
 }
 
 /** Overall = worst tier rating; each tier's rating = worst finding rating within that tier. */
 export function computeSeverityRollup(findings: FindingForRollup[]): RollupResult {
   const byTier: Record<Tier, Severity[]> = { A: [], B: [], C: [] };
+  const totalByTier: Record<Tier, number> = { A: 0, B: 0, C: 0 };
   for (const f of findings) {
+    totalByTier[f.templateItem.tier]++;
     if (f.severity) byTier[f.templateItem.tier].push(f.severity);
   }
 
@@ -44,8 +61,19 @@ export function computeSeverityRollup(findings: FindingForRollup[]): RollupResul
     C: worstSeverity(byTier.C),
   };
 
+  const perTierCoverage: Record<Tier, Coverage> = {
+    A: { rated: byTier.A.length, total: totalByTier.A },
+    B: { rated: byTier.B.length, total: totalByTier.B },
+    C: { rated: byTier.C.length, total: totalByTier.C },
+  };
+
   return {
     perTier,
     overall: worstSeverity(Object.values(perTier)),
+    perTierCoverage,
+    overallCoverage: {
+      rated: byTier.A.length + byTier.B.length + byTier.C.length,
+      total: findings.length,
+    },
   };
 }

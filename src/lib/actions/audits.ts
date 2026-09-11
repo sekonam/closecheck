@@ -61,7 +61,12 @@ export async function runTierAAutomation(formData: FormData) {
   const { orgId } = await requireOrgSession();
   const auditId = z.string().min(1).parse(formData.get("auditId"));
 
-  await withOrgScope(orgId, async (tx) => {
+  // Reads the finding list and target domain in a short first transaction, then runs the outbound
+  // checks OUTSIDE any transaction, then writes results back in a second short transaction. Found
+  // via UI testing: the original version ran the WHOIS/DNS/TLS/HTTP calls (which can take several
+  // seconds combined) inside a single withOrgScope transaction, holding a Postgres connection idle
+  // the whole time — fine for one dev locally, a real problem under any concurrent load.
+  const { domain, automatable, engagementId } = await withOrgScope(orgId, async (tx) => {
     const audit = await tx.audit.findUniqueOrThrow({
       where: { id: auditId },
       include: { engagement: true, findings: { include: { templateItem: true } } },
@@ -72,17 +77,27 @@ export async function runTierAAutomation(formData: FormData) {
       throw new Error("This engagement has no primary domain set — add one before running Tier A checks.");
     }
 
-    const automatable = audit.findings.filter((f) => isAutomatable(f.templateItem.automationKey));
+    return {
+      domain,
+      engagementId: audit.engagementId,
+      automatable: audit.findings.filter((f) => isAutomatable(f.templateItem.automationKey)),
+    };
+  });
 
-    // Sequential, not Promise.all: these are outbound network calls (WHOIS/DNS/TLS/HTTP) against a
-    // third party's infrastructure — a handful of sequential requests for one domain is a
-    // reasonable, low-impact rate; unbounded parallelism across many findings is not, and this is
-    // exactly the kind of check-then-act code path .claude/skills/domain-code-review/SKILL.md asks
-    // to look at for anything touching an external target.
-    for (const finding of automatable) {
-      const result = await runTierACheck(finding.templateItem.automationKey!, domain);
+  // Sequential, not Promise.all: these are outbound network calls against a third party's
+  // infrastructure — a handful of sequential requests for one domain is a reasonable, low-impact
+  // rate; unbounded parallelism across many findings is not, and this is exactly the kind of
+  // check-then-act code path .claude/skills/domain-code-review/SKILL.md asks to look at for
+  // anything touching an external target.
+  const results: Array<{ findingId: string; result: Awaited<ReturnType<typeof runTierACheck>> }> = [];
+  for (const finding of automatable) {
+    results.push({ findingId: finding.id, result: await runTierACheck(finding.templateItem.automationKey!, domain) });
+  }
+
+  await withOrgScope(orgId, async (tx) => {
+    for (const { findingId, result } of results) {
       await tx.finding.update({
-        where: { id: finding.id },
+        where: { id: findingId },
         data: {
           status: result.status,
           severity: result.severity,
@@ -93,8 +108,7 @@ export async function runTierAAutomation(formData: FormData) {
     }
   });
 
-  const audit = await prisma.audit.findUniqueOrThrow({ where: { id: auditId } });
-  revalidatePath(`/engagements/${audit.engagementId}/audits/${auditId}`);
+  revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }
 
 const updateFindingSchema = z.object({

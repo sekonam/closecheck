@@ -70,8 +70,19 @@ export default async function AuditPage({
         </h1>
         <div className="flex items-center gap-2 text-sm">
           <span>Overall:</span>
-          <span className={`h-3 w-3 rounded-full ${SEVERITY_DOT[rollup.overall]}`} />
-          <span className="font-medium">{rollup.overall}</span>
+          {rollup.overallCoverage.rated === 0 ? (
+            <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+              Not yet rated
+            </span>
+          ) : (
+            <>
+              <span className={`h-3 w-3 rounded-full ${SEVERITY_DOT[rollup.overall]}`} />
+              <span className="font-medium">{rollup.overall}</span>
+            </>
+          )}
+          <span className="text-xs text-slate-400">
+            ({rollup.overallCoverage.rated}/{rollup.overallCoverage.total} rated)
+          </span>
         </div>
       </div>
 
@@ -163,7 +174,16 @@ export default async function AuditPage({
         <section key={tier} className="mt-8">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-medium text-slate-900">{TIER_LABEL[tier]}</h2>
-            <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_DOT[rollup.perTier[tier]]}`} />
+            {rollup.perTierCoverage[tier].rated === 0 ? (
+              <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                Not yet rated
+              </span>
+            ) : (
+              <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_DOT[rollup.perTier[tier]]}`} />
+            )}
+            <span className="text-xs text-slate-400">
+              ({rollup.perTierCoverage[tier].rated}/{rollup.perTierCoverage[tier].total} rated)
+            </span>
           </div>
           <div className="mt-3 space-y-3">
             {byTier[tier].map((finding) => {
