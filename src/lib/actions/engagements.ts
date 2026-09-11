@@ -3,17 +3,14 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { DealStage } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
+import { normalizeDomain } from "@/lib/validation/domain";
 
 const createEngagementSchema = z.object({
   businessName: z.string().min(1, "Business name is required"),
-  primaryDomain: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .transform((v) => v.replace(/^https?:\/\//, "").replace(/\/.*$/, ""))
-    .optional(),
+  primaryDomain: z.string().trim().transform(normalizeDomain).optional(),
 });
 
 export async function createEngagement(formData: FormData) {
@@ -36,4 +33,53 @@ export async function createEngagement(formData: FormData) {
 
   revalidatePath("/engagements");
   redirect(`/engagements/${engagement.id}`);
+}
+
+const updateEngagementSchema = z.object({
+  engagementId: z.string().min(1),
+  businessName: z.string().min(1, "Business name is required"),
+  // Blank means "clear the domain" here, same as create — there is no separate "leave unchanged"
+  // affordance in a plain text input, and that's the right default: re-submitting the form with the
+  // field emptied is the only way a consultant has to remove a domain they'd previously set.
+  primaryDomain: z.string().trim().transform(normalizeDomain).optional(),
+  dealStage: z.nativeEnum(DealStage),
+  // docs/spec.md §8: "consultant-configurable deletion policy" — the consultant sets the actual
+  // purge date directly rather than us computing one from a hardcoded N-days constant. Blank clears
+  // it (no purge scheduled), same reasoning as primaryDomain above.
+  documentPurgeAt: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? new Date(v) : undefined)),
+});
+
+/**
+ * The only way to change an Engagement after creation — including adding a primaryDomain to one
+ * created without it, which otherwise permanently blocks Tier A automation for that Engagement
+ * (found via UI testing: the app had no edit path at all before this).
+ */
+export async function updateEngagement(formData: FormData): Promise<void> {
+  const { orgId } = await requireOrgSession();
+  const parsed = updateEngagementSchema.parse({
+    engagementId: formData.get("engagementId"),
+    businessName: formData.get("businessName"),
+    primaryDomain: formData.get("primaryDomain") || undefined,
+    dealStage: formData.get("dealStage"),
+    documentPurgeAt: formData.get("documentPurgeAt") || undefined,
+  });
+
+  await withOrgScope(orgId, (tx) =>
+    tx.engagement.update({
+      where: { id: parsed.engagementId },
+      data: {
+        businessName: parsed.businessName,
+        primaryDomain: parsed.primaryDomain || null,
+        dealStage: parsed.dealStage,
+        documentPurgeAt: parsed.documentPurgeAt ?? null,
+      },
+    }),
+  );
+
+  revalidatePath(`/engagements/${parsed.engagementId}`);
+  revalidatePath("/engagements");
 }

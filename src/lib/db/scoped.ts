@@ -32,10 +32,22 @@ export async function withOrgScope<T>(
   });
 }
 
-/** Escape hatch for the small number of genuinely cross-tenant operations (e.g. an admin tool with
- * its own separate audit-logged access path — spec.md §8). Not used by any route yet; exists so that
- * if one is ever needed, it's an explicit, greppable exception rather than a plain `prisma.<model>`
- * call that looks identical to a mistake. */
+/**
+ * NOT a cross-tenant escape hatch, despite how that might read — correcting an earlier version of
+ * this comment that claimed otherwise. Under the RLS design (prisma/migrations/*_row_level_security,
+ * *_least_privilege_app_role), the `prisma` client's role (`closecheck_app`) has no access to a
+ * tenant table's rows unless `app.current_org_id` is set on that connection — with no org scope set,
+ * every tenant-table query returns zero rows, full stop (verified by scripts/verify-rls.ts's
+ * "unscoped client sees 0 rows" assertion). This function exists only for the same non-tenant
+ * content withOrgScope's own docstring already carves out (Template/TemplateItem) if a caller wants
+ * the plain client without importing it from ./client directly.
+ *
+ * A genuine cross-tenant operation (found a real one: scripts/purge-expired-documents.ts, which has
+ * to find engagements due for purge across every org) needs a connection using the
+ * DIRECT_DATABASE_URL superuser role instead — the same role migrations use, for the same reason:
+ * `closecheck_app` cannot do this by design, not by oversight. Build that as its own standalone
+ * script with its own audit trail, the way that one does — never by widening this function.
+ */
 export function unscoped(): PrismaClient {
   return prisma;
 }

@@ -4,6 +4,9 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { prisma } from "@/lib/db/client";
 import { createAudit } from "@/lib/actions/audits";
+import { updateEngagement } from "@/lib/actions/engagements";
+
+const DEAL_STAGES = ["PRE_LOI", "POST_LOI", "CLOSING", "CLOSED", "DEAD"] as const;
 
 export default async function EngagementPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,6 +32,80 @@ export default async function EngagementPage({ params }: { params: Promise<{ id:
       <p className="text-sm text-slate-500">
         {engagement.primaryDomain ?? "No primary domain set"} · {engagement.dealStage}
       </p>
+
+      <div
+        key={`${engagement.businessName}-${engagement.primaryDomain}-${engagement.dealStage}-${engagement.documentPurgeAt?.toISOString()}`}
+        className="mt-6 rounded-lg border border-slate-200 bg-white p-4"
+      >
+        <h2 className="text-sm font-medium text-slate-900">Edit engagement</h2>
+        <form action={updateEngagement} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <input type="hidden" name="engagementId" value={engagement.id} />
+          <div>
+            <label className="block text-xs font-medium text-slate-600" htmlFor="businessName">
+              Business name
+            </label>
+            <input
+              id="businessName"
+              name="businessName"
+              defaultValue={engagement.businessName}
+              required
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600" htmlFor="primaryDomain">
+              Primary domain (for Tier A checks)
+            </label>
+            <input
+              id="primaryDomain"
+              name="primaryDomain"
+              defaultValue={engagement.primaryDomain ?? ""}
+              placeholder="example-restaurant.com"
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600" htmlFor="dealStage">
+              Deal stage
+            </label>
+            <select
+              id="dealStage"
+              name="dealStage"
+              defaultValue={engagement.dealStage}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            >
+              {DEAL_STAGES.map((s) => (
+                <option key={s} value={s}>
+                  {s.replace("_", "-")}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600" htmlFor="documentPurgeAt">
+              Purge uploaded documents on/after (docs/spec.md §8)
+            </label>
+            <input
+              id="documentPurgeAt"
+              name="documentPurgeAt"
+              type="date"
+              defaultValue={engagement.documentPurgeAt?.toISOString().slice(0, 10) ?? ""}
+              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Blank = no purge scheduled. Applied by `npm run db:purge-expired-documents`, not automatically.
+            </p>
+          </div>
+          <div className="sm:col-span-2">
+            <button
+              type="submit"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-medium text-slate-900">Start a new audit</h2>

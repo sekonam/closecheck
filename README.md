@@ -15,12 +15,21 @@ spec/roadmap/release/methodology/design/review work, and how to combine them).
 ## Application (Phase 1 MVP scaffold)
 
 Next.js (App Router) + TypeScript + Postgres. Implements the core loop from `docs/roadmap.md` Phase
-1: create an Engagement, run the Restaurant/online-ordering Template through Tier A (real WHOIS/DNS/
-SSL/CMS checks), Tier B/C manual finding capture (including document upload and the
-transferable/penalty structured fields for contract items) and a consultant override on the computed
-rating, and generate a whitelabeled PDF report. Not yet built: self-serve billing, the client portal
-(Phase 3), the other three templates, and document retention/purge automation (the schema and
-storage layer support it — `Engagement.documentPurgeAt`, `docs/spec.md` §8 — but no job runs it yet).
+1: create or edit an Engagement (including adding a domain after the fact — Tier A automation is
+otherwise permanently blocked for an Engagement created without one), run the Restaurant/online-
+ordering Template through Tier A (real WHOIS/DNS/SSL/CMS checks), Tier B/C manual finding capture
+(including document upload and the transferable/penalty structured fields for contract items), a
+consultant override on the computed rating, and a whitelabeled PDF report — every severity badge,
+including the report's, shows rated/total coverage so a not-yet-checked audit never reads as
+"verified Green." Document retention (`docs/spec.md` §8) is consultant-configurable per Engagement
+(a purge date field) and enforced by `npm run db:purge-expired-documents`, run manually or on a cron
+— nothing runs it automatically yet. Not yet built: self-serve billing, the client portal (Phase 3),
+the other three templates.
+
+**Tagged `v0.1.0`** — Phase 1 MVP, all engineering deliverables done and verified via full UI
+testing (browser session, not just unit tests). The phase's actual exit criteria — a design partner
+completing a real audit and sending the PDF to a real buyer — is a validation event, not code, and
+remains open.
 
 ### Local setup
 
