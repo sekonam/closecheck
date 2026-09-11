@@ -102,6 +102,12 @@ const updateFindingSchema = z.object({
   status: z.nativeEnum(FindingStatus),
   severity: z.nativeEnum(Severity).optional(),
   note: z.string().optional(),
+  // Contract-specific structured fields (docs/spec.md §4, Tier B) — only rendered in the UI for the
+  // POS/online-ordering contract items, but accepted generically here rather than gated by title so
+  // this action doesn't need to know which items are "contract-shaped."
+  transferable: z.enum(["yes", "no", "unclear"]).optional(),
+  penaltyAmount: z.string().optional(),
+  penaltyBasis: z.string().optional(),
 });
 
 export async function updateFinding(formData: FormData) {
@@ -111,7 +117,12 @@ export async function updateFinding(formData: FormData) {
     status: formData.get("status"),
     severity: formData.get("severity") || undefined,
     note: formData.get("note") || undefined,
+    transferable: formData.get("transferable") || undefined,
+    penaltyAmount: formData.get("penaltyAmount") || undefined,
+    penaltyBasis: formData.get("penaltyBasis") || undefined,
   });
+
+  const hasStructuredFields = parsed.transferable || parsed.penaltyAmount || parsed.penaltyBasis;
 
   const updated = await withOrgScope(orgId, (tx) =>
     tx.finding.update({
@@ -120,10 +131,55 @@ export async function updateFinding(formData: FormData) {
         status: parsed.status,
         severity: parsed.severity ? parsed.severity : null,
         note: parsed.note ?? null,
+        // Only touch structuredData when this submit actually carried one of the contract fields —
+        // omitting the key here (rather than writing null/{}) leaves Tier A's automated check
+        // output on other findings untouched, since this same action is shared by every finding's
+        // form regardless of tier or method.
+        ...(hasStructuredFields
+          ? {
+              structuredData: {
+                transferable: parsed.transferable ?? null,
+                penaltyAmount: parsed.penaltyAmount ?? null,
+                penaltyBasis: parsed.penaltyBasis ?? null,
+              } satisfies Prisma.InputJsonValue,
+            }
+          : {}),
       },
       include: { audit: true },
     }),
   );
 
   revalidatePath(`/engagements/${updated.audit.engagementId}/audits/${updated.audit.id}`);
+}
+
+const updateAuditOverrideSchema = z.object({
+  auditId: z.string().min(1),
+  overallRatingOverride: z.nativeEnum(Severity).optional(),
+  overallRatingOverrideNote: z.string().optional(),
+});
+
+/**
+ * Sets or clears the consultant's override of the computed overall rating (docs/spec.md §6). The
+ * computed rating itself is never stored as overridden — src/lib/reports/renderHtml.ts always
+ * recomputes it fresh and shows both, per the spec's transparency requirement.
+ */
+export async function updateAuditOverride(formData: FormData): Promise<void> {
+  const { orgId } = await requireOrgSession();
+  const parsed = updateAuditOverrideSchema.parse({
+    auditId: formData.get("auditId"),
+    overallRatingOverride: formData.get("overallRatingOverride") || undefined,
+    overallRatingOverrideNote: formData.get("overallRatingOverrideNote") || undefined,
+  });
+
+  const updated = await withOrgScope(orgId, (tx) =>
+    tx.audit.update({
+      where: { id: parsed.auditId },
+      data: {
+        overallRatingOverride: parsed.overallRatingOverride ?? null,
+        overallRatingOverrideNote: parsed.overallRatingOverrideNote ?? null,
+      },
+    }),
+  );
+
+  revalidatePath(`/engagements/${updated.engagementId}/audits/${updated.id}`);
 }

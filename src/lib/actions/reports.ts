@@ -25,7 +25,7 @@ export async function generateReport(formData: FormData): Promise<void> {
       include: {
         engagement: true,
         template: true,
-        findings: { include: { templateItem: true } },
+        findings: { include: { templateItem: true, evidence: true } },
       },
     });
     const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
@@ -41,7 +41,7 @@ export async function generateReport(formData: FormData): Promise<void> {
       templateName: audit.template.name,
       generatedAt: report.generatedAt,
       org: { name: org.name, brandColorHex: org.brandColorHex, brandLogoUrl: org.brandLogoUrl },
-      findings: audit.findings,
+      findings: audit.findings.map((f) => ({ ...f, evidenceCount: f.evidence.length })),
       overallRatingOverride: audit.overallRatingOverride,
       overallRatingOverrideNote: audit.overallRatingOverrideNote,
     });

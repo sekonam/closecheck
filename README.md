@@ -16,8 +16,11 @@ spec/roadmap/release/methodology/design/review work, and how to combine them).
 
 Next.js (App Router) + TypeScript + Postgres. Implements the core loop from `docs/roadmap.md` Phase
 1: create an Engagement, run the Restaurant/online-ordering Template through Tier A (real WHOIS/DNS/
-SSL/CMS checks), Tier B/C (manual entry), and generate a whitelabeled PDF report. Not yet built:
-self-serve billing, the client portal (Phase 3), the other three templates.
+SSL/CMS checks), Tier B/C manual finding capture (including document upload and the
+transferable/penalty structured fields for contract items) and a consultant override on the computed
+rating, and generate a whitelabeled PDF report. Not yet built: self-serve billing, the client portal
+(Phase 3), the other three templates, and document retention/purge automation (the schema and
+storage layer support it — `Engagement.documentPurgeAt`, `docs/spec.md` §8 — but no job runs it yet).
 
 ### Local setup
 

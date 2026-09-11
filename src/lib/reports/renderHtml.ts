@@ -5,6 +5,8 @@ export interface ReportFinding extends FindingForRollup {
   id: string;
   note: string | null;
   status: string;
+  structuredData?: unknown;
+  evidenceCount?: number;
   templateItem: { tier: Tier; title: string; description: string | null };
 }
 
@@ -70,17 +72,30 @@ export function renderReportHtml(data: ReportData): string {
       const items = byTier[tier];
       if (items.length === 0) return "";
       const rows = items
-        .map(
-          (f) => `
+        .map((f) => {
+          const structured = (f.structuredData ?? null) as
+            | { transferable?: string | null; penaltyAmount?: string | null; penaltyBasis?: string | null }
+            | null;
+          const structuredParts = structured
+            ? [
+                structured.transferable ? `Transferable: ${escapeHtml(structured.transferable)}` : null,
+                structured.penaltyAmount ? `Penalty: ${escapeHtml(structured.penaltyAmount)}` : null,
+                structured.penaltyBasis ? `Basis: ${escapeHtml(structured.penaltyBasis)}` : null,
+              ].filter((v): v is string => Boolean(v))
+            : [];
+
+          return `
         <tr style="border-bottom:1px solid #e2e8f0">
           <td style="padding:8px 12px;vertical-align:top;width:70%">
             <div style="font-weight:600">${escapeHtml(f.templateItem.title)}</div>
             ${f.templateItem.description ? `<div style="color:#64748b;font-size:13px;margin-top:2px">${escapeHtml(f.templateItem.description)}</div>` : ""}
             ${f.note ? `<div style="margin-top:6px;font-size:13px;color:#334155"><em>Finding:</em> ${escapeHtml(f.note)}</div>` : ""}
+            ${structuredParts.length > 0 ? `<div style="margin-top:4px;font-size:12px;color:#475569">${structuredParts.join(" · ")}</div>` : ""}
+            ${f.evidenceCount ? `<div style="margin-top:4px;font-size:12px;color:#0369a1">${f.evidenceCount} document${f.evidenceCount === 1 ? "" : "s"} attached</div>` : ""}
           </td>
           <td style="padding:8px 12px;text-align:right;vertical-align:top">${f.severity ? badge(f.severity) : '<span style="color:#94a3b8;font-size:12px">not rated</span>'}</td>
-        </tr>`,
-        )
+        </tr>`;
+        })
         .join("");
 
       return `

@@ -4,8 +4,9 @@ import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
-import { runTierAAutomation, updateFinding } from "@/lib/actions/audits";
+import { runTierAAutomation, updateFinding, updateAuditOverride } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
+import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 
 const TIER_LABEL: Record<Tier, string> = {
   A: "Tier A — External (no seller cooperation needed)",
@@ -18,6 +19,14 @@ const SEVERITY_DOT: Record<string, string> = {
   YELLOW: "bg-amber-500",
   RED: "bg-red-600",
 };
+
+// Contract-shaped Tier B items get the extra structured fields (docs/spec.md §4). Matched by title
+// rather than a schema flag, per .claude/skills/audit-methodology/SKILL.md's guidance to keep the
+// tier *model* and tier *content* changes separate — this is a display decision, not a new field on
+// TemplateItem.
+function isContractItem(title: string): boolean {
+  return /contract/i.test(title);
+}
 
 export default async function AuditPage({
   params,
@@ -34,7 +43,7 @@ export default async function AuditPage({
         engagement: true,
         template: true,
         findings: {
-          include: { templateItem: true },
+          include: { templateItem: true, evidence: { orderBy: { createdAt: "desc" } } },
           orderBy: { templateItem: { sortOrder: "asc" } },
         },
       },
@@ -93,6 +102,44 @@ export default async function AuditPage({
         )}
       </div>
 
+      <div
+        key={`${audit.overallRatingOverride}-${audit.overallRatingOverrideNote}`}
+        className="mt-4 rounded-lg border border-slate-200 bg-white p-3"
+      >
+        <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          Override computed rating
+        </h2>
+        <p className="mt-1 text-xs text-slate-500">
+          The computed rating above is always kept and shown — an override is added alongside it in
+          the report, never in place of it (docs/spec.md §6).
+        </p>
+        <form action={updateAuditOverride} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_auto]">
+          <input type="hidden" name="auditId" value={audit.id} />
+          <select
+            name="overallRatingOverride"
+            defaultValue={audit.overallRatingOverride ?? ""}
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          >
+            <option value="">No override</option>
+            <option value="GREEN">Green</option>
+            <option value="YELLOW">Yellow</option>
+            <option value="RED">Red</option>
+          </select>
+          <input
+            name="overallRatingOverrideNote"
+            defaultValue={audit.overallRatingOverrideNote ?? ""}
+            placeholder="Why the override — required context for the report reader"
+            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+          />
+          <button
+            type="submit"
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Save
+          </button>
+        </form>
+      </div>
+
       {reports.length > 0 && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
           <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500">Reports</h2>
@@ -119,65 +166,144 @@ export default async function AuditPage({
             <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_DOT[rollup.perTier[tier]]}`} />
           </div>
           <div className="mt-3 space-y-3">
-            {byTier[tier].map((finding) => (
-              <div key={finding.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="font-medium text-slate-900">{finding.templateItem.title}</div>
-                    {finding.templateItem.description && (
-                      <div className="mt-0.5 text-xs text-slate-500">{finding.templateItem.description}</div>
-                    )}
-                    <div className="mt-1 text-xs text-slate-400">
-                      {finding.templateItem.method === "AUTOMATED" ? "Automated" : "Manual"}
-                    </div>
-                  </div>
-                  {finding.severity && (
-                    <span className={`h-3 w-3 shrink-0 rounded-full ${SEVERITY_DOT[finding.severity]}`} />
-                  )}
-                </div>
+            {byTier[tier].map((finding) => {
+              const contractFields = isContractItem(finding.templateItem.title);
+              const structured = (finding.structuredData ?? {}) as {
+                transferable?: string | null;
+                penaltyAmount?: string | null;
+                penaltyBasis?: string | null;
+              };
 
-                <form
-                  key={`${finding.status}-${finding.severity}-${finding.note}`}
-                  action={updateFinding}
-                  className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[140px_140px_1fr_auto]"
-                >
-                  <input type="hidden" name="findingId" value={finding.id} />
-                  <select
-                    name="status"
-                    defaultValue={finding.status}
-                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              return (
+                <div key={finding.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="font-medium text-slate-900">{finding.templateItem.title}</div>
+                      {finding.templateItem.description && (
+                        <div className="mt-0.5 text-xs text-slate-500">{finding.templateItem.description}</div>
+                      )}
+                      <div className="mt-1 text-xs text-slate-400">
+                        {finding.templateItem.method === "AUTOMATED" ? "Automated" : "Manual"}
+                      </div>
+                    </div>
+                    {finding.severity && (
+                      <span className={`h-3 w-3 shrink-0 rounded-full ${SEVERITY_DOT[finding.severity]}`} />
+                    )}
+                  </div>
+
+                  <form
+                    key={`${finding.status}-${finding.severity}-${finding.note}-${JSON.stringify(structured)}`}
+                    action={updateFinding}
+                    className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[140px_140px_1fr_auto]"
                   >
-                    {["NOT_STARTED", "IN_PROGRESS", "PASS", "FAIL", "NOT_APPLICABLE", "BLOCKED"].map((s) => (
-                      <option key={s} value={s}>
-                        {s.replace("_", " ")}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    name="severity"
-                    defaultValue={finding.severity ?? ""}
-                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-                  >
-                    <option value="">No rating</option>
-                    <option value="GREEN">Green</option>
-                    <option value="YELLOW">Yellow</option>
-                    <option value="RED">Red</option>
-                  </select>
-                  <input
-                    name="note"
-                    defaultValue={finding.note ?? ""}
-                    placeholder="Finding note"
-                    className="rounded-md border border-slate-300 px-2 py-1 text-sm"
-                  />
-                  <button
-                    type="submit"
-                    className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    Save
-                  </button>
-                </form>
-              </div>
-            ))}
+                    <input type="hidden" name="findingId" value={finding.id} />
+                    <select
+                      name="status"
+                      defaultValue={finding.status}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    >
+                      {["NOT_STARTED", "IN_PROGRESS", "PASS", "FAIL", "NOT_APPLICABLE", "BLOCKED"].map((s) => (
+                        <option key={s} value={s}>
+                          {s.replace("_", " ")}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      name="severity"
+                      defaultValue={finding.severity ?? ""}
+                      className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    >
+                      <option value="">No rating</option>
+                      <option value="GREEN">Green</option>
+                      <option value="YELLOW">Yellow</option>
+                      <option value="RED">Red</option>
+                    </select>
+                    <input
+                      name="note"
+                      defaultValue={finding.note ?? ""}
+                      placeholder="Finding note"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Save
+                    </button>
+
+                    {contractFields && (
+                      <div className="col-span-full grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 sm:grid-cols-3">
+                        <label className="text-xs text-slate-500">
+                          Transferable to new owner
+                          <select
+                            name="transferable"
+                            defaultValue={structured.transferable ?? ""}
+                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
+                          >
+                            <option value="">Not recorded</option>
+                            <option value="yes">Yes</option>
+                            <option value="no">No</option>
+                            <option value="unclear">Unclear</option>
+                          </select>
+                        </label>
+                        <label className="text-xs text-slate-500">
+                          Early-termination penalty amount
+                          <input
+                            name="penaltyAmount"
+                            defaultValue={structured.penaltyAmount ?? ""}
+                            placeholder="e.g. $12,000 or 3 months' fees"
+                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                          />
+                        </label>
+                        <label className="text-xs text-slate-500">
+                          Penalty basis
+                          <input
+                            name="penaltyBasis"
+                            defaultValue={structured.penaltyBasis ?? ""}
+                            placeholder="e.g. flat fee, % of remaining term"
+                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </form>
+
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Evidence</div>
+                    {finding.evidence.length > 0 && (
+                      <ul className="mt-1.5 space-y-1">
+                        {finding.evidence.map((e) => (
+                          <li key={e.id} className="flex items-center justify-between text-sm">
+                            <a
+                              href={`/api/evidence/${e.id}`}
+                              className="text-slate-600 underline hover:text-slate-900"
+                            >
+                              {e.text ?? "document"}
+                            </a>
+                            <form action={deleteEvidence}>
+                              <input type="hidden" name="evidenceId" value={e.id} />
+                              <button type="submit" className="text-xs text-slate-400 hover:text-red-600">
+                                Remove
+                              </button>
+                            </form>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <form action={attachEvidence} className="mt-2 flex items-center gap-2">
+                      <input type="hidden" name="findingId" value={finding.id} />
+                      <input type="file" name="file" className="text-xs" />
+                      <button
+                        type="submit"
+                        className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Attach
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </section>
       ))}

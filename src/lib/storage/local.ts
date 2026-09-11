@@ -24,3 +24,10 @@ export async function getObject(key: string): Promise<Buffer> {
 export function reportPdfKey(orgId: string, reportId: string): string {
   return `${orgId}/reports/${reportId}.pdf`;
 }
+
+/** Sanitizes the original filename for use as a path segment — keeps it human-readable in the key
+ * without letting it escape the intended directory. */
+export function evidenceKey(orgId: string, findingId: string, evidenceId: string, filename: string): string {
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 100) || "file";
+  return `${orgId}/evidence/${findingId}/${evidenceId}-${safeName}`;
+}
