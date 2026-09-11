@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./client";
 
 /**
@@ -11,7 +11,19 @@ import { prisma } from "./client";
  * .claude/skills/domain-code-review/SKILL.md, which specifically checks for this.
  *
  * `Template`/`TemplateItem` are shared, non-tenant content (spec.md §5) and are read directly via
- * `prisma` — they do not go through this helper and have no RLS policy.
+ * `prisma`, imported from ./client — they do not go through this helper and have no RLS policy.
+ *
+ * There is deliberately no "unscoped" escape hatch exported from this file for tenant tables: under
+ * this RLS design, the `prisma` client's role (`closecheck_app`) has no access to a tenant table's
+ * rows unless `app.current_org_id` is set on that connection — with no org scope set, every
+ * tenant-table query returns zero rows, full stop (verified by scripts/verify-rls.ts's "unscoped
+ * client sees 0 rows" assertion). A genuine cross-tenant operation — the one that exists,
+ * scripts/purge-expired-documents.ts, which has to find engagements due for purge across every org
+ * — needs its own connection using the DIRECT_DATABASE_URL superuser role instead, the same role
+ * migrations use, for the same reason: `closecheck_app` cannot do this by design, not by oversight.
+ * Build that as its own standalone script with its own audit trail, the way that one does — an
+ * `unscoped()` helper here would look like a working shortcut and just silently return empty
+ * results for every tenant table, which is worse than not offering one.
  */
 export type ScopedTx = Prisma.TransactionClient;
 
@@ -30,24 +42,4 @@ export async function withOrgScope<T>(
     await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`;
     return fn(tx);
   });
-}
-
-/**
- * NOT a cross-tenant escape hatch, despite how that might read — correcting an earlier version of
- * this comment that claimed otherwise. Under the RLS design (prisma/migrations/*_row_level_security,
- * *_least_privilege_app_role), the `prisma` client's role (`closecheck_app`) has no access to a
- * tenant table's rows unless `app.current_org_id` is set on that connection — with no org scope set,
- * every tenant-table query returns zero rows, full stop (verified by scripts/verify-rls.ts's
- * "unscoped client sees 0 rows" assertion). This function exists only for the same non-tenant
- * content withOrgScope's own docstring already carves out (Template/TemplateItem) if a caller wants
- * the plain client without importing it from ./client directly.
- *
- * A genuine cross-tenant operation (found a real one: scripts/purge-expired-documents.ts, which has
- * to find engagements due for purge across every org) needs a connection using the
- * DIRECT_DATABASE_URL superuser role instead — the same role migrations use, for the same reason:
- * `closecheck_app` cannot do this by design, not by oversight. Build that as its own standalone
- * script with its own audit trail, the way that one does — never by widening this function.
- */
-export function unscoped(): PrismaClient {
-  return prisma;
 }
