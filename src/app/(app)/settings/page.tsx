@@ -81,7 +81,7 @@ export default async function SettingsPage() {
             </div>
           )}
           <form action={uploadOrgLogo} className="flex items-center gap-2">
-            <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" required />
+            <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
             <button
               type="submit"
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"

@@ -6,6 +6,13 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { putObject, deleteObject, orgLogoKey } from "@/lib/storage/local";
 
+// Raster only — deliberately excludes SVG. An uploaded SVG can carry a <script>, and
+// /api/branding/logo serves it back with Content-Type: image/svg+xml; browsers don't execute that
+// when it's used as an <img> src (how the settings page and report render it today), but the route
+// itself doesn't stop someone from navigating to it directly, which does execute it. Not worth the
+// risk for a whitelabel logo when PNG/JPEG/WebP/GIF cover every real case.
+const ALLOWED_LOGO_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
 const updateOrgBrandingSchema = z.object({
   name: z.string().min(1, "Org name is required"),
   // Blank clears the override back to the default accent used in src/lib/reports/renderHtml.ts —
@@ -53,6 +60,10 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   if (!(file instanceof File) || file.size === 0) {
     // Nothing selected — same no-op convention as attachEvidence in src/lib/actions/evidence.ts.
     return;
+  }
+
+  if (!ALLOWED_LOGO_MIME_TYPES.has(file.type)) {
+    throw new Error(`Unsupported logo file type "${file.type || "unknown"}" — use PNG, JPEG, WebP, or GIF.`);
   }
 
   const bytes = Buffer.from(await file.arrayBuffer());

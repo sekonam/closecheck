@@ -9,13 +9,15 @@ import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtm
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
 import { putObject, getObject, reportPdfKey } from "@/lib/storage/local";
 
+// No svg — see the matching comment in src/app/api/branding/logo/route.ts. Embedded as a data URI
+// inside an <img> src here, which doesn't execute SVG scripts, but keeping the two maps in sync
+// avoids a future accidental reintroduction of one without the other.
 const LOGO_EXTENSION_MIME: Record<string, string> = {
   png: "image/png",
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   gif: "image/gif",
   webp: "image/webp",
-  svg: "image/svg+xml",
 };
 
 /** Best-effort: a missing/unreadable logo file should never block report generation, just render
