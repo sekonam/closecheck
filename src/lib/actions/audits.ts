@@ -207,12 +207,19 @@ export async function updateAuditOverride(formData: FormData): Promise<void> {
     overallRatingOverrideNote: formData.get("overallRatingOverrideNote") || undefined,
   });
 
+  // The note textarea isn't tied to the select — a consultant can pick "No override" without
+  // clearing leftover note text and hit the one Save button for both fields. Found live: that left
+  // overallRatingOverrideNote populated while overallRatingOverride was null, so the audit page kept
+  // showing old override reasoning text next to a "No override" dropdown (confusing, though harmless
+  // to the actual report — renderHtml.ts's overrideBlock only renders when overallRatingOverride is
+  // set). A note with no override is meaningless, so clearing the override always clears the note too.
+  const overallRatingOverride = parsed.overallRatingOverride ?? null;
   const updated = await withOrgScope(orgId, (tx) =>
     tx.audit.update({
       where: { id: parsed.auditId },
       data: {
-        overallRatingOverride: parsed.overallRatingOverride ?? null,
-        overallRatingOverrideNote: parsed.overallRatingOverrideNote ?? null,
+        overallRatingOverride,
+        overallRatingOverrideNote: overallRatingOverride ? (parsed.overallRatingOverrideNote ?? null) : null,
       },
     }),
   );

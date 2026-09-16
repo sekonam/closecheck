@@ -29,10 +29,17 @@ const updateOrgBrandingSchema = z.object({
  * enforced the same way as every other tenant table, via withOrgScope. */
 export async function updateOrgBranding(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const parsed = updateOrgBrandingSchema.parse({
+  const result = updateOrgBrandingSchema.safeParse({
     name: formData.get("name"),
     brandColorHex: formData.get("brandColorHex") || "",
   });
+  // A raw ZodError crashes the request to a bare 500 with no indication of which field was wrong —
+  // same convention as uploadOrgLogo's file-type check below: surface the schema's own message
+  // instead of letting the framework's default error page swallow it.
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid firm branding input.");
+  }
+  const parsed = result.data;
 
   await withOrgScope(orgId, (tx) =>
     tx.consultantOrg.update({
