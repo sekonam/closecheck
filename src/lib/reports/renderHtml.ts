@@ -52,6 +52,19 @@ const TIER_LABEL: Record<Tier, string> = {
   C: "Tier C — Live access verification",
 };
 
+// spec.md §6: "each finding showing status, severity, note, evidence" — status alone (not just
+// severity) is what tells a reader *why* something has no rating: not started yet, actively blocked
+// by the seller, or genuinely not applicable to this business. Collapsing all of those into a bare
+// "not rated" (the prior behavior) lost that distinction in the one artifact a buyer actually reads.
+const STATUS_LABEL: Record<string, string> = {
+  NOT_STARTED: "Not started",
+  IN_PROGRESS: "In progress",
+  PASS: "Pass",
+  FAIL: "Fail",
+  NOT_APPLICABLE: "Not applicable",
+  BLOCKED: "Blocked",
+};
+
 function badge(severity: Severity): string {
   return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;color:#fff;background:${SEVERITY_COLOR[severity]}">${SEVERITY_LABEL[severity]}</span>`;
 }
@@ -122,7 +135,10 @@ export function renderReportHtml(data: ReportData): string {
             ${structuredParts.length > 0 ? `<div style="margin-top:4px;font-size:12px;color:#475569">${structuredParts.join(" · ")}</div>` : ""}
             ${f.evidenceCount ? `<div style="margin-top:4px;font-size:12px;color:#0369a1">${f.evidenceCount} document${f.evidenceCount === 1 ? "" : "s"} attached</div>` : ""}
           </td>
-          <td style="padding:8px 12px;text-align:right;vertical-align:top">${f.severity ? badge(f.severity) : '<span style="color:#94a3b8;font-size:12px">not rated</span>'}</td>
+          <td style="padding:8px 12px;text-align:right;vertical-align:top">
+            <div style="font-size:11px;color:#94a3b8;margin-bottom:3px">${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}</div>
+            ${f.severity ? badge(f.severity) : '<span style="color:#94a3b8;font-size:12px">not rated</span>'}
+          </td>
         </tr>`;
         })
         .join("");
