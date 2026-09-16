@@ -69,11 +69,15 @@ export default async function EngagementsPage() {
         )}
         {engagements.map((e) => (
           <li key={e.id} className="flex items-center justify-between p-4">
-            <div>
-              <Link href={`/engagements/${e.id}`} className="font-medium text-slate-900 hover:underline">
+            <div className="min-w-0">
+              <Link
+                href={`/engagements/${e.id}`}
+                className="block truncate font-medium text-slate-900 hover:underline"
+                title={e.businessName}
+              >
                 {e.businessName}
               </Link>
-              <div className="text-xs text-slate-500">
+              <div className="truncate text-xs text-slate-500">
                 {DEAL_STAGE_LABEL[e.dealStage]} · {e.primaryDomain ?? "no domain set"} ·{" "}
                 {e.audits.length} audit{e.audits.length === 1 ? "" : "s"}
               </div>
