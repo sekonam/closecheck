@@ -10,14 +10,27 @@ export interface ReportFinding extends FindingForRollup {
   templateItem: { tier: Tier; title: string; description: string | null };
 }
 
+export interface AppendixDocument {
+  findingTitle: string;
+  tier: Tier;
+  filename: string;
+}
+
 export interface ReportData {
   businessName: string;
   templateName: string;
   generatedAt: Date;
-  org: { name: string; brandColorHex: string | null; brandLogoUrl: string | null };
+  // A data URI, not a fetchable URL: this HTML is handed straight to a headless Chromium page via
+  // page.setContent (src/lib/reports/pdf.ts), which has no session/cookies to authenticate a request
+  // back to an app route with — the caller (generateReport) resolves the org's stored logo bytes to
+  // a data URI before building this.
+  org: { name: string; brandColorHex: string | null; brandLogoDataUri: string | null };
   findings: ReportFinding[];
   overallRatingOverride?: Severity | null;
   overallRatingOverrideNote?: string | null;
+  // spec.md §6: "appendix (raw uploaded documents, if the consultant opts to include them)." Omitted
+  // or empty means no appendix section is rendered at all.
+  appendixDocuments?: AppendixDocument[];
 }
 
 const SEVERITY_LABEL: Record<Severity, string> = {
@@ -139,6 +152,11 @@ export function renderReportHtml(data: ReportData): string {
       <div style="color:#64748b;font-size:13px;margin-top:4px">Template: ${escapeHtml(data.templateName)} · Generated ${data.generatedAt.toISOString().slice(0, 10)}</div>
     </div>
     <div style="text-align:right">
+      ${
+        data.org.brandLogoDataUri
+          ? `<img src="${data.org.brandLogoDataUri}" alt="${escapeHtml(data.org.name)} logo" style="max-height:40px;max-width:200px;object-fit:contain;margin-bottom:4px" />`
+          : ""
+      }
       <div style="font-weight:700;font-size:16px">${escapeHtml(data.org.name)}</div>
     </div>
   </header>
@@ -162,12 +180,49 @@ export function renderReportHtml(data: ReportData): string {
 
   ${tierSections}
 
+  ${appendixSection(data.appendixDocuments)}
+
   <footer style="margin-top:36px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+      ${data.org.brandLogoDataUri ? `<img src="${data.org.brandLogoDataUri}" alt="" style="height:14px;width:auto;object-fit:contain" />` : ""}
+      <span style="font-weight:600;color:#64748b">${escapeHtml(data.org.name)}</span>
+    </div>
     <p>This report reflects information available as of the date generated above. It is not a substitute for legal, financial, or tax due diligence. Findings are based on the tier methodology described to the client separately; Tier C findings are consultant-attested observations, not automated verifications.</p>
     <p>Prepared using CloseCheck.</p>
   </footer>
 </body>
 </html>`;
+}
+
+/**
+ * Lists the raw uploaded documents referenced by the audit's findings (spec.md §6's appendix), only
+ * when the consultant opted in via the "Include uploaded documents" checkbox on generateReport. A
+ * listed reference (filename, which finding/tier it's evidence for) rather than embedding file
+ * contents inline — most uploaded documents are contracts/PDFs, not images, and the report itself is
+ * the deliverable, not a document viewer.
+ */
+function appendixSection(documents: AppendixDocument[] | undefined): string {
+  if (!documents || documents.length === 0) return "";
+
+  const rows = documents
+    .map(
+      (d) => `
+    <tr style="border-bottom:1px solid #e2e8f0">
+      <td style="padding:6px 12px;font-size:13px">${escapeHtml(d.filename)}</td>
+      <td style="padding:6px 12px;font-size:12px;color:#64748b">${escapeHtml(d.findingTitle)}</td>
+      <td style="padding:6px 12px;font-size:12px;color:#64748b">Tier ${d.tier}</td>
+    </tr>`,
+    )
+    .join("");
+
+  return `
+  <section style="margin-top:28px">
+    <h3 style="font-size:16px;margin:0 0 10px 0">Appendix — Uploaded documents</h3>
+    <p style="font-size:12px;color:#64748b;margin:0 0 10px 0">Raw documents provided as evidence during this audit, listed for reference. Retained and access-controlled per the firm's document retention policy — not reproduced inline here.</p>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden">
+      ${rows}
+    </table>
+  </section>`;
 }
 
 function escapeHtml(input: string): string {

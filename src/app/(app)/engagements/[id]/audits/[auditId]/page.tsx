@@ -90,8 +90,12 @@ export default async function AuditPage({
             Run Tier A automated checks
           </button>
         </form>
-        <form action={generateReport}>
+        <form action={generateReport} className="flex items-center gap-2">
           <input type="hidden" name="auditId" value={audit.id} />
+          <label className="flex items-center gap-1.5 text-xs text-slate-600">
+            <input type="checkbox" name="includeAppendix" />
+            Include uploaded documents as an appendix
+          </label>
           <button
             type="submit"
             className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"

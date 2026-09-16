@@ -15,17 +15,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/engagements" className="font-semibold text-slate-900">
             CloseCheck
           </Link>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/login" });
-            }}
-          >
-            <span className="mr-3 text-sm text-slate-500">{session.user.email}</span>
-            <button type="submit" className="text-sm text-slate-500 underline hover:text-slate-700">
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-3">
+            <Link href="/settings" className="text-sm text-slate-500 hover:text-slate-700">
+              Branding
+            </Link>
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/login" });
+              }}
+            >
+              <span className="mr-3 text-sm text-slate-500">{session.user.email}</span>
+              <button type="submit" className="text-sm text-slate-500 underline hover:text-slate-700">
+                Sign out
+              </button>
+            </form>
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">{children}</main>

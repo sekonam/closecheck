@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 /**
@@ -21,6 +21,14 @@ export async function getObject(key: string): Promise<Buffer> {
   return readFile(join(STORAGE_ROOT, key));
 }
 
+/** Tolerates an already-missing file (e.g. a re-run, or a key that was never actually written) —
+ * the caller's goal ("this key no longer points to a live file") is already satisfied either way. */
+export async function deleteObject(key: string): Promise<void> {
+  await unlink(join(STORAGE_ROOT, key)).catch((err) => {
+    if (err.code !== "ENOENT") throw err;
+  });
+}
+
 export function reportPdfKey(orgId: string, reportId: string): string {
   return `${orgId}/reports/${reportId}.pdf`;
 }
@@ -30,4 +38,14 @@ export function reportPdfKey(orgId: string, reportId: string): string {
 export function evidenceKey(orgId: string, findingId: string, evidenceId: string, filename: string): string {
   const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 100) || "file";
   return `${orgId}/evidence/${findingId}/${evidenceId}-${safeName}`;
+}
+
+/** One logo per org, but the key still incorporates the (sanitized) original filename — so a
+ * re-upload under a different filename/extension does NOT land at the same path. Callers that
+ * replace or clear a logo must explicitly delete the previous key themselves (see
+ * uploadOrgLogo/removeOrgLogo in src/lib/actions/org.ts); this helper alone does not prevent
+ * orphaning the prior file. */
+export function orgLogoKey(orgId: string, filename: string): string {
+  const safeName = filename.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 100) || "logo";
+  return `${orgId}/branding/logo-${safeName}`;
 }
