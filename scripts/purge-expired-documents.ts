@@ -41,23 +41,33 @@ async function main() {
       select: { id: true, storageKey: true },
     });
 
+    // Delete each file and its row as one unit rather than unlinking everything then batch-deleting
+    // rows afterward: a batched deleteMany run only after the whole unlink loop meant a single
+    // mid-loop unlink failure (permissions, disk issue) threw before deleteMany ran at all, leaving
+    // rows for already-deleted earlier files pointing at files that no longer exist (they'd then
+    // 404/500 on download instead of being gone). Per-file deletion means a failure on one file
+    // only skips that file's row, not every file already handled before it.
+    let purgedCount = 0;
     for (const e of evidence) {
       if (e.storageKey) {
-        await unlink(join(STORAGE_ROOT, e.storageKey)).catch((err) => {
-          // Already gone is fine (e.g. a re-run after a partial prior failure); anything else is
-          // worth seeing rather than silently continuing to delete the DB row for a file we
-          // couldn't actually remove.
-          if (err.code !== "ENOENT") throw err;
-        });
+        const removed = await unlink(join(STORAGE_ROOT, e.storageKey))
+          .then(() => true)
+          .catch((err) => {
+            // Already gone is fine (e.g. a re-run after a partial prior failure) — treat as purged.
+            // Anything else: leave the row in place for a future re-run rather than deleting a row
+            // whose file deletion we can't actually confirm.
+            if (err.code === "ENOENT") return true;
+            console.error(`Failed to unlink ${e.storageKey}, leaving its row for a future run:`, err);
+            return false;
+          });
+        if (!removed) continue;
       }
+      await prisma.evidence.delete({ where: { id: e.id } });
+      purgedCount++;
     }
 
-    const { count } = await prisma.evidence.deleteMany({
-      where: { id: { in: evidence.map((e) => e.id) } },
-    });
-
     console.log(
-      `Purged ${count} evidence document(s) for "${engagement.businessName}" (org ${engagement.orgId}, due ${engagement.documentPurgeAt?.toISOString()}).`,
+      `Purged ${purgedCount} evidence document(s) for "${engagement.businessName}" (org ${engagement.orgId}, due ${engagement.documentPurgeAt?.toISOString()}).`,
     );
   }
 }

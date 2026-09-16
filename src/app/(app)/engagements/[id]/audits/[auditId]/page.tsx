@@ -7,6 +7,7 @@ import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { runTierAAutomation, updateFinding, updateAuditOverride } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
+import { isContractItem } from "@/lib/audit/contractItem";
 
 const TIER_LABEL: Record<Tier, string> = {
   A: "Tier A — External (no seller cooperation needed)",
@@ -19,14 +20,6 @@ const SEVERITY_DOT: Record<string, string> = {
   YELLOW: "bg-amber-500",
   RED: "bg-red-600",
 };
-
-// Contract-shaped Tier B items get the extra structured fields (docs/spec.md §4). Matched by title
-// rather than a schema flag, per .claude/skills/audit-methodology/SKILL.md's guidance to keep the
-// tier *model* and tier *content* changes separate — this is a display decision, not a new field on
-// TemplateItem.
-function isContractItem(title: string): boolean {
-  return /contract/i.test(title);
-}
 
 export default async function AuditPage({
   params,
@@ -157,9 +150,18 @@ export default async function AuditPage({
           <ul className="mt-2 space-y-1 text-sm">
             {reports.map((r) => (
               <li key={r.id} className="flex items-center justify-between">
-                <span>
+                <span className="flex items-center gap-1.5">
                   {r.generatedAt.toISOString().slice(0, 19).replace("T", " ")} —{" "}
-                  <span className="font-medium">{r.computedOverallSeverity}</span>
+                  {r.overallCoveredCount === 0 ? (
+                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      Not yet rated
+                    </span>
+                  ) : (
+                    <span className="font-medium">{r.computedOverallSeverity}</span>
+                  )}
+                  <span className="text-xs text-slate-400">
+                    ({r.overallCoveredCount}/{r.overallTotalCount} rated)
+                  </span>
                 </span>
                 <a href={`/api/reports/${r.id}/pdf`} className="text-slate-600 underline hover:text-slate-900">
                   Download PDF

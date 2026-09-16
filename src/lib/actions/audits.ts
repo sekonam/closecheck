@@ -8,6 +8,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { isAutomatable, runTierACheck } from "@/lib/audit/tierA";
+import { isContractItem } from "@/lib/audit/contractItem";
 
 /**
  * Creates an Audit pinned to the currently-active version of the given Template slug
@@ -80,7 +81,9 @@ export async function runTierAAutomation(formData: FormData) {
     return {
       domain,
       engagementId: audit.engagementId,
-      automatable: audit.findings.filter((f) => isAutomatable(f.templateItem.automationKey)),
+      automatable: audit.findings
+        .filter((f) => isAutomatable(f.templateItem.automationKey))
+        .map((f) => ({ id: f.id, automationKey: f.templateItem.automationKey!, updatedAt: f.updatedAt })),
     };
   });
 
@@ -89,15 +92,23 @@ export async function runTierAAutomation(formData: FormData) {
   // rate; unbounded parallelism across many findings is not, and this is exactly the kind of
   // check-then-act code path .claude/skills/domain-code-review/SKILL.md asks to look at for
   // anything touching an external target.
-  const results: Array<{ findingId: string; result: Awaited<ReturnType<typeof runTierACheck>> }> = [];
+  const results: Array<{ findingId: string; capturedUpdatedAt: Date; result: Awaited<ReturnType<typeof runTierACheck>> }> = [];
   for (const finding of automatable) {
-    results.push({ findingId: finding.id, result: await runTierACheck(finding.templateItem.automationKey!, domain) });
+    results.push({
+      findingId: finding.id,
+      capturedUpdatedAt: finding.updatedAt,
+      result: await runTierACheck(finding.automationKey, domain),
+    });
   }
 
   await withOrgScope(orgId, async (tx) => {
-    for (const { findingId, result } of results) {
-      await tx.finding.update({
-        where: { id: findingId },
+    for (const { findingId, capturedUpdatedAt, result } of results) {
+      // Guards against clobbering a manual edit made while the (multi-second) outbound checks above
+      // were in flight: only overwrite if the row is still exactly as it was when read. A 0-count
+      // result means a consultant edited this finding in the gap — leave their edit alone rather
+      // than silently discarding it with a fresher-but-unwanted automated result.
+      await tx.finding.updateMany({
+        where: { id: findingId, updatedAt: capturedUpdatedAt },
         data: {
           status: result.status,
           severity: result.severity,
@@ -136,20 +147,31 @@ export async function updateFinding(formData: FormData) {
     penaltyBasis: formData.get("penaltyBasis") || undefined,
   });
 
-  const hasStructuredFields = parsed.transferable || parsed.penaltyAmount || parsed.penaltyBasis;
+  const updated = await withOrgScope(orgId, async (tx) => {
+    // Whether this submit is allowed to touch structuredData is decided from the finding's own
+    // templateItem title — the same check the UI uses to decide whether to render the contract
+    // fields at all (src/lib/audit/contractItem.ts) — never from whether the posted values happen
+    // to be non-empty. Gating on posted-value truthiness meant a consultant clearing all three
+    // fields back to blank (a legitimate correction) silently left the stale structuredData in
+    // place, since an all-empty submission looked identical to "this form doesn't have these
+    // fields." Gating on the finding's actual shape also closes off writing contract-shaped
+    // structuredData onto an unrelated (e.g. Tier A automated) finding via a crafted submission.
+    const existing = await tx.finding.findUniqueOrThrow({
+      where: { id: parsed.findingId },
+      include: { templateItem: true },
+    });
+    const isContractFinding = isContractItem(existing.templateItem.title);
 
-  const updated = await withOrgScope(orgId, (tx) =>
-    tx.finding.update({
+    return tx.finding.update({
       where: { id: parsed.findingId },
       data: {
         status: parsed.status,
         severity: parsed.severity ? parsed.severity : null,
         note: parsed.note ?? null,
-        // Only touch structuredData when this submit actually carried one of the contract fields —
-        // omitting the key here (rather than writing null/{}) leaves Tier A's automated check
+        // Omitting the key here (rather than writing null/{}) leaves Tier A's automated check
         // output on other findings untouched, since this same action is shared by every finding's
         // form regardless of tier or method.
-        ...(hasStructuredFields
+        ...(isContractFinding
           ? {
               structuredData: {
                 transferable: parsed.transferable ?? null,
@@ -160,8 +182,8 @@ export async function updateFinding(formData: FormData) {
           : {}),
       },
       include: { audit: true },
-    }),
-  );
+    });
+  });
 
   revalidatePath(`/engagements/${updated.audit.engagementId}/audits/${updated.audit.id}`);
 }

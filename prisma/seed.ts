@@ -1,7 +1,12 @@
 import { PrismaClient, Tier, CheckMethod } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+// Deliberately connects with DIRECT_DATABASE_URL (the superuser/migration role), not the app's
+// `closecheck_app` role: creating the dev org's first row is the same kind of bootstrap write
+// migrations do, and RLS blocks it under `closecheck_app` by design — there is no
+// `app.current_org_id` to scope by until this org exists (see the `unscoped()` docstring in
+// src/lib/db/scoped.ts and scripts/purge-expired-documents.ts for the same pattern).
+const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
 
 // The Restaurant/online-ordering Template — the one fully-built template for MVP per
 // docs/spec.md §5 and docs/roadmap.md Phase 1. Base items (universal across templates) come first,

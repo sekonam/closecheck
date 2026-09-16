@@ -19,7 +19,12 @@ export async function generateReport(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
   const auditId = z.string().min(1).parse(formData.get("auditId"));
 
-  const { engagementId } = await withOrgScope(orgId, async (tx) => {
+  // Reads + the Report row creation happen in a short first transaction; PDF rendering (headless
+  // Chromium, can take several seconds) and the disk write happen OUTSIDE any transaction, mirroring
+  // the fix already applied to runTierAAutomation (src/lib/actions/audits.ts) — holding a Postgres
+  // connection open for the duration of a Chromium render is fine for one dev locally and a real
+  // connection-pool risk under concurrent report generation across tenants.
+  const { engagementId, reportId, orgId: reportOrgId, html } = await withOrgScope(orgId, async (tx) => {
     const audit = await tx.audit.findUniqueOrThrow({
       where: { id: auditId },
       include: {
@@ -33,7 +38,13 @@ export async function generateReport(formData: FormData): Promise<void> {
     const rollup = computeSeverityRollup(audit.findings);
 
     const report = await tx.report.create({
-      data: { orgId, auditId, computedOverallSeverity: rollup.overall },
+      data: {
+        orgId,
+        auditId,
+        computedOverallSeverity: rollup.overall,
+        overallCoveredCount: rollup.overallCoverage.rated,
+        overallTotalCount: rollup.overallCoverage.total,
+      },
     });
 
     const html = renderReportHtml({
@@ -46,14 +57,22 @@ export async function generateReport(formData: FormData): Promise<void> {
       overallRatingOverrideNote: audit.overallRatingOverrideNote,
     });
 
+    return { engagementId: audit.engagementId, reportId: report.id, orgId, html };
+  });
+
+  try {
     const pdf = await renderHtmlToPdf(html);
-    const key = reportPdfKey(orgId, report.id);
+    const key = reportPdfKey(reportOrgId, reportId);
     await putObject(key, pdf);
 
-    await tx.report.update({ where: { id: report.id }, data: { pdfStorageKey: key } });
-
-    return { engagementId: audit.engagementId };
-  });
+    await withOrgScope(orgId, (tx) => tx.report.update({ where: { id: reportId }, data: { pdfStorageKey: key } }));
+  } catch (err) {
+    // The Report row committed but rendering/storing the PDF didn't — remove the row rather than
+    // leave a Report with no downloadable PDF behind (same compensating-delete pattern as
+    // src/lib/actions/evidence.ts's attachEvidence), and surface the failure to the caller.
+    await withOrgScope(orgId, (tx) => tx.report.delete({ where: { id: reportId } })).catch(() => {});
+    throw err;
+  }
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }

@@ -9,7 +9,7 @@
     "lint": "eslint",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx -r dotenv/config prisma/seed.ts",
     "db:verify-rls": "tsx -r dotenv/config scripts/verify-rls.ts",
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "test": "vitest run"

@@ -28,14 +28,17 @@ export async function attachEvidence(formData: FormData): Promise<void> {
   const bytes = Buffer.from(await file.arrayBuffer());
   const key = evidenceKey(orgId, findingId, evidenceId, file.name);
 
+  // Confirms the finding belongs to this org and creates the Evidence row first, then writes the
+  // file to disk only after that commits. Ordering matters: writing to disk *inside* the transaction
+  // left an orphaned, unreferenced file on disk (invisible to purge-expired-documents.ts, which only
+  // finds files by joining through Evidence rows) if a later statement rolled the transaction back.
+  // Committing the row first means the only failure mode is the reverse — a row with no file — which
+  // is compensated for below and which purge/download paths already treat as a tolerable ENOENT.
   const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
-    // Confirms the finding belongs to this org before writing anything to disk under its id.
     const finding = await tx.finding.findUniqueOrThrow({
       where: { id: findingId },
       include: { audit: true },
     });
-
-    await putObject(key, bytes);
 
     await tx.evidence.create({
       data: {
@@ -50,6 +53,15 @@ export async function attachEvidence(formData: FormData): Promise<void> {
 
     return { engagementId: finding.audit.engagementId, auditId: finding.auditId };
   });
+
+  try {
+    await putObject(key, bytes);
+  } catch (err) {
+    // The row committed but the file didn't land — remove the row rather than leave Evidence
+    // pointing at a file that will never exist, and surface the failure to the caller.
+    await withOrgScope(orgId, (tx) => tx.evidence.delete({ where: { id: evidenceId } })).catch(() => {});
+    throw err;
+  }
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }

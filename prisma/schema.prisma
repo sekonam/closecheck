@@ -265,6 +265,11 @@ model Report {
   // Snapshot of computed severity roll-up at generation time, so a Report reflects "the state at the
   // stated date" (spec.md §6 disclaimer language) even if the Audit's findings change afterward.
   computedOverallSeverity Severity
+  // Coverage snapshot alongside the severity above — src/lib/reports/rollup.ts's overallCoverage at
+  // generation time. Required so any UI listing past Reports (not just the live audit page) can show
+  // "GREEN (0/12 rated)" instead of a bare "GREEN" that reads as verified-safe (spec.md §6).
+  overallCoveredCount     Int           @default(0)
+  overallTotalCount       Int           @default(0)
   generatedAt             DateTime      @default(now())
   pdfStorageKey           String?
 
