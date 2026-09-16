@@ -89,6 +89,23 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   revalidatePath("/settings");
 }
 
+/**
+ * Records that this org's consultant has read and approved the standard report disclaimer language
+ * (spec.md §6 — "required review by the consultant, not optional boilerplate ... silently inserted").
+ * generateReport (src/lib/actions/reports.ts) refuses to run until this is set. There's no
+ * un-acknowledge action: the only way this field goes back to null is a future wording change
+ * resetting it via migration (see the schema comment on ConsultantOrg.disclaimerAcknowledgedAt).
+ */
+export async function acknowledgeDisclaimer(): Promise<void> {
+  const { orgId } = await requireOrgSession();
+
+  await withOrgScope(orgId, (tx) =>
+    tx.consultantOrg.update({ where: { id: orgId }, data: { disclaimerAcknowledgedAt: new Date() } }),
+  );
+
+  revalidatePath("/settings");
+}
+
 export async function removeOrgLogo(): Promise<void> {
   const { orgId } = await requireOrgSession();
 

@@ -48,6 +48,10 @@ export default async function AuditPage({
     tx.report.findMany({ where: { auditId }, orderBy: { generatedAt: "desc" } }),
   );
 
+  const org = await withOrgScope(orgId, (tx) =>
+    tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { disclaimerAcknowledgedAt: true } }),
+  );
+
   const rollup = computeSeverityRollup(audit.findings);
   const byTier: Record<Tier, typeof audit.findings> = { A: [], B: [], C: [] };
   for (const f of audit.findings) byTier[f.templateItem.tier].push(f);
@@ -98,7 +102,8 @@ export default async function AuditPage({
           </label>
           <button
             type="submit"
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+            disabled={!org.disclaimerAcknowledgedAt}
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Generate report
           </button>
@@ -106,6 +111,15 @@ export default async function AuditPage({
         {!audit.engagement.primaryDomain && (
           <p className="self-center text-xs text-amber-600">
             Set a primary domain on the engagement to enable Tier A automation.
+          </p>
+        )}
+        {!org.disclaimerAcknowledgedAt && (
+          <p className="self-center text-xs text-amber-600">
+            Review the report disclaimer on the{" "}
+            <Link href="/settings" className="underline">
+              Branding
+            </Link>{" "}
+            page to enable report generation.
           </p>
         )}
       </div>

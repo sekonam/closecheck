@@ -62,6 +62,15 @@ export async function generateReport(formData: FormData): Promise<void> {
     });
     const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
 
+    // spec.md §6: the disclaimer is "required review by the consultant, not optional boilerplate the
+    // product silently inserts without them seeing it" — refuse to generate until the org has
+    // reviewed it once on /settings (src/lib/actions/org.ts's acknowledgeDisclaimer).
+    if (!org.disclaimerAcknowledgedAt) {
+      throw new Error(
+        "Review the report disclaimer language on the Branding settings page before generating a report.",
+      );
+    }
+
     const rollup = computeSeverityRollup(audit.findings);
 
     const report = await tx.report.create({

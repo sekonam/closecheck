@@ -34,6 +34,13 @@ model ConsultantOrg {
   // Whitelabel brand kit — spec.md §6. Logo is a URL into object storage, not inline bytes.
   brandLogoUrl  String?
   brandColorHex String?
+  // Required-review gate on the standard report disclaimer language (spec.md §6: "required review by
+  // the consultant, not optional boilerplate the product silently inserts without them seeing it").
+  // Null = not yet reviewed; generateReport (src/lib/actions/reports.ts) refuses to run until this is
+  // set. Src/lib/reports/disclaimer.ts is the single source of truth for the text being acknowledged
+  // — a future wording change should null this out again via migration, not leave stale consent
+  // standing for language nobody actually reviewed.
+  disclaimerAcknowledgedAt DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

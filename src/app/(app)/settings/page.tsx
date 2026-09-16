@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
-import { updateOrgBranding, uploadOrgLogo, removeOrgLogo } from "@/lib/actions/org";
+import { updateOrgBranding, uploadOrgLogo, removeOrgLogo, acknowledgeDisclaimer } from "@/lib/actions/org";
+import { REPORT_DISCLAIMER_TEXT } from "@/lib/reports/disclaimer";
 
 export default async function SettingsPage() {
   const { orgId } = await requireOrgSession();
@@ -97,6 +98,31 @@ export default async function SettingsPage() {
             </form>
           )}
         </div>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-slate-900">Report disclaimer</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Every generated report includes this language (docs/spec.md §6). Review it once — report
+          generation is blocked until you do.
+        </p>
+        <blockquote className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+          {REPORT_DISCLAIMER_TEXT}
+        </blockquote>
+        {org.disclaimerAcknowledgedAt ? (
+          <p className="mt-3 text-sm text-emerald-700">
+            Reviewed on {org.disclaimerAcknowledgedAt.toISOString().slice(0, 10)}.
+          </p>
+        ) : (
+          <form action={acknowledgeDisclaimer} className="mt-3">
+            <button
+              type="submit"
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              I&apos;ve reviewed this language — enable report generation
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

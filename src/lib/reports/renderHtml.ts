@@ -1,5 +1,6 @@
 import { Severity, Tier } from "@prisma/client";
 import { computeSeverityRollup, type Coverage, type FindingForRollup } from "./rollup";
+import { REPORT_DISCLAIMER_TEXT } from "./disclaimer";
 
 export interface ReportFinding extends FindingForRollup {
   id: string;
@@ -187,7 +188,7 @@ export function renderReportHtml(data: ReportData): string {
       ${data.org.brandLogoDataUri ? `<img src="${data.org.brandLogoDataUri}" alt="" style="height:14px;width:auto;object-fit:contain" />` : ""}
       <span style="font-weight:600;color:#64748b">${escapeHtml(data.org.name)}</span>
     </div>
-    <p>This report reflects information available as of the date generated above. It is not a substitute for legal, financial, or tax due diligence. Findings are based on the tier methodology described to the client separately; Tier C findings are consultant-attested observations, not automated verifications.</p>
+    <p>${escapeHtml(REPORT_DISCLAIMER_TEXT)}</p>
     <p>Prepared using CloseCheck.</p>
   </footer>
 </body>
