@@ -17,8 +17,16 @@ import { isContractItem } from "@/lib/audit/contractItem";
  */
 export async function createAudit(formData: FormData) {
   const { orgId } = await requireOrgSession();
-  const engagementId = z.string().min(1).parse(formData.get("engagementId"));
-  const templateSlug = z.string().min(1).parse(formData.get("templateSlug"));
+  const engagementIdResult = z.string().min(1).safeParse(formData.get("engagementId"));
+  if (!engagementIdResult.success) {
+    throw new Error("Missing or invalid engagementId.");
+  }
+  const engagementId = engagementIdResult.data;
+  const templateSlugResult = z.string().min(1).safeParse(formData.get("templateSlug"));
+  if (!templateSlugResult.success) {
+    throw new Error("Missing or invalid templateSlug.");
+  }
+  const templateSlug = templateSlugResult.data;
 
   // Templates are shared, non-tenant content (spec.md §5) — read directly, not via withOrgScope.
   const template = await prisma.template.findFirst({
@@ -60,7 +68,11 @@ export async function createAudit(formData: FormData) {
  */
 export async function runTierAAutomation(formData: FormData) {
   const { orgId } = await requireOrgSession();
-  const auditId = z.string().min(1).parse(formData.get("auditId"));
+  const auditIdResult = z.string().min(1).safeParse(formData.get("auditId"));
+  if (!auditIdResult.success) {
+    throw new Error("Missing or invalid auditId.");
+  }
+  const auditId = auditIdResult.data;
 
   // Reads the finding list and target domain in a short first transaction, then runs the outbound
   // checks OUTSIDE any transaction, then writes results back in a second short transaction. Found
@@ -137,7 +149,7 @@ const updateFindingSchema = z.object({
 
 export async function updateFinding(formData: FormData) {
   const { orgId } = await requireOrgSession();
-  const parsed = updateFindingSchema.parse({
+  const result = updateFindingSchema.safeParse({
     findingId: formData.get("findingId"),
     status: formData.get("status"),
     severity: formData.get("severity") || undefined,
@@ -146,6 +158,10 @@ export async function updateFinding(formData: FormData) {
     penaltyAmount: formData.get("penaltyAmount") || undefined,
     penaltyBasis: formData.get("penaltyBasis") || undefined,
   });
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid finding update.");
+  }
+  const parsed = result.data;
 
   const updated = await withOrgScope(orgId, async (tx) => {
     // Whether this submit is allowed to touch structuredData is decided from the finding's own
@@ -201,11 +217,15 @@ const updateAuditOverrideSchema = z.object({
  */
 export async function updateAuditOverride(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const parsed = updateAuditOverrideSchema.parse({
+  const result = updateAuditOverrideSchema.safeParse({
     auditId: formData.get("auditId"),
     overallRatingOverride: formData.get("overallRatingOverride") || undefined,
     overallRatingOverrideNote: formData.get("overallRatingOverrideNote") || undefined,
   });
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid rating override.");
+  }
+  const parsed = result.data;
 
   // The note textarea isn't tied to the select — a consultant can pick "No override" without
   // clearing leftover note text and hit the one Save button for both fields. Found live: that left

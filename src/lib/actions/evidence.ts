@@ -15,7 +15,11 @@ import { putObject, evidenceKey } from "@/lib/storage/local";
  */
 export async function attachEvidence(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const findingId = z.string().min(1).parse(formData.get("findingId"));
+  const findingIdResult = z.string().min(1).safeParse(formData.get("findingId"));
+  if (!findingIdResult.success) {
+    throw new Error("Missing or invalid findingId.");
+  }
+  const findingId = findingIdResult.data;
   const file = formData.get("file");
 
   if (!(file instanceof File) || file.size === 0) {
@@ -68,7 +72,11 @@ export async function attachEvidence(formData: FormData): Promise<void> {
 
 export async function deleteEvidence(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const evidenceId = z.string().min(1).parse(formData.get("evidenceId"));
+  const evidenceIdResult = z.string().min(1).safeParse(formData.get("evidenceId"));
+  if (!evidenceIdResult.success) {
+    throw new Error("Missing or invalid evidenceId.");
+  }
+  const evidenceId = evidenceIdResult.data;
 
   const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
     const evidence = await tx.evidence.findUniqueOrThrow({

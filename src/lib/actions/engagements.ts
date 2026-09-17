@@ -16,10 +16,14 @@ const createEngagementSchema = z.object({
 export async function createEngagement(formData: FormData) {
   const { orgId } = await requireOrgSession();
 
-  const parsed = createEngagementSchema.parse({
+  const result = createEngagementSchema.safeParse({
     businessName: formData.get("businessName"),
     primaryDomain: formData.get("primaryDomain") || undefined,
   });
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid engagement input.");
+  }
+  const parsed = result.data;
 
   const engagement = await withOrgScope(orgId, (tx) =>
     tx.engagement.create({
@@ -60,13 +64,17 @@ const updateEngagementSchema = z.object({
  */
 export async function updateEngagement(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const parsed = updateEngagementSchema.parse({
+  const result = updateEngagementSchema.safeParse({
     engagementId: formData.get("engagementId"),
     businessName: formData.get("businessName"),
     primaryDomain: formData.get("primaryDomain") || undefined,
     dealStage: formData.get("dealStage"),
     documentPurgeAt: formData.get("documentPurgeAt") || undefined,
   });
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid engagement input.");
+  }
+  const parsed = result.data;
 
   await withOrgScope(orgId, (tx) =>
     tx.engagement.update({

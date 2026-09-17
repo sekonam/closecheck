@@ -42,7 +42,11 @@ async function resolveLogoDataUri(storageKey: string | null): Promise<string | n
  */
 export async function generateReport(formData: FormData): Promise<void> {
   const { orgId } = await requireOrgSession();
-  const auditId = z.string().min(1).parse(formData.get("auditId"));
+  const auditIdResult = z.string().min(1).safeParse(formData.get("auditId"));
+  if (!auditIdResult.success) {
+    throw new Error("Missing or invalid auditId.");
+  }
+  const auditId = auditIdResult.data;
   const includeAppendix = formData.get("includeAppendix") === "on";
 
   // Reads + the Report row creation happen in a short first transaction; everything requiring disk
