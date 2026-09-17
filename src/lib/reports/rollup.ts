@@ -23,6 +23,7 @@ export function worstSeverity(severities: Array<Severity | null | undefined>): S
 
 export interface FindingForRollup {
   severity: Severity | null;
+  status: string;
   templateItem: { tier: Tier };
 }
 
@@ -46,11 +47,23 @@ export interface RollupResult {
   overallCoverage: Coverage;
 }
 
-/** Overall = worst tier rating; each tier's rating = worst finding rating within that tier. */
+/**
+ * Overall = worst tier rating; each tier's rating = worst finding rating within that tier.
+ *
+ * NOT_APPLICABLE findings are excluded from both the coverage denominator and the severity
+ * computation entirely — found via QA: a checklist item that genuinely doesn't apply to this
+ * business (e.g. "third-party delivery platform account ownership" for a restaurant with no
+ * delivery integration) carries no risk to rate, so counting it as "not yet rated" misrepresented
+ * a fully-resolved audit as still having open work. "Not applicable" is a resolution, not a pending
+ * state — see badgeWithCoverage in renderHtml.ts and the audit page for the corresponding
+ * "Not applicable" (coverage.total === 0) render branch, distinct from "Not yet rated"
+ * (coverage.rated === 0 but total > 0).
+ */
 export function computeSeverityRollup(findings: FindingForRollup[]): RollupResult {
   const byTier: Record<Tier, Severity[]> = { A: [], B: [], C: [] };
   const totalByTier: Record<Tier, number> = { A: 0, B: 0, C: 0 };
   for (const f of findings) {
+    if (f.status === "NOT_APPLICABLE") continue;
     totalByTier[f.templateItem.tier]++;
     if (f.severity) byTier[f.templateItem.tier].push(f.severity);
   }
@@ -73,7 +86,7 @@ export function computeSeverityRollup(findings: FindingForRollup[]): RollupResul
     perTierCoverage,
     overallCoverage: {
       rated: byTier.A.length + byTier.B.length + byTier.C.length,
-      total: findings.length,
+      total: totalByTier.A + totalByTier.B + totalByTier.C,
     },
   };
 }

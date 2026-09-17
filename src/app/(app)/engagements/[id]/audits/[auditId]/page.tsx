@@ -21,6 +21,20 @@ const SEVERITY_DOT: Record<string, string> = {
   RED: "bg-red-600",
 };
 
+/**
+ * Shared by the overall badge, each per-tier badge, and the historical reports list — all three need
+ * the same three-way read: total === 0 means every item in scope was NOT_APPLICABLE (excluded from
+ * computeSeverityRollup's denominator entirely, src/lib/reports/rollup.ts), which is a resolved
+ * state, not pending work, so it must render differently from "not-yet-rated" (total > 0, rated ===
+ * 0) even though both have rated === 0. A plain discriminator rather than a shared component since
+ * each call site's markup (dot size, whether a text label accompanies the dot) already differs.
+ */
+function coverageStatus(rated: number, total: number): "not-applicable" | "not-yet-rated" | "rated" {
+  if (total === 0) return "not-applicable";
+  if (rated === 0) return "not-yet-rated";
+  return "rated";
+}
+
 export default async function AuditPage({
   params,
 }: {
@@ -55,6 +69,7 @@ export default async function AuditPage({
   const rollup = computeSeverityRollup(audit.findings);
   const byTier: Record<Tier, typeof audit.findings> = { A: [], B: [], C: [] };
   for (const f of audit.findings) byTier[f.templateItem.tier].push(f);
+  const overallStatus = coverageStatus(rollup.overallCoverage.rated, rollup.overallCoverage.total);
 
   return (
     <div>
@@ -67,9 +82,9 @@ export default async function AuditPage({
         </h1>
         <div className="flex items-center gap-2 text-sm">
           <span>Overall:</span>
-          {rollup.overallCoverage.rated === 0 ? (
+          {overallStatus !== "rated" ? (
             <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-              Not yet rated
+              {overallStatus === "not-applicable" ? "Not applicable" : "Not yet rated"}
             </span>
           ) : (
             <>
@@ -170,9 +185,11 @@ export default async function AuditPage({
               <li key={r.id} className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   {r.generatedAt.toISOString().slice(0, 19).replace("T", " ")} —{" "}
-                  {r.overallCoveredCount === 0 ? (
+                  {coverageStatus(r.overallCoveredCount, r.overallTotalCount) !== "rated" ? (
                     <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      Not yet rated
+                      {coverageStatus(r.overallCoveredCount, r.overallTotalCount) === "not-applicable"
+                        ? "Not applicable"
+                        : "Not yet rated"}
                     </span>
                   ) : (
                     <span className="font-medium">{r.computedOverallSeverity}</span>
@@ -190,13 +207,15 @@ export default async function AuditPage({
         </div>
       )}
 
-      {(Object.keys(TIER_LABEL) as Tier[]).map((tier) => (
+      {(Object.keys(TIER_LABEL) as Tier[]).map((tier) => {
+        const tierStatus = coverageStatus(rollup.perTierCoverage[tier].rated, rollup.perTierCoverage[tier].total);
+        return (
         <section key={tier} className="mt-8">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-medium text-slate-900">{TIER_LABEL[tier]}</h2>
-            {rollup.perTierCoverage[tier].rated === 0 ? (
+            {tierStatus !== "rated" ? (
               <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-                Not yet rated
+                {tierStatus === "not-applicable" ? "Not applicable" : "Not yet rated"}
               </span>
             ) : (
               <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_DOT[rollup.perTier[tier]]}`} />
@@ -346,7 +365,8 @@ export default async function AuditPage({
             })}
           </div>
         </section>
-      ))}
+        );
+      })}
     </div>
   );
 }

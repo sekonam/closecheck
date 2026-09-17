@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Severity, Tier } from "@prisma/client";
 import { computeSeverityRollup, worstSeverity, type FindingForRollup } from "./rollup";
 
-function finding(tier: Tier, severity: Severity | null): FindingForRollup {
-  return { severity, templateItem: { tier } };
+function finding(tier: Tier, severity: Severity | null, status = "IN_PROGRESS"): FindingForRollup {
+  return { severity, status, templateItem: { tier } };
 }
 
 describe("worstSeverity", () => {
@@ -84,5 +84,32 @@ describe("computeSeverityRollup", () => {
     expect(result.perTierCoverage.B).toEqual({ rated: 1, total: 1 });
     expect(result.perTierCoverage.C).toEqual({ rated: 0, total: 2 });
     expect(result.overallCoverage).toEqual({ rated: 2, total: 5 });
+  });
+
+  it("excludes NOT_APPLICABLE findings from the coverage denominator entirely", () => {
+    const findings: FindingForRollup[] = [
+      finding(Tier.A, Severity.GREEN),
+      finding(Tier.A, null, "NOT_APPLICABLE"),
+      finding(Tier.A, null, "NOT_APPLICABLE"),
+    ];
+    const result = computeSeverityRollup(findings);
+    // Two NOT_APPLICABLE items don't count toward "still needs a rating" — only the one applicable,
+    // rated item does. Found via QA: counting them made a fully-resolved audit misread as having
+    // open work (spec.md §6's traffic-light summary is the one artifact a buyer actually reads).
+    expect(result.perTierCoverage.A).toEqual({ rated: 1, total: 1 });
+    expect(result.overallCoverage).toEqual({ rated: 1, total: 1 });
+  });
+
+  it("an audit where every finding is NOT_APPLICABLE rolls up to zero-total coverage, not zero-rated", () => {
+    const findings: FindingForRollup[] = [
+      finding(Tier.A, null, "NOT_APPLICABLE"),
+      finding(Tier.B, null, "NOT_APPLICABLE"),
+    ];
+    const result = computeSeverityRollup(findings);
+    // total: 0, not total: 2 — callers (renderHtml.ts, the audit page) use this to render "Not
+    // applicable" instead of "Not yet rated": every item here is resolved (correctly excluded from
+    // scope), none are pending.
+    expect(result.overallCoverage).toEqual({ rated: 0, total: 0 });
+    expect(result.overall).toBe(Severity.GREEN);
   });
 });

@@ -78,6 +78,13 @@ function badge(severity: Severity): string {
  */
 function badgeWithCoverage(severity: Severity, coverage: Coverage): string {
   const coverageNote = `<span style="color:#94a3b8;font-size:11px;font-weight:400"> (${coverage.rated}/${coverage.total} rated)</span>`;
+  // total === 0 means every item here was marked NOT_APPLICABLE (computeSeverityRollup excludes
+  // them from the denominator entirely) — that's a resolved state, not pending work, so it must
+  // read differently from "Not yet rated" (total > 0, rated === 0) even though both cases have
+  // rated === 0.
+  if (coverage.total === 0) {
+    return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;color:#475569;background:#e2e8f0">Not applicable</span>${coverageNote}`;
+  }
   if (coverage.rated === 0) {
     return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;color:#475569;background:#e2e8f0">Not yet rated</span>${coverageNote}`;
   }
