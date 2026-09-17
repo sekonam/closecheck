@@ -14,7 +14,9 @@ import { putObject, deleteObject, orgLogoKey } from "@/lib/storage/local";
 const ALLOWED_LOGO_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 const updateOrgBrandingSchema = z.object({
-  name: z.string().min(1, "Org name is required"),
+  // Trimmed before the length check — otherwise a whitespace-only name (spaces, tabs) passes
+  // validation and saves, leaving the org with a name that renders blank on every report cover.
+  name: z.string().trim().min(1, "Org name is required"),
   // Blank clears the override back to the default accent used in src/lib/reports/renderHtml.ts —
   // same "blank means clear" convention as updateEngagement in src/lib/actions/engagements.ts.
   brandColorHex: z
