@@ -172,10 +172,17 @@ export async function updateFinding(formData: FormData) {
     // place, since an all-empty submission looked identical to "this form doesn't have these
     // fields." Gating on the finding's actual shape also closes off writing contract-shaped
     // structuredData onto an unrelated (e.g. Tier A automated) finding via a crafted submission.
-    const existing = await tx.finding.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow: a findingId for another org resolves to zero rows under
+    // RLS (not a Postgres policy error, just an empty result), so findUniqueOrThrow's raw
+    // PrismaClientKnownRequestError (P2025) would crash to Next's default 500 page instead of a
+    // clean message — found live via cross-tenant IDOR testing with a real foreign findingId.
+    const existing = await tx.finding.findUnique({
       where: { id: parsed.findingId },
       include: { templateItem: true },
     });
+    if (!existing) {
+      throw new Error("Finding not found.");
+    }
     const isContractFinding = isContractItem(existing.templateItem.title);
 
     return tx.finding.update({
