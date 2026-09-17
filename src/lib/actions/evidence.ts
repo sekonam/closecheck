@@ -39,10 +39,16 @@ export async function attachEvidence(formData: FormData): Promise<void> {
   // Committing the row first means the only failure mode is the reverse — a row with no file — which
   // is compensated for below and which purge/download paths already treat as a tolerable ENOENT.
   const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
-    const finding = await tx.finding.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow: a foreign-org findingId resolves to zero rows under RLS,
+    // and findUniqueOrThrow's raw PrismaClientKnownRequestError would crash instead of failing
+    // cleanly — same class of bug found live via cross-tenant isolation testing on updateFinding.
+    const finding = await tx.finding.findUnique({
       where: { id: findingId },
       include: { audit: true },
     });
+    if (!finding) {
+      throw new Error("Finding not found.");
+    }
 
     await tx.evidence.create({
       data: {
@@ -79,10 +85,14 @@ export async function deleteEvidence(formData: FormData): Promise<void> {
   const evidenceId = evidenceIdResult.data;
 
   const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
-    const evidence = await tx.evidence.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow — same reasoning as attachEvidence above.
+    const evidence = await tx.evidence.findUnique({
       where: { id: evidenceId },
       include: { finding: { include: { audit: true } } },
     });
+    if (!evidence) {
+      throw new Error("Evidence not found.");
+    }
     await tx.evidence.delete({ where: { id: evidenceId } });
     // Deliberately not deleting the underlying object from local storage here — matches
     // docs/spec.md §8's retention model (purge is a lifecycle-driven job, not an on-delete side

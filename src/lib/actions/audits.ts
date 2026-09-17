@@ -38,8 +38,13 @@ export async function createAudit(formData: FormData) {
   const audit = await withOrgScope(orgId, async (tx) => {
     // Confirm the engagement belongs to this org before creating anything under it — withOrgScope's
     // RLS policy would reject a cross-org write anyway, but failing with a clear error here beats a
-    // raw Postgres RLS error surfacing to a user.
-    const engagement = await tx.engagement.findUniqueOrThrow({ where: { id: engagementId } });
+    // raw crash surfacing to a user. findUnique, not findUniqueOrThrow: a foreign-org engagementId
+    // resolves to zero rows under RLS (not a Postgres error), and findUniqueOrThrow's raw
+    // PrismaClientKnownRequestError (P2025) would still crash to Next's default 500 page otherwise.
+    const engagement = await tx.engagement.findUnique({ where: { id: engagementId } });
+    if (!engagement) {
+      throw new Error("Engagement not found.");
+    }
 
     return tx.audit.create({
       data: {
@@ -80,10 +85,16 @@ export async function runTierAAutomation(formData: FormData) {
   // seconds combined) inside a single withOrgScope transaction, holding a Postgres connection idle
   // the whole time — fine for one dev locally, a real problem under any concurrent load.
   const { domain, automatable, engagementId } = await withOrgScope(orgId, async (tx) => {
-    const audit = await tx.audit.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow: a foreign-org auditId resolves to zero rows under RLS, and
+    // findUniqueOrThrow's raw PrismaClientKnownRequestError would crash instead of failing cleanly —
+    // same class of bug found live via cross-tenant isolation testing on updateFinding.
+    const audit = await tx.audit.findUnique({
       where: { id: auditId },
       include: { engagement: true, findings: { include: { templateItem: true } } },
     });
+    if (!audit) {
+      throw new Error("Audit not found.");
+    }
 
     const domain = audit.engagement.primaryDomain;
     if (!domain) {
@@ -241,15 +252,22 @@ export async function updateAuditOverride(formData: FormData): Promise<void> {
   // to the actual report — renderHtml.ts's overrideBlock only renders when overallRatingOverride is
   // set). A note with no override is meaningless, so clearing the override always clears the note too.
   const overallRatingOverride = parsed.overallRatingOverride ?? null;
-  const updated = await withOrgScope(orgId, (tx) =>
-    tx.audit.update({
+  const updated = await withOrgScope(orgId, async (tx) => {
+    // update() throws the same raw PrismaClientKnownRequestError as findUniqueOrThrow when the row
+    // is invisible under RLS (foreign-org auditId) — an explicit existence check first fails cleanly
+    // instead, same fix shape as every other tamperable-id lookup in this file.
+    const existing = await tx.audit.findUnique({ where: { id: parsed.auditId } });
+    if (!existing) {
+      throw new Error("Audit not found.");
+    }
+    return tx.audit.update({
       where: { id: parsed.auditId },
       data: {
         overallRatingOverride,
         overallRatingOverrideNote: overallRatingOverride ? (parsed.overallRatingOverrideNote ?? null) : null,
       },
-    }),
-  );
+    });
+  });
 
   revalidatePath(`/engagements/${updated.engagementId}/audits/${updated.id}`);
 }

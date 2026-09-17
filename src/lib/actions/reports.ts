@@ -56,7 +56,12 @@ export async function generateReport(formData: FormData): Promise<void> {
   // open that whole time is fine for one dev locally and a real connection-pool risk under concurrent
   // report generation across tenants.
   const { engagementId, reportId, orgId: reportOrgId, reportData } = await withOrgScope(orgId, async (tx) => {
-    const audit = await tx.audit.findUniqueOrThrow({
+    // findUnique, not findUniqueOrThrow: a foreign-org auditId resolves to zero rows under RLS, and
+    // findUniqueOrThrow's raw PrismaClientKnownRequestError would crash instead of failing cleanly —
+    // same class of bug found live via cross-tenant isolation testing on updateFinding. The org
+    // lookup just below stays findUniqueOrThrow: orgId there is the session's own org (server-derived
+    // from the JWT, not form input), so it failing would mean real DB corruption, not attacker input.
+    const audit = await tx.audit.findUnique({
       where: { id: auditId },
       include: {
         engagement: true,
@@ -64,6 +69,9 @@ export async function generateReport(formData: FormData): Promise<void> {
         findings: { include: { templateItem: true, evidence: true } },
       },
     });
+    if (!audit) {
+      throw new Error("Audit not found.");
+    }
     const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
 
     // spec.md §6: the disclaimer is "required review by the consultant, not optional boilerplate the
