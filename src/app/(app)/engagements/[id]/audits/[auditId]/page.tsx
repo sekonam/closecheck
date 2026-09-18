@@ -8,6 +8,7 @@ import { runTierAAutomation, updateFinding, updateAuditOverride } from "@/lib/ac
 import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { isContractItem } from "@/lib/audit/contractItem";
+import { createPortalLink, revokePortalLink } from "@/lib/actions/portal";
 
 const TIER_LABEL: Record<Tier, string> = {
   A: "Tier A — External (no seller cooperation needed)",
@@ -61,6 +62,23 @@ export default async function AuditPage({
   const reports = await withOrgScope(orgId, (tx) =>
     tx.report.findMany({ where: { auditId }, orderBy: { generatedAt: "desc" } }),
   );
+
+  // Client Portal Links (spec.md §7) for these reports, with each link's access log (spec.md §8's
+  // "who viewed/exported/shared a given Report and when," from the consultant's side — there's no
+  // "who" for an anonymous buyer, just "when" and a hashed IP, so this list itself is the answer).
+  const portalLinks = await withOrgScope(orgId, (tx) =>
+    tx.clientPortalLink.findMany({
+      where: { reportId: { in: reports.map((r) => r.id) } },
+      include: { accessLog: { orderBy: { viewedAt: "desc" } } },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
+  const portalLinksByReport = new Map<string, typeof portalLinks>();
+  for (const link of portalLinks) {
+    const existing = portalLinksByReport.get(link.reportId) ?? [];
+    existing.push(link);
+    portalLinksByReport.set(link.reportId, existing);
+  }
 
   const org = await withOrgScope(orgId, (tx) =>
     tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { disclaimerAcknowledgedAt: true } }),
@@ -181,28 +199,89 @@ export default async function AuditPage({
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
           <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500">Reports</h2>
           <ul className="mt-2 space-y-1 text-sm">
-            {reports.map((r) => (
-              <li key={r.id} className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
-                  {r.generatedAt.toISOString().slice(0, 19).replace("T", " ")} —{" "}
-                  {coverageStatus(r.overallCoveredCount, r.overallTotalCount) !== "rated" ? (
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      {coverageStatus(r.overallCoveredCount, r.overallTotalCount) === "not-applicable"
-                        ? "Not applicable"
-                        : "Not yet rated"}
+            {reports.map((r) => {
+              const links = portalLinksByReport.get(r.id) ?? [];
+              return (
+              <li key={r.id} className="border-b border-slate-100 py-2 last:border-0">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    {r.generatedAt.toISOString().slice(0, 19).replace("T", " ")} —{" "}
+                    {coverageStatus(r.overallCoveredCount, r.overallTotalCount) !== "rated" ? (
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        {coverageStatus(r.overallCoveredCount, r.overallTotalCount) === "not-applicable"
+                          ? "Not applicable"
+                          : "Not yet rated"}
+                      </span>
+                    ) : (
+                      <span className="font-medium">{r.computedOverallSeverity}</span>
+                    )}
+                    <span className="text-xs text-slate-400">
+                      ({r.overallCoveredCount}/{r.overallTotalCount} rated)
                     </span>
-                  ) : (
-                    <span className="font-medium">{r.computedOverallSeverity}</span>
-                  )}
-                  <span className="text-xs text-slate-400">
-                    ({r.overallCoveredCount}/{r.overallTotalCount} rated)
                   </span>
-                </span>
-                <a href={`/api/reports/${r.id}/pdf`} className="text-slate-600 underline hover:text-slate-900">
-                  Download PDF
-                </a>
+                  <div className="flex items-center gap-3">
+                    <a href={`/api/reports/${r.id}/pdf`} className="text-slate-600 underline hover:text-slate-900">
+                      Download PDF
+                    </a>
+                    <form action={createPortalLink}>
+                      <input type="hidden" name="reportId" value={r.id} />
+                      <button type="submit" className="text-slate-600 underline hover:text-slate-900">
+                        Create client link
+                      </button>
+                    </form>
+                  </div>
+                </div>
+                {links.length > 0 && (
+                  <ul className="mt-2 space-y-2 pl-3 text-xs">
+                    {links.map((link) => {
+                      const isRevoked = Boolean(link.revokedAt);
+                      const isExpired = link.expiresAt.getTime() < Date.now();
+                      const isLive = !isRevoked && !isExpired;
+                      return (
+                        <li key={link.id} className="rounded-md border border-slate-200 bg-slate-50 p-2">
+                          <div className="flex items-center justify-between gap-2">
+                            {isLive ? (
+                              <a
+                                href={`/portal/${link.token}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="truncate text-slate-700 underline"
+                              >
+                                /portal/{link.token}
+                              </a>
+                            ) : (
+                              <span className="truncate text-slate-400 line-through">/portal/{link.token}</span>
+                            )}
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 font-medium ${
+                                isLive ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"
+                              }`}
+                            >
+                              {isRevoked ? "Revoked" : isExpired ? "Expired" : "Live"}
+                            </span>
+                            {isLive && (
+                              <form action={revokePortalLink}>
+                                <input type="hidden" name="linkId" value={link.id} />
+                                <button type="submit" className="shrink-0 text-slate-500 underline hover:text-slate-700">
+                                  Revoke
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                          <p className="mt-1 text-slate-400">
+                            Expires {link.expiresAt.toISOString().slice(0, 10)} ·{" "}
+                            {link.accessLog.length === 0
+                              ? "never viewed"
+                              : `viewed ${link.accessLog.length} time${link.accessLog.length === 1 ? "" : "s"}, last ${link.accessLog[0].viewedAt.toISOString().slice(0, 19).replace("T", " ")}`}
+                          </p>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       )}
