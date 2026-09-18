@@ -9,7 +9,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 
 const inviteMemberSchema = z.object({
-  email: z.string().trim().email("Enter a valid email address"),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
   name: z.string().trim().optional(),
 });
 
@@ -57,6 +57,15 @@ export async function inviteMember(formData: FormData): Promise<void> {
     } catch (err) {
       // Prisma's unique-constraint error (P2002) on email — surface a clean message instead of the
       // raw constraint violation, matching this session's established error-handling convention.
+      //
+      // Known, accepted limitation: User.email is unique platform-wide, not per-org, so this error
+      // also fires when the email belongs to a DIFFERENT org — letting an OWNER probe whether an
+      // arbitrary email is a CloseCheck customer anywhere, not just within their own firm. Closing
+      // this fully would mean either a per-org-scoped email uniqueness model or a real
+      // invite-by-email flow (no synchronous temp-password relay) so a "we sent an invite" message
+      // can be shown unconditionally — both bigger changes than this pass. Accepted for now, on the
+      // same footing as signup's own "email already exists" check (src/lib/actions/auth.ts), which
+      // has an identical (single-email, self-directed) enumeration shape.
       if (err && typeof err === "object" && "code" in err && err.code === "P2002") {
         throw new Error("That email is already in use.");
       }
@@ -108,8 +117,17 @@ export async function removeMember(formData: FormData): Promise<void> {
     }
 
     if (target.role === "OWNER") {
-      const ownerCount = await tx.user.count({ where: { orgId, role: "OWNER" } });
-      if (ownerCount <= 1) {
+      // FOR UPDATE locks the org's OWNER rows for the rest of this transaction — without it, two
+      // concurrent "remove the other owner" requests (one from each of an org's two owners) could
+      // both read ownerCount === 2, both pass this check, and both commit, leaving the org with zero
+      // owners and no recovery path. The second transaction here blocks until the first commits or
+      // rolls back, then re-reads a now-correct count.
+      // Postgres rejects FOR UPDATE combined with an aggregate (count(*)) — select the row ids
+      // themselves and count them in JS instead.
+      const owners = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM users WHERE "orgId" = ${orgId} AND role = 'OWNER' FOR UPDATE
+      `;
+      if (owners.length <= 1) {
         throw new Error("Can't remove the only owner on the account.");
       }
     }

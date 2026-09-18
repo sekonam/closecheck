@@ -19,9 +19,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Password", type: "password" },
       },
       authorize: async (credentials) => {
-        const email = credentials?.email;
+        const rawEmail = credentials?.email;
         const password = credentials?.password;
-        if (typeof email !== "string" || typeof password !== "string") return null;
+        if (typeof rawEmail !== "string" || typeof password !== "string") return null;
+        // signUp (src/lib/actions/auth.ts) and inviteMember (src/lib/actions/team.ts) both store
+        // email lowercased — normalize the same way here, or a user who signed up as
+        // "Jane@Firm.com" gets a spurious "Invalid email or password" logging in with different
+        // casing than they stored.
+        const email = rawEmail.trim().toLowerCase();
 
         const user = await authPrisma.user.findUnique({ where: { email } });
         if (!user) return null;
