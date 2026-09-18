@@ -162,6 +162,13 @@ checklist changes would silently invalidate a consultant's already-recorded find
 
 ## 7. Client-facing portal (Phase 3+, not MVP)
 
+**Status update:** built (2026-09-18), ahead of the design-partner evidence this section originally
+called for, per explicit user direction to build through Phase 3 regardless — see
+`docs/roadmap.md` Phase 3's matching note. The rationale below is preserved as the reasoning that was
+superseded, not deleted, per this project's `spec-writing` convention for resolved-but-overridden
+sections. The implementation matches the "magic-link, no account required" shape this section
+specifies: `src/app/portal/[token]/page.tsx`, `src/lib/actions/portal.ts`.
+
 Deferred per `idea.md`'s open question, resolved here: **not core to v1.** Rationale: the PDF export
 already satisfies "hand the buyer something professional," and a portal adds auth, hosting, and
 support-surface cost before the core workflow (consultant runs an audit, gets a report) is validated

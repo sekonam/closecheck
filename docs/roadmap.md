@@ -101,6 +101,12 @@ explicit about avoiding.
 **Goal:** close the loop on `idea.md`'s open distribution question and ship the portal only once
 there's a validated reason to (per `spec.md` §7).
 
+**Status update (2026-09-18):** the Client Portal Link deliverable below was built ahead of the
+Phase 1/2 evidence this phase calls for, per explicit user direction to build through Phase 3
+regardless of the normal evidence gate. The distribution-channel decision remains unresolved — it's a
+business/strategy call, not something buildable from this codebase, and stays open per the reasoning
+below.
+
 **Deliverables:**
 - Magic-link, no-account Client Portal Link (`spec.md` §7) — built only if Phase 1/2 design partners
   or their buyers explicitly asked for it; otherwise this deliverable is replaced by whatever gap
