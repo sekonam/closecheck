@@ -43,6 +43,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session: async ({ session, token }) => {
       if (session.user) {
         session.user.orgId = token.orgId as string;
+        // token.sub is Auth.js's own standard claim, set automatically to the id authorize()
+        // returned and preserved across every subsequent jwt() call — this was never copied onto
+        // the session, so requireOrgSession()'s userId (src/lib/auth/session.ts) has been silently
+        // undefined this entire time. Nothing needed it until src/lib/actions/team.ts's
+        // owner-only checks became the first real consumer — found live, testing the invite form
+        // never rendering for an actual account owner.
+        session.user.id = token.sub as string;
       }
       return session;
     },
