@@ -7,8 +7,12 @@ import { dirname, join } from "node:path";
  * storage (S3-compatible) before any real seller/buyer data touches this — do not ship this module
  * to production as-is. Every caller goes through `orgId` in the key path so a future S3 swap can
  * carry the same per-tenant prefixing straight over.
+ *
+ * STORAGE_ROOT_DIR overrides the default cwd-relative path — needed in production so this can point
+ * at a mounted persistent volume instead of the container's (ephemeral, per-deploy) filesystem. Unset
+ * in local dev, matching the previous hardcoded behavior.
  */
-const STORAGE_ROOT = join(process.cwd(), ".local-storage");
+const STORAGE_ROOT = process.env.STORAGE_ROOT_DIR || join(process.cwd(), ".local-storage");
 
 export async function putObject(key: string, data: Buffer): Promise<string> {
   const path = join(STORAGE_ROOT, key);

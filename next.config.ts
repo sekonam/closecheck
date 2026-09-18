@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Bundles only the production dependencies actually reachable from the app into .next/standalone,
+  // instead of shipping the full node_modules — needed to keep the production Docker image (which
+  // also carries a full Chromium install for src/lib/reports/pdf.ts) a reasonable size.
+  output: "standalone",
   experimental: {
     serverActions: {
       // Next's default (1 MB) is well under what a real Tier B document looks like — scanned

@@ -253,7 +253,14 @@ async function main() {
     ECOMMERCE_SPECIFIC_ITEMS,
   );
 
-  // Local dev login only — not a design-partner account. See README for credentials.
+  // Local dev login only — not a design-partner account, and never seeded in production, where a
+  // publicly-known email/password (see README) would be a real, standing credential to guess.
+  // Production accounts come from /signup (src/app/signup/page.tsx) instead.
+  if (process.env.NODE_ENV === "production") {
+    console.log("NODE_ENV=production: skipping dev login seed. Use /signup to create a real account.");
+    return;
+  }
+
   const devOrg = await prisma.consultantOrg.upsert({
     where: { id: "dev-org" },
     update: {},

@@ -1,0 +1,43 @@
+# Render Blueprint — see docs/deployment.md for the full first-deploy runbook (role password
+# rotation, template seeding, and the other manual steps a blueprint can't automate).
+#
+# Render, not Vercel: this app renders PDFs with a real headless Chromium (src/lib/reports/pdf.ts)
+# and stores uploaded evidence/logos on local disk (src/lib/storage/local.ts) — both need a
+# long-running container with a persistent volume, not a stateless serverless function.
+services:
+  - type: web
+    name: closecheck
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    disk:
+      name: closecheck-storage
+      mountPath: /app/.local-storage
+      sizeGB: 1
+    preDeployCommand: npm run db:migrate:deploy
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Superuser/owner connection Render provides for the database below — set this first from the
+      # database's "Internal Connection String". Everything else here is bootstrapped FROM this one
+      # per docs/deployment.md (rotate role passwords, then fill in DATABASE_URL and friends).
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_DATABASE_URL
+        sync: false
+      - key: SIGNUP_DATABASE_URL
+        sync: false
+      - key: PORTAL_DATABASE_URL
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      # Set once Render assigns the service's *.onrender.com URL (or a custom domain is attached).
+      - key: NEXTAUTH_URL
+        sync: false
+
+databases:
+  - name: closecheck-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"
