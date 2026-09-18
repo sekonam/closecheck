@@ -5,12 +5,30 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { prisma } from "@/lib/db/client";
 import { createAudit } from "@/lib/actions/audits";
 import { updateEngagement } from "@/lib/actions/engagements";
+import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
 const DEAL_STAGES = ["PRE_LOI", "POST_LOI", "CLOSING", "CLOSED", "DEAD"] as const;
 
-export default async function EngagementPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EngagementPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
+}) {
   const { id } = await params;
+  const { error } = await searchParams;
   const { orgId } = await requireOrgSession();
+  const backPath = `/engagements/${id}`;
+
+  async function updateEngagementAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => updateEngagement(formData), backPath);
+  }
+  async function createAuditAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => createAudit(formData), backPath);
+  }
 
   const engagement = await withOrgScope(orgId, (tx) =>
     tx.engagement.findUnique({
@@ -33,12 +51,18 @@ export default async function EngagementPage({ params }: { params: Promise<{ id:
         {engagement.primaryDomain ?? "No primary domain set"} · {engagement.dealStage}
       </p>
 
+      {error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       <div
         key={`${engagement.businessName}-${engagement.primaryDomain}-${engagement.dealStage}-${engagement.documentPurgeAt?.toISOString()}`}
         className="mt-6 rounded-lg border border-slate-200 bg-white p-4"
       >
         <h2 className="text-sm font-medium text-slate-900">Edit engagement</h2>
-        <form action={updateEngagement} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <form action={updateEngagementAction} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <input type="hidden" name="engagementId" value={engagement.id} />
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="businessName">
@@ -109,7 +133,7 @@ export default async function EngagementPage({ params }: { params: Promise<{ id:
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-medium text-slate-900">Start a new audit</h2>
-        <form action={createAudit} className="mt-3 flex items-end gap-3">
+        <form action={createAuditAction} className="mt-3 flex items-end gap-3">
           <input type="hidden" name="engagementId" value={engagement.id} />
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="templateSlug">

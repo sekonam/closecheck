@@ -5,9 +5,40 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { updateOrgBranding, uploadOrgLogo, removeOrgLogo, acknowledgeDisclaimer } from "@/lib/actions/org";
 import { inviteMember, removeMember } from "@/lib/actions/team";
 import { REPORT_DISCLAIMER_TEXT } from "@/lib/reports/disclaimer";
+import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const { orgId, userId } = await requireOrgSession();
+
+  async function updateOrgBrandingAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => updateOrgBranding(formData), "/settings");
+  }
+  async function uploadOrgLogoAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => uploadOrgLogo(formData), "/settings");
+  }
+  async function removeOrgLogoAction() {
+    "use server";
+    await runOrRedirect(() => removeOrgLogo(), "/settings");
+  }
+  async function acknowledgeDisclaimerAction() {
+    "use server";
+    await runOrRedirect(() => acknowledgeDisclaimer(), "/settings");
+  }
+  async function inviteMemberAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => inviteMember(formData), "/settings");
+  }
+  async function removeMemberAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => removeMember(formData), "/settings");
+  }
 
   const org = await withOrgScope(orgId, (tx) => tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } }));
   const members = await withOrgScope(orgId, (tx) =>
@@ -33,12 +64,18 @@ export default async function SettingsPage() {
         (docs/spec.md §6) — never CloseCheck&apos;s.
       </p>
 
+      {error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       <div
         key={`${org.name}-${org.brandColorHex}`}
         className="mt-6 rounded-lg border border-slate-200 bg-white p-4"
       >
         <h2 className="text-sm font-medium text-slate-900">Firm name and color</h2>
-        <form action={updateOrgBranding} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <form action={updateOrgBrandingAction} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="name">
               Firm name
@@ -94,7 +131,7 @@ export default async function SettingsPage() {
               No logo
             </div>
           )}
-          <form action={uploadOrgLogo} className="flex items-center gap-2">
+          <form action={uploadOrgLogoAction} className="flex items-center gap-2">
             <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
             <button
               type="submit"
@@ -104,7 +141,7 @@ export default async function SettingsPage() {
             </button>
           </form>
           {org.brandLogoUrl && (
-            <form action={removeOrgLogo}>
+            <form action={removeOrgLogoAction}>
               <button type="submit" className="text-sm text-slate-500 underline hover:text-slate-700">
                 Remove
               </button>
@@ -127,7 +164,7 @@ export default async function SettingsPage() {
             Reviewed on {org.disclaimerAcknowledgedAt.toISOString().slice(0, 10)}.
           </p>
         ) : (
-          <form action={acknowledgeDisclaimer} className="mt-3">
+          <form action={acknowledgeDisclaimerAction} className="mt-3">
             <button
               type="submit"
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
@@ -167,7 +204,7 @@ export default async function SettingsPage() {
                 </span>
               </div>
               {isOwner && (
-                <form action={removeMember}>
+                <form action={removeMemberAction}>
                   <input type="hidden" name="userId" value={m.id} />
                   <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
                     Remove
@@ -179,7 +216,7 @@ export default async function SettingsPage() {
         </ul>
 
         {isOwner && (
-          <form action={inviteMember} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <form action={inviteMemberAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
             <input
               name="email"
               type="email"

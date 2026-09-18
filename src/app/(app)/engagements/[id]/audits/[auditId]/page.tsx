@@ -9,6 +9,7 @@ import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { isContractItem } from "@/lib/audit/contractItem";
 import { createPortalLink, revokePortalLink } from "@/lib/actions/portal";
+import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
 const TIER_LABEL: Record<Tier, string> = {
   A: "Tier A — External (no seller cooperation needed)",
@@ -38,11 +39,48 @@ function coverageStatus(rated: number, total: number): "not-applicable" | "not-y
 
 export default async function AuditPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; auditId: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { id: engagementId, auditId } = await params;
+  const { error } = await searchParams;
   const { orgId } = await requireOrgSession();
+  const backPath = `/engagements/${engagementId}/audits/${auditId}`;
+
+  async function runTierAAutomationAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => runTierAAutomation(formData), backPath);
+  }
+  async function generateReportAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => generateReport(formData), backPath);
+  }
+  async function updateAuditOverrideAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => updateAuditOverride(formData), backPath);
+  }
+  async function createPortalLinkAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => createPortalLink(formData), backPath);
+  }
+  async function revokePortalLinkAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => revokePortalLink(formData), backPath);
+  }
+  async function updateFindingAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => updateFinding(formData), backPath);
+  }
+  async function attachEvidenceAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => attachEvidence(formData), backPath);
+  }
+  async function deleteEvidenceAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => deleteEvidence(formData), backPath);
+  }
 
   const audit = await withOrgScope(orgId, (tx) =>
     tx.audit.findUnique({
@@ -116,8 +154,14 @@ export default async function AuditPage({
         </div>
       </div>
 
+      {error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       <div className="mt-4 flex flex-wrap gap-3">
-        <form action={runTierAAutomation}>
+        <form action={runTierAAutomationAction}>
           <input type="hidden" name="auditId" value={audit.id} />
           <button
             type="submit"
@@ -127,7 +171,7 @@ export default async function AuditPage({
             Run Tier A automated checks
           </button>
         </form>
-        <form action={generateReport} className="flex items-center gap-2">
+        <form action={generateReportAction} className="flex items-center gap-2">
           <input type="hidden" name="auditId" value={audit.id} />
           <label className="flex items-center gap-1.5 text-xs text-slate-600">
             <input type="checkbox" name="includeAppendix" />
@@ -168,7 +212,7 @@ export default async function AuditPage({
           The computed rating above is always kept and shown — an override is added alongside it in
           the report, never in place of it (docs/spec.md §6).
         </p>
-        <form action={updateAuditOverride} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_auto]">
+        <form action={updateAuditOverrideAction} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_auto]">
           <input type="hidden" name="auditId" value={audit.id} />
           <select
             name="overallRatingOverride"
@@ -223,7 +267,7 @@ export default async function AuditPage({
                     <a href={`/api/reports/${r.id}/pdf`} className="text-slate-600 underline hover:text-slate-900">
                       Download PDF
                     </a>
-                    <form action={createPortalLink}>
+                    <form action={createPortalLinkAction}>
                       <input type="hidden" name="reportId" value={r.id} />
                       <button type="submit" className="text-slate-600 underline hover:text-slate-900">
                         Create client link
@@ -260,7 +304,7 @@ export default async function AuditPage({
                               {isRevoked ? "Revoked" : isExpired ? "Expired" : "Live"}
                             </span>
                             {isLive && (
-                              <form action={revokePortalLink}>
+                              <form action={revokePortalLinkAction}>
                                 <input type="hidden" name="linkId" value={link.id} />
                                 <button type="submit" className="shrink-0 text-slate-500 underline hover:text-slate-700">
                                   Revoke
@@ -331,7 +375,7 @@ export default async function AuditPage({
 
                   <form
                     key={`${finding.status}-${finding.severity}-${finding.note}-${JSON.stringify(structured)}`}
-                    action={updateFinding}
+                    action={updateFindingAction}
                     className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[140px_140px_1fr_auto]"
                   >
                     <input type="hidden" name="findingId" value={finding.id} />
@@ -418,7 +462,7 @@ export default async function AuditPage({
                             >
                               {e.text ?? "document"}
                             </a>
-                            <form action={deleteEvidence}>
+                            <form action={deleteEvidenceAction}>
                               <input type="hidden" name="evidenceId" value={e.id} />
                               <button type="submit" className="text-xs text-slate-400 hover:text-red-600">
                                 Remove
@@ -428,7 +472,7 @@ export default async function AuditPage({
                         ))}
                       </ul>
                     )}
-                    <form action={attachEvidence} className="mt-2 flex items-center gap-2">
+                    <form action={attachEvidenceAction} className="mt-2 flex items-center gap-2">
                       <input type="hidden" name="findingId" value={finding.id} />
                       <input type="file" name="file" className="text-xs" />
                       <button

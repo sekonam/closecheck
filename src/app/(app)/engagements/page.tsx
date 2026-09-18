@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { createEngagement } from "@/lib/actions/engagements";
+import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
 const DEAL_STAGE_LABEL: Record<string, string> = {
   PRE_LOI: "Pre-LOI",
@@ -11,8 +12,18 @@ const DEAL_STAGE_LABEL: Record<string, string> = {
   DEAD: "Dead",
 };
 
-export default async function EngagementsPage() {
+export default async function EngagementsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const { orgId } = await requireOrgSession();
+
+  async function createEngagementAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => createEngagement(formData), "/engagements");
+  }
 
   const engagements = await withOrgScope(orgId, (tx) =>
     tx.engagement.findMany({
@@ -28,9 +39,15 @@ export default async function EngagementsPage() {
         One Engagement per acquisition deal being diligenced (docs/spec.md §3).
       </p>
 
+      {error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-medium text-slate-900">New engagement</h2>
-        <form action={createEngagement} className="mt-3 flex flex-wrap items-end gap-3">
+        <form action={createEngagementAction} className="mt-3 flex flex-wrap items-end gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="businessName">
               Business name
