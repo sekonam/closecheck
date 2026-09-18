@@ -1,13 +1,26 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { updateOrgBranding, uploadOrgLogo, removeOrgLogo, acknowledgeDisclaimer } from "@/lib/actions/org";
+import { inviteMember, removeMember } from "@/lib/actions/team";
 import { REPORT_DISCLAIMER_TEXT } from "@/lib/reports/disclaimer";
 
 export default async function SettingsPage() {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
 
   const org = await withOrgScope(orgId, (tx) => tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } }));
+  const members = await withOrgScope(orgId, (tx) =>
+    tx.user.findMany({ where: { orgId }, orderBy: { createdAt: "asc" } }),
+  );
+  const isOwner = members.find((m) => m.id === userId)?.role === "OWNER";
+
+  // One-time display of a just-generated invite password (src/lib/actions/team.ts's inviteMember) —
+  // the cookie has a 60s maxAge and isn't explicitly deleted here (a Server Component can't delete
+  // cookies during render), it just naturally stops appearing once it expires.
+  const cookieStore = await cookies();
+  const tempPasswordCookie = cookieStore.get("closecheck_invite_temp_password")?.value;
+  const [invitedEmail, invitedTempPassword] = tempPasswordCookie?.split(":") ?? [];
 
   return (
     <div>
@@ -120,6 +133,70 @@ export default async function SettingsPage() {
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
             >
               I&apos;ve reviewed this language — enable report generation
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-slate-900">Team</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Everyone listed here shares this firm&apos;s engagements, templates, and branding
+          (docs/roadmap.md Phase 2). Only the account owner can invite or remove teammates.
+        </p>
+
+        {invitedEmail && invitedTempPassword && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">Temporary password for {invitedEmail}</p>
+            <p className="mt-1 font-mono text-xs">{invitedTempPassword}</p>
+            <p className="mt-1 text-xs text-amber-700">
+              Shown once — relay it to them yourself. There is no invite-email sending yet (Phase 2
+              placeholder); this password won&apos;t be shown again after you leave this page.
+            </p>
+          </div>
+        )}
+
+        <ul className="mt-3 divide-y divide-slate-100 text-sm">
+          {members.map((m) => (
+            <li key={m.id} className="flex items-center justify-between py-2">
+              <div>
+                <span className="font-medium text-slate-900">{m.name || m.email}</span>
+                {m.name && <span className="ml-2 text-slate-500">{m.email}</span>}
+                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  {m.role}
+                </span>
+              </div>
+              {isOwner && (
+                <form action={removeMember}>
+                  <input type="hidden" name="userId" value={m.id} />
+                  <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
+                    Remove
+                  </button>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
+
+        {isOwner && (
+          <form action={inviteMember} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <input
+              name="email"
+              type="email"
+              placeholder="teammate@example.com"
+              required
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+            <input
+              name="name"
+              placeholder="Name (optional)"
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Invite
             </button>
           </form>
         )}
