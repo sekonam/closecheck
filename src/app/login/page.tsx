@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthError } from "next-auth";
 import { signIn } from "@/lib/auth/config";
@@ -65,7 +66,18 @@ export default async function LoginPage({
           </button>
         </form>
 
-        <p className="mt-6 text-xs text-slate-400">
+        <p className="mt-6 text-sm text-slate-500">
+          Don&apos;t have an account?{" "}
+          <Link href="/signup" className="font-medium text-slate-700 underline hover:text-slate-900">
+            Sign up
+          </Link>{" "}
+          ·{" "}
+          <Link href="/pricing" className="font-medium text-slate-700 underline hover:text-slate-900">
+            Pricing
+          </Link>
+        </p>
+
+        <p className="mt-4 text-xs text-slate-400">
           Local dev seed: dev@closecheck.local / devpassword123 (see prisma/seed.ts)
         </p>
       </div>
