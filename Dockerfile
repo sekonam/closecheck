@@ -10,6 +10,11 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# `prisma generate` only reads prisma/schema.prisma — it never actually connects — but
+# prisma.config.ts's env("DIRECT_DATABASE_URL") validates the var is set just to load the config.
+# Any well-formed value works at build time; the real one is supplied at runtime via the platform's
+# env vars.
+ENV DIRECT_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 RUN npx prisma generate
 RUN npm run build
 
