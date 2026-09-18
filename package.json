@@ -12,6 +12,7 @@
     "db:seed": "tsx -r dotenv/config prisma/seed.ts",
     "db:verify-rls": "tsx -r dotenv/config scripts/verify-rls.ts",
     "db:verify-signup-portal-roles": "tsx -r dotenv/config scripts/verify-signup-portal-roles.ts",
+    "db:verify-template-versioning": "tsx -r dotenv/config scripts/verify-template-versioning.ts",
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "test": "vitest run"
   },
