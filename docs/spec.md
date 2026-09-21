@@ -76,9 +76,18 @@ Runnable pre-LOI, even pre-offer, from public information only.
 | DNS provider and hosting fingerprint | automated |
 | SSL/TLS certificate validity, issuer, expiration | automated |
 | CMS identification and version/patch status (e.g. outdated WordPress plugin) | automated, best-effort |
+| Email authentication posture (SPF / DMARC records; DKIM best-effort — see note) | automated (added 2026-09-21, §13.1) |
+| Mail provider fingerprint (MX records — who hosts the business's email) | automated (added 2026-09-21, §13.1) |
+| HTTPS hygiene (HTTP→HTTPS redirect enforced; HSTS observed) | automated (added 2026-09-21, §13.1) |
 | Google Business Profile ownership and claim status | manual (no reliable public API for claim status) |
 | Social account ownership (which accounts exist, who administers them per public info) | manual |
 | Trademark conflict scan on business name / domain | manual, consultant-triggered (search, not filed automatically) |
+
+DKIM note (methodology constraint, not an implementation detail): DKIM records live under
+per-provider selector names that cannot be enumerated from public DNS, so the check probes common
+selectors (`google`, `selector1/2`, `k1`, …) best-effort. A found record is evidence; a not-found
+result is **not** evidence of absence and must never lower a severity on its own — the finding note
+says what was probed and defers to SPF/DMARC (which are deterministically checkable) for scoring.
 
 Tier A is the automation surface. It's also the free/first-touch surface: a consultant can run Tier A
 on a prospective deal before they've even been engaged, which is a plausible top-of-funnel hook (see
@@ -203,6 +212,12 @@ affected.
 - **Compliance posture:** no SOC 2 / compliance certification targeted for MVP; revisit once a design
   partner's own compliance requirements (or a firm's client contract) makes it a sales blocker, not
   before. Track this as a roadmap trigger, not a fixed date.
+- **API keys and webhooks (Phase 4, §13):** API keys are CloseCheck-issued org credentials — hashed
+  at rest, revocable, org-scoped through the same RLS enforcement as interactive sessions (the API is
+  not an application-layer-only access path). Webhook payloads deliberately exclude findings content
+  and document data — identifiers and status only — so a misconfigured receiver endpoint cannot
+  become an exfiltration path. Neither feature stores or proxies any *seller* credential; the Tier C
+  decision above is untouched.
 
 ## 9. Pricing & packaging (decision, resolving `idea.md`'s open question — revised from `docs/research/pricing.md`)
 
@@ -215,6 +230,24 @@ Canopy, Suralink) either prices per-user for daily-use tools or sells enterprise
 flat-fee to an occasional user. The decision below supersedes the original; the reasoning stays here
 rather than being deleted, per the `spec-writing` skill's convention that resolved decisions keep
 their rationale.
+
+**Second revision note (2026-09-21):** dedicated profitability research
+(`docs/research/profitability.md`) re-benchmarked the model against closer structural analogs
+(deliverable-generating tools for solo professionals: Spectora at $109/mo + per-published-report fee,
+BizEquity ~$240/mo solo-advisor, Finsider.ai at $1,500–4,000 per QoE engagement) and against the
+consultant's own $500–5,000 engagement fee. Two changes follow, superseding the numbers below where
+they conflict (the original bands stay visible per this skill's convention):
+
+1. **The per-audit overage test band moves from $49–79 to $99–149.** The original band captures only
+   1.5–10% of the consultant's engagement fee; comparable deliverable tools capture ~6–16% of the
+   human deliverable they replace. At near-100% marginal margin, this roughly halves the customer
+   count needed for any MRR target. The Phase 0/1 head-to-head price test must include this band —
+   the higher number is a hypothesis to validate, not a decision to skip validating.
+2. **The annual-credits plan is promoted from "fallback" to lead offer.** Annual-default billing with
+   a ~17% discount is the best-evidenced churn lever found (40–60% churn reduction in benchmarks),
+   and matters more here than usual because ~43% of SMB SaaS churn lands in the first quarter —
+   monthly-billed low-frequency buyers cancel between deals. Monthly remains available, positioned
+   second.
 
 **Hybrid: low base subscription + per-audit overage (or bundled audit credits).**
 
@@ -235,7 +268,11 @@ their rationale.
 
 At a blended ~$65/mo ARPU (`docs/research/pricing.md` §2), reaching $3,000 MRR needs roughly **47
 customers**, $10,000 MRR roughly **154 customers** — see that document for the full sensitivity table
-and for why the pure-per-seat and pure-per-audit alternatives were rejected.
+and for why the pure-per-seat and pure-per-audit alternatives were rejected. If the $99–149 overage
+band validates, blended ARPU rises enough to roughly halve those counts
+(`docs/research/profitability.md`); the same research moves the planning CAC midpoint to ~$700–1,200
+(2025 blended B2B SaaS benchmarks), which weakens `docs/research/pricing.md` §5's LTV:CAC ranges and
+makes the higher overage band load-bearing, not optional, for unit economics.
 
 **The one number to validate before building any billing logic** (`docs/research/pricing.md` §7):
 whether this buyer will pay a recurring fee at all for a tool used a handful of times a year, tested
@@ -247,7 +284,7 @@ Indicative tiers (numbers are placeholders for Phase 0 validation, not commitmen
 
 | Tier | Seats | Base | Included audits/yr | Overage | Notes |
 |---|---|---|---|---|---|
-| Solo | 1 | $29–39/mo | 2–3 | $49–79/audit | Independent consultants |
+| Solo | 1 | $29–39/mo | 2–3 | $49–79/audit (test $99–149 per second revision note) | Independent consultants |
 | Team | up to ~5 | base + $20–30/seat/mo | scales with seats | same | Small firms |
 | Firm | custom | custom | custom | custom | White-label options, priority support |
 
@@ -267,7 +304,9 @@ by legacy decisions.
   per Engagement.
 - **Tier A automation:** background job workers calling out to WHOIS/DNS/SSL/CMS-fingerprinting checks
   (many are simple standard libraries or a small number of free/cheap third-party APIs) — no need for
-  a scanning product of our own; this is thin integration work, not novel infrastructure.
+  a scanning product of our own; this is thin integration work, not novel infrastructure. Domain
+  ownership lookups must use **RDAP-era APIs, not legacy WHOIS**: ICANN sunset the legacy protocol in
+  January 2025 and hundreds of gTLDs have shut off port 43 (`docs/research/profitability.md`).
 - **Report rendering:** HTML → PDF rendering pipeline (e.g. headless browser or a PDF library), driven
   off the same Finding data used for on-screen review, so the PDF is never a hand-maintained parallel
   representation.
@@ -305,11 +344,107 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   anyone else has moved into technology scope). Revisit this scan periodically; it was one search
   session with several sources blocked (G2, Capterra, Clio — see `docs/research/competitors.md` and
   `docs/research/market.md` method notes), not an exhaustive audit.
+  **Refresh (2026-09-21, `docs/research/competitors-2026-09.md`):** the gap thesis still holds
+  verbatim, but its durability is revised down to a **12–24 month window**, not indefinite. What
+  changed: DueDilio shipped a self-service marketplace platform in 2026 (proving it builds software —
+  a provider-workflow tool as a retention feature is its most plausible gap-closer); a buyer-facing
+  SMB AI-diligence category formed (DEALPRINT, Bizzed, Devaland, Acquire.com's DD tooling — all
+  financial-scope, buyer-GTM); and RapidFire Network Detective Pro (whitelabel IT-scan reports to
+  MSPs at ~$200–300/mo) surfaced as the closest shipped analog, one positioning pivot from collision.
+  Strategic consequence: AI report generation has commoditized the "automated checks → PDF" layer, so
+  **Tier A is the wedge, not the moat** — the defensible core is Tiers B+C structured/attested
+  evidence capture, the business-type templates, and the whitelabel consultant workflow.
 - Whether Tier C ever gets a credential-handling feature, and under what security architecture, if a
   design partner makes it a blocker.
 - Distribution entry point: cold outreach to DueDilio's providers vs. a partnership/listing with
   DueDilio itself (confirmed pure lead-marketplace, no provider tooling of its own —
   `docs/research/market.md` §4) vs. reaching QoE generalists/IT consultants directly vs. another
-  channel — tracked in `docs/releases.md`, not a product-spec question.
+  channel — tracked in `docs/releases.md`, not a product-spec question. **Update (2026-09-21):**
+  `docs/research/promotion.md` now provides a ranked channel list and a 90-day sequence (founder-led
+  outreach to the publicly self-promoting SMB QoE firm ecosystem first, ETA-community embedding in
+  parallel, newsletters/podcasts next — including a warm DueDilio path via its founder's own
+  newsletter, The Business Inquirer). The *decision* stays open pending real reply-rate evidence, per
+  `docs/releases.md` §5's gate, but the default execution order is no longer unresearched.
+- Whether full whitelabel (custom domain, deeper brand control on the portal) should be unbundled
+  into a paid add-on tier (+$30–60/mo, per `docs/research/profitability.md`'s lever #3, with
+  comparable agency tools gating it behind a higher tier) or stay bundled — decide once real
+  customers exist to segment; grandfather design partners either way.
 - Whether trademark-conflict scanning (Tier A) should eventually be automated against a paid search
   API, or stays a manual, consultant-triggered step indefinitely.
+- Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
+  gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
+  integration decision).
+
+## 13. Phase 4 — depth features (API, webhooks, expanded Tier A automation)
+
+**Status note:** this section is being specified and built ahead of the roadmap's Phase 4 gate
+(`docs/roadmap.md` Phase 4 says "re-evaluate against real usage before starting"), per explicit user
+direction on 2026-09-21 to proceed — the same kind of override recorded for the Phase 3 Client Portal
+(§7). The gate's reasoning stands and is preserved here rather than deleted: without paying firms
+using the product, every scope choice below is an evidence-free hypothesis. That risk is mitigated by
+deliberately shipping *primitives* (read-only API, signed webhooks, more of the same class of Tier A
+check) rather than named-vendor integrations or speculative depth. Placed as §13 (after §12) to keep
+the section numbers §1–12 stable, since they are cross-referenced by number across the repo.
+
+### 13.1 Expanded Tier A automated checks
+
+More of the existing class — external, public-information-only, no seller cooperation (§4's Tier A
+definition is unchanged; these are content additions inside it, owned by the `audit-methodology`
+skill for exact item wording and severity thresholds):
+
+- **Email deliverability & authentication posture** — SPF / DKIM / DMARC DNS records for the business
+  domain. Transfer-relevant: a business whose email domain has no authentication records (or a
+  misconfigured one) hands the buyer a deliverability problem on day one.
+- **Mail provider fingerprint** — MX records identify who hosts the business's email (Google
+  Workspace, Microsoft 365, registrar-bundled, self-hosted). A transfer-complexity signal, same
+  rationale as the existing DNS/hosting fingerprint.
+- **HTTPS hygiene** — does HTTP redirect to HTTPS; is HSTS present. Cheap, public, and a credibility
+  detail consultants can point at.
+
+All three follow the existing runner pattern (`src/lib/audit/tierA.ts`): conservative severity
+thresholds, notes that state what was observed rather than inferred conclusions. Adding them to
+shipped Templates is a template-version event (§5 versioning rules; `docs/releases.md` §3).
+
+**Explicitly not in this batch:** anything requiring a paid third-party API (vulnerability databases,
+paid reputation feeds, trademark search — the §12 trademark question stays open), and anything that
+would blur Tier A's no-seller-cooperation boundary.
+
+### 13.2 Read-only API (org-scoped keys)
+
+For firms that have adopted CloseCheck and want Audit data inside their own tooling
+(`docs/roadmap.md` Phase 4's stated rationale):
+
+- **API keys are per-Consultant-Org, created and revoked by Owners** from a settings surface. Shown
+  once at creation, stored hashed at rest (same standard as passwords), with a last-used timestamp
+  surfaced so stale keys are visible.
+- **Read-only in v1 of the API.** Endpoints expose the org's own Engagements, Audits, Findings, and
+  Report metadata — never another org's, enforced by the same RLS scoping as the interactive app, not
+  by application code alone (§8's isolation rule applies to every access path, API included).
+- **No write API yet.** A write surface multiplies the abuse/blast-radius questions (who can mutate
+  findings from outside the app's validation?) for zero evidenced demand. Revisit when a firm asks
+  for a concrete write use case.
+
+### 13.3 Webhooks — the integration primitive, not a CRM connector
+
+`docs/roadmap.md` Phase 4 names "CRM/workflow integrations" — but no design partner has named a CRM,
+and picking one now would repeat the guessed-feature-list mistake `idea.md` §"The original idea" is
+explicit about. Decision: **ship signed webhooks as the primitive** and let the first real firm
+integration pull a named connector into scope (tracked as a §12 open question).
+
+- **Events:** `audit.completed`, `report.generated` — lifecycle moments a deal-tracking tool would
+  care about. More events only when asked for.
+- **Payloads carry identifiers and status, not findings content.** A misconfigured or compromised
+  endpoint URL must not become a data-exfiltration path for Tier B document content or finding
+  details (§8) — the receiving system uses the id to call back through the authenticated API if it
+  wants detail.
+- **Signed** (HMAC over the payload with a per-endpoint secret, shown once at creation) so receivers
+  can authenticate origin; delivery is best-effort with limited retries, not a guaranteed queue —
+  guaranteed delivery infrastructure is not justified at this stage.
+
+### 13.4 What Phase 4 still does not include
+
+- **SOC 2 / compliance certification** — unchanged from §8: gated on a real sales blocker (a firm's
+  client contract or partner requirement), not built speculatively.
+- **Tier C credential handling** — unchanged standing decision (§4); nothing in this section touches
+  it.
+- **Named CRM connectors** — see 13.3; the primitive ships, the connector waits for evidence.

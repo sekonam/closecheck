@@ -7,6 +7,22 @@ passed. Rough duration estimates are included for planning only.
 Each phase lists: **Goal**, **Deliverables**, **Exit criteria** (go/no-go into the next phase), and
 **Primary risk**.
 
+**Status note (2026-09-21): build state and validation state have diverged.** The deliverables of
+Phases 1–3 are substantially built (core loop, four templates, team plans, self-serve signup, pricing
+page, client portal — see git history), per explicit user direction to build ahead of the evidence
+gates. The *evidence* side has not moved: no design partners recruited (Phase 0), no real-deal audit
+completed (Phase 1 exit), no paying customer (Phase 2 exit). Validation state is effectively
+pre-Phase 0 while build state is through Phase 3. The exit criteria below therefore remain the honest
+go/no-go signals — they gate *validation and GTM*, not code existing. Two additions follow from the
+2026-09-21 research pass (`docs/research/profitability.md`, `competitors-2026-09.md`,
+`promotion.md`): a new **Phase 2.5 (Revenue readiness)** closing the gap between built features and
+the ability to take money and measure outcomes, and a **competitive-window constraint** — the
+gap-thesis window is now judged 12–24 months (`competitors-2026-09.md` §3), and since AI report
+generation has commoditized the automated-checks-to-PDF layer, sequencing should favor the durable
+moat (Tier B/C evidence capture, business-type templates, whitelabel workflow) over further Tier A
+expansion when the two compete. The promotion/GTM track (`docs/research/promotion.md`'s 90-day
+sequence) runs in parallel with Phase 2.5 and is owned by `docs/releases.md` §4, not this file.
+
 ## Phase 0 — Design partner discovery (no product yet)
 
 **Goal:** confirm the reframe in `idea.md` actually converts to willingness-to-pay before writing a
@@ -46,6 +62,10 @@ resistant as buyers were. This phase exists specifically to find out before Phas
 **Goal:** a design partner can run a complete Restaurant/online-ordering Audit on a real deal, tier by
 tier, and export a whitelabeled PDF report they actually send to a buyer.
 
+**Status (2026-09-21):** deliverables built (see top status note). The exit criterion is untouched
+and unmet — no design partner has run a real-deal audit; recruiting them is the Phase 0 work that
+still gates this phase's *completion*, build state notwithstanding.
+
 **Deliverables:**
 - Consultant Org + Engagement + Audit data model (`spec.md` §3), single-tenant-safe from day one
   (`spec.md` §8's isolation rule applies even with one paying customer).
@@ -76,6 +96,13 @@ for a solo developer, revising the original 6–10 week guess upward).
 **Goal:** broaden beyond the single validated template and beyond single-seat usage, based on actual
 design-partner deal flow (which business types they're really encountering), not the original
 four-template guess.
+
+**Status (2026-09-21):** deliverables built (all three additional templates, team plans, self-serve
+signup, pricing page). The exit criterion is not just unmet but currently *unmeasurable*: the pricing
+page is display-only — no billing exists anywhere in the codebase — so "self-serve signups convert to
+paid" cannot happen until Phase 2.5 below lands. Note the template-proliferation risk below
+materialized in the way it predicted: all four templates now exist without design-partner deal-flow
+evidence for their sequencing.
 
 **Deliverables:**
 - Salon/booking and Franchise templates (`spec.md` §5) — sequenced by whichever design partners'
@@ -130,15 +157,35 @@ explicitly conditional, not committed, until Phase 1/2 evidence says otherwise.
 **Goal:** deepen the product for firms who've adopted it as core infrastructure, once there are enough
 paying firms for this to be worth building.
 
-**Deliverables (indicative, not committed — re-evaluate against real usage before starting):**
-- More Tier A checks automated (reduce manual items in the base checklist).
-- CRM/workflow integrations (e.g. a firm's existing deal-tracking tool).
-- API access for firms wanting to embed Audit data into their own tooling.
-- SOC 2 posture work, if a firm's client contract or a partner integration makes it a blocker
-  (`spec.md` §8).
+**Status update (2026-09-21):** a first slice of this phase is being built ahead of the "re-plan
+from real usage first" gate below, per explicit user direction to proceed — the same kind of override
+recorded for Phase 3's Client Portal. The gate's reasoning stands and is preserved: with no paying
+firms yet, none of this scope is evidence-backed. The mitigation, per `spec.md` §13, is that the
+committed slice is deliberately primitives-only — more of the existing class of Tier A check, a
+read-only API, and webhooks — with everything vendor-specific or speculative still held behind real
+evidence.
 
-**Exit criteria:** N/A — this phase is deliberately open-ended; re-plan it explicitly from Phase 3
-evidence rather than executing this list as written.
+**Deliverables — committed slice (per `spec.md` §13, built under the override above):**
+- Three new Tier A automated checks, same public-information-only class as the existing four:
+  SPF/DKIM/DMARC email-authentication posture, MX/mail-provider fingerprint, and HTTPS hygiene
+  (HTTP→HTTPS redirect, HSTS). Adding them to shipped templates is a template-version event
+  (`spec.md` §5, `releases.md` §3).
+- Org-scoped **read-only** API: per-org revocable keys (hashed at rest, last-used surfaced), RLS-
+  enforced like the interactive app. No write API.
+- Signed webhooks (`audit.completed`, `report.generated`) as the integration primitive — identifiers
+  and status only in payloads, never findings content (`spec.md` §8).
+
+**Deliverables — still indicative, not committed (unchanged gate: re-evaluate against real usage):**
+- Named CRM/deal-tracking connectors on top of the webhook/API primitive — deferred until a paying
+  firm names the tool they'd actually connect (`spec.md` §12, §13.3).
+- Further Tier A automation requiring paid third-party APIs (vulnerability databases, trademark
+  search — `spec.md` §12).
+- SOC 2 posture work — still gated on a firm's client contract or partner integration making it a
+  sales blocker (`spec.md` §8), not built speculatively.
+
+**Exit criteria:** N/A — this phase remains deliberately open-ended beyond the committed slice above;
+re-plan the indicative items explicitly from real-usage evidence rather than executing them as
+written.
 
 **Primary risk:** scope creep into a general-purpose diligence platform, diluting the specific,
 evidenced wedge (`idea.md`'s tech-diligence gap in the $200k–2M band) that made this viable in the
