@@ -10,7 +10,7 @@ Product versions track roadmap phases, not every deploy:
 | Version | Meaning |
 |---|---|
 | `v0.x` | Pre-launch and private beta — Phase 0 discovery artifacts through Phase 1 design-partner usage. No public pricing, no self-serve signup. |
-| `v1.0` | First self-serve-capable release — end of Phase 2 (template expansion + team plans + pricing page). This is "GA" for the purposes of public announcement. |
+| `v1.0` | First self-serve-capable release — end of Phase 2 (template expansion + team plans + pricing page) **plus Phase 2.5 (revenue readiness — billing, transactional email, metric instrumentation; `roadmap.md`, inserted 2026-09-21)**. This is "GA" for the purposes of public announcement. |
 | `v1.x` | Incremental Phase 2/3/4 additions (new templates, portal, and the Phase 4 depth set — expanded Tier A checks, read-only API, webhooks per `spec.md` §13) between major milestones. |
 | `v2.0` | Reserved for the first release that materially changes the core loop (e.g., Tier C credential handling, if Phase 3/4 evidence ever justifies it) — not for routine feature additions. The Phase 4 read-only API does **not** trigger v2.0: it exposes the existing loop's data, it doesn't change the loop. |
 
@@ -96,6 +96,13 @@ sponsors; weeks 8–12, IBBA Supplier Directory listing ($595–895) if reply ra
 contacts, publish the SEO cornerstone pieces, then decide on paid escalation — **gated on 3–5
 nameable customers**, per `docs/research/distribution.md`'s original trigger.
 
+*Timing dependency:* the sequence's "launch ≈ early Oct 2026" start assumes `roadmap.md` Phase 2.5
+(billing, email, instrumentation — estimated 2–4 weeks from 2026-09-21) completes on the short end;
+billing is the critical-path item. If Phase 2.5 slips, the week numbering shifts with it — except
+SFSC Dallas (Nov 7–9), which is a fixed external anchor: attend regardless of launch state, since
+its sponsor/speaker list doubles as a prospect list and outreach can run against a private-beta
+product with the free sample audit as the hook.
+
 **Channel correction (2026-09-11, `docs/research/distribution.md`):** DueDilio's provider network is
 not a contactable list — provider identities are redacted on their own network page by design (see
 `docs/idea.md`'s correction note). "DueDilio-listed providers" below means *consultants/firms who
@@ -143,6 +150,9 @@ this manual motion; expect a first reply/meeting in 2–4 weeks, not immediately
   us. The implementation must match `spec.md` §9 as revised: annual-credits plan as the lead offer,
   monthly second, per-audit overage billed as a monthly rollup invoice (not one charge per audit,
   per `docs/research/profitability.md`'s lever #4).
+- [ ] **Transactional email delivery exists** (team invites, portal-link delivery, receipts) — as of
+  2026-09-21 these are copy-paste URLs with no delivery mechanism, a hard self-serve conversion
+  blocker (`roadmap.md` Phase 2.5 deliverable).
 - [ ] **`spec.md` §11 success metrics are instrumented, not just defined.** Activation, the
   second-audit retention proxy, and report-sent-to-buyer usage must be measurable in the product
   before public beta — several gates in this section (and `roadmap.md`'s exit criteria) are

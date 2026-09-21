@@ -123,6 +123,48 @@ explicit about avoiding.
 
 **Estimate:** 6–8 weeks.
 
+## Phase 2.5 — Revenue readiness (inserted 2026-09-21)
+
+**Goal:** close the gap between built features and a business — the product can take money, deliver
+its own emails, and measure the success metrics its evidence gates depend on. Inserted here because
+Phase 2's exit criterion (self-serve → paid conversion) is impossible to meet, or even measure,
+without this work; sourced from the 2026-09-21 implementation-gap audit and
+`docs/research/profitability.md`.
+
+**Deliverables:**
+- **Stripe billing implementing `spec.md` §9 as revised 2026-09-21.** Annual-credits plan as the
+  lead offer (~17% discount, bundled audit credits) with monthly second — annual-default is the
+  best-evidenced churn lever for a low-frequency buyer (`profitability.md` §6 lever 1). Per-audit
+  overage priced in the $99–149 test band and **batched into a monthly rollup invoice**, not charged
+  per audit (lever 4 — avoids Stripe fixed-fee waste and "charged again" moments). Prices must stay
+  config-changeable, since every number is still awaiting the Phase 0 head-to-head test.
+- **Transactional email** (team invites, portal link delivery, receipts) — invites and portal links
+  are currently copy-paste URLs with no delivery mechanism; a hard self-serve conversion blocker.
+- **Success-metric instrumentation + error tracking.** `spec.md` §11's activation, second-audit
+  retention proxy, and report-usage metrics are not instrumented anywhere, so every evidence gate in
+  this roadmap is currently unmeasurable in-product. Basic error tracking ships with it.
+- **Tier A WHOIS → RDAP migration.** Verified 2026-09-21: `src/lib/checks/whois.ts` does raw port-43
+  WHOIS with IANA referral — the legacy path ICANN sunset in January 2025, with hundreds of gTLDs
+  already off port 43 (`profitability.md` §3, `spec.md` §10). Migrate to RDAP before Tier A
+  reliability becomes a first-impression/churn problem.
+- **White-glove first-audit onboarding flow.** ~43% of SMB SaaS churn lands in the first quarter
+  (`profitability.md` §2), so retention work here means a guided, founder-assisted first audit — not
+  steady-state support tooling.
+
+**Exit criteria:** a stranger can sign up, pay (annual or monthly), run a full audit, and receive
+every system email with zero founder intervention; a real production charge and a real refund have
+each been processed end-to-end; the §11 metrics for that journey are visible somewhere the founder
+actually checks.
+
+**Primary risk:** mistaking "billing exists" for "pricing validated." Every price this phase
+implements is an untested hypothesis until the Phase 0 head-to-head test runs — the specific
+mitigation is config-level price changeability and resisting any public GTM push that would freeze
+the numbers before evidence arrives. This is the same build-ahead-of-evidence divergence recorded in
+the top status note, now applied to money.
+
+**Estimate:** 2–4 weeks (billing 1–2 weeks using Stripe-hosted checkout/portal surfaces; email,
+instrumentation, and RDAP migration a few days each).
+
 ## Phase 3 — Client-facing portal + distribution partnership
 
 **Goal:** close the loop on `idea.md`'s open distribution question and ship the portal only once
@@ -190,3 +232,11 @@ written.
 **Primary risk:** scope creep into a general-purpose diligence platform, diluting the specific,
 evidenced wedge (`idea.md`'s tech-diligence gap in the $200k–2M band) that made this viable in the
 first place.
+
+**Sequencing note (2026-09-21, competitive window):** `docs/research/competitors-2026-09.md` §3
+judges the competitive gap durable for 12–24 months and finds AI report generation has commoditized
+the automated-checks-to-PDF layer — Tier A is the wedge, not the moat. Consequence for this phase:
+beyond the already-built committed slice, further Tier A expansion (the paid-API items above) ranks
+*below* deepening the durable moat — Tier B/C evidence capture, template quality, and whitelabel/
+portal polish — whenever the two compete for the same weeks. This tightens, not replaces, the
+existing "re-plan from real usage" gate.
