@@ -3,11 +3,12 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { FindingStatus, Severity, type Prisma } from "@prisma/client";
+import { AuditStatus, FindingStatus, Severity, type Prisma } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { isAutomatable, runTierACheck } from "@/lib/audit/tierA";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { isContractItem } from "@/lib/audit/contractItem";
 
 /**
@@ -266,6 +267,72 @@ export async function updateAuditOverride(formData: FormData): Promise<void> {
         overallRatingOverride,
         overallRatingOverrideNote: overallRatingOverride ? (parsed.overallRatingOverrideNote ?? null) : null,
       },
+    });
+  });
+
+  revalidatePath(`/engagements/${updated.engagementId}/audits/${updated.id}`);
+}
+
+/**
+ * Marks an Audit COMPLETE. AuditStatus.COMPLETE existed in the schema from day one but nothing set
+ * it until Phase 4 — the webhook `audit.completed` event (docs/spec.md §13.3) needed a real
+ * lifecycle moment to fire on, and "the consultant says the audit is done" is that moment. No
+ * finding-state precondition is enforced: whether an audit with BLOCKED or NOT_STARTED items is
+ * "done" is the consultant's professional judgment (coverage is already surfaced on the report
+ * itself per §6), not a rule the product should hard-code.
+ */
+export async function markAuditComplete(formData: FormData): Promise<void> {
+  const { orgId } = await requireOrgSession();
+  const result = z.string().min(1).safeParse(formData.get("auditId"));
+  if (!result.success) {
+    throw new Error("Missing or invalid auditId.");
+  }
+
+  const { audit: updated, transitioned } = await withOrgScope(orgId, async (tx) => {
+    const existing = await tx.audit.findUnique({ where: { id: result.data } });
+    if (!existing) {
+      throw new Error("Audit not found.");
+    }
+    if (existing.status === AuditStatus.COMPLETE) {
+      return { audit: existing, transitioned: false }; // idempotent — no duplicate webhook below
+    }
+    const audit = await tx.audit.update({
+      where: { id: existing.id },
+      data: { status: AuditStatus.COMPLETE },
+    });
+    return { audit, transitioned: true };
+  });
+
+  if (transitioned) {
+    // Deliberately not awaited: delivery is best-effort (spec.md §13.3) and must never delay the
+    // consultant's own request. dispatchWebhookEvent catches everything internally.
+    void dispatchWebhookEvent(orgId, {
+      event: "audit.completed",
+      data: { auditId: updated.id, engagementId: updated.engagementId, status: updated.status },
+    });
+  }
+
+  revalidatePath(`/engagements/${updated.engagementId}/audits/${updated.id}`);
+}
+
+/** The inverse of markAuditComplete — findings needing rework after completion is a normal deal
+ * reality, not an error path. No webhook fires on reopen; receivers track completions, and a
+ * re-completion after rework fires a fresh audit.completed. */
+export async function reopenAudit(formData: FormData): Promise<void> {
+  const { orgId } = await requireOrgSession();
+  const result = z.string().min(1).safeParse(formData.get("auditId"));
+  if (!result.success) {
+    throw new Error("Missing or invalid auditId.");
+  }
+
+  const updated = await withOrgScope(orgId, async (tx) => {
+    const existing = await tx.audit.findUnique({ where: { id: result.data } });
+    if (!existing) {
+      throw new Error("Audit not found.");
+    }
+    return tx.audit.update({
+      where: { id: existing.id },
+      data: { status: AuditStatus.IN_PROGRESS },
     });
   });
 

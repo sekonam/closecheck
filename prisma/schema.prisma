@@ -51,6 +51,8 @@ model ConsultantOrg {
   evidence          Evidence[]
   reports           Report[]
   clientPortalLinks ClientPortalLink[]
+  apiKeys           ApiKey[]
+  webhookEndpoints  WebhookEndpoint[]
 
   @@map("consultant_orgs")
 }
@@ -304,6 +306,55 @@ model ClientPortalLink {
 
   @@index([orgId])
   @@map("client_portal_links")
+}
+
+// ---------------------------------------------------------------------------
+// Programmatic access — spec.md §13 (Phase 4)
+// ---------------------------------------------------------------------------
+
+// spec.md §13.2: org-scoped, read-only API credentials. The plaintext token is shown exactly once at
+// creation and never stored — tokenHash is sha256 of the full token (sha256, not bcrypt, because the
+// token itself is a 32-byte random value with no dictionary to attack, and the hash doubles as the
+// unique lookup column; a slow hash would add nothing but per-request latency). Cross-org lookup by
+// hash happens via the dedicated `closecheck_api` role (src/lib/api/db.ts), mirroring how sign-in's
+// email lookup works — never by widening closecheck_app's RLS.
+model ApiKey {
+  id          String        @id @default(cuid())
+  orgId       String
+  org         ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name        String
+  tokenHash   String        @unique
+  // First characters of the token (e.g. "cc_live_a1b2c3") so keys stay identifiable in the settings
+  // UI without retaining the secret.
+  tokenPrefix String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@index([orgId])
+  @@map("api_keys")
+}
+
+// spec.md §13.3: signed-webhook endpoints. Unlike ApiKey.tokenHash, `secret` is stored as-is —
+// dispatch must produce an HMAC with it on every delivery, so a one-way hash is impossible here.
+// It is still org-scoped tenant data under RLS like everything else, and payloads it signs carry
+// identifiers and status only, never findings/document content (spec.md §8).
+model WebhookEndpoint {
+  id                String        @id @default(cuid())
+  orgId             String
+  org               ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  url               String
+  secret            String
+  disabledAt        DateTime?
+  // Best-effort delivery observability (spec.md §13.3 — limited retries, no guaranteed queue): the
+  // last outcome per endpoint, not a per-delivery log table.
+  lastSuccessAt     DateTime?
+  lastFailureAt     DateTime?
+  lastFailureReason String?
+  createdAt         DateTime      @default(now())
+
+  @@index([orgId])
+  @@map("webhook_endpoints")
 }
 
 // spec.md §8 — audit logging of report access, needed once the portal ships.

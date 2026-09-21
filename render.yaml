@@ -31,6 +31,8 @@ services:
         sync: false
       - key: PORTAL_DATABASE_URL
         sync: false
+      - key: API_DATABASE_URL
+        sync: false
       - key: AUTH_SECRET
         generateValue: true
       # Set once Render assigns the service's *.onrender.com URL (or a custom domain is attached).

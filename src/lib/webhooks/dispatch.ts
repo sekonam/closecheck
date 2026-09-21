@@ -1,0 +1,123 @@
+import { createHmac, randomUUID } from "node:crypto";
+import { withOrgScope } from "@/lib/db/scoped";
+
+/**
+ * Signed webhook delivery, docs/spec.md §13.3. Deliberately minimal by spec: best-effort with
+ * limited retries, no delivery queue, no per-delivery log table — per-endpoint last-outcome columns
+ * are the observability surface. Payloads carry identifiers and status only, never findings or
+ * document content (spec.md §8): a misconfigured receiver URL must not become an exfiltration path;
+ * the receiver calls back through the authenticated read-only API if it wants detail.
+ */
+export type WebhookEvent =
+  | { event: "audit.completed"; data: { auditId: string; engagementId: string; status: string } }
+  | {
+      event: "report.generated";
+      // Deliberately no severity/rating field: the computed overall rating is the report's headline
+      // conclusion, which is exactly the class of data the identifier-and-status-only rule exists to
+      // keep out of receiver endpoints. The receiver fetches it via GET /api/v1/reports/{id}.
+      data: { reportId: string; auditId: string; engagementId: string; generatedAt: string };
+    };
+
+const DELIVERY_TIMEOUT_MS = 5_000;
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Endpoint URLs are consultant-owner-supplied and fetched from the server, i.e. an SSRF surface.
+ * The payload contains nothing sensitive by design, but refusing obviously-internal targets keeps a
+ * hostile URL from using CloseCheck as a probe into wherever it happens to be deployed. Hostname
+ * checks only — this is a guardrail, not a full egress policy (DNS-rebinding-grade defense would
+ * need resolution pinning, out of scope per §13.3's deliberate minimalism).
+ */
+export function isDeliverableWebhookUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || host === "0.0.0.0" || host.endsWith(".localhost") || host.endsWith(".internal")) {
+    return false;
+  }
+  if (/^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+  if (host === "::1" || host.startsWith("[")) return false;
+  return true;
+}
+
+export function signWebhookPayload(secret: string, body: string): string {
+  return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+}
+
+async function deliverOnce(url: string, body: string, signature: string): Promise<void> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "CloseCheck-Webhook/1.0",
+      "X-CloseCheck-Signature": signature,
+    },
+    body,
+    signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+    redirect: "error",
+  });
+  if (!response.ok) {
+    throw new Error(`Receiver responded ${response.status}`);
+  }
+}
+
+/**
+ * Fire-and-forget from the caller's perspective: server actions call this WITHOUT awaiting it (via
+ * `void dispatchWebhookEvent(...)`) so a slow or dead receiver never delays the consultant's own
+ * request. Safe here because the app runs as a persistent Node server (Docker/Render — see
+ * docs/deployment.md), not on a freeze-after-response serverless runtime.
+ */
+export async function dispatchWebhookEvent(orgId: string, event: WebhookEvent): Promise<void> {
+  try {
+    const endpoints = await withOrgScope(orgId, (tx) =>
+      tx.webhookEndpoint.findMany({ where: { disabledAt: null } }),
+    );
+    if (endpoints.length === 0) return;
+
+    const body = JSON.stringify({
+      id: randomUUID(),
+      event: event.event,
+      occurredAt: new Date().toISOString(),
+      data: event.data,
+    });
+
+    await Promise.allSettled(
+      endpoints.map(async (endpoint) => {
+        const signature = signWebhookPayload(endpoint.secret, body);
+        let lastError = "";
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          try {
+            await deliverOnce(endpoint.url, body, signature);
+            await withOrgScope(orgId, (tx) =>
+              tx.webhookEndpoint.update({
+                where: { id: endpoint.id },
+                data: { lastSuccessAt: new Date(), lastFailureAt: null, lastFailureReason: null },
+              }),
+            );
+            return;
+          } catch (err) {
+            lastError = err instanceof Error ? err.message : String(err);
+            if (attempt < MAX_ATTEMPTS) {
+              await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
+            }
+          }
+        }
+        await withOrgScope(orgId, (tx) =>
+          tx.webhookEndpoint.update({
+            where: { id: endpoint.id },
+            data: { lastFailureAt: new Date(), lastFailureReason: lastError.slice(0, 500) },
+          }),
+        );
+      }),
+    );
+  } catch (err) {
+    // Delivery is best-effort by spec — a webhook failure must never surface into the user-facing
+    // action that triggered it.
+    console.error("Webhook dispatch failed:", err);
+  }
+}

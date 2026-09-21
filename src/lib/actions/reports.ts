@@ -8,6 +8,7 @@ import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtml";
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
 import { putObject, getObject, reportPdfKey } from "@/lib/storage/local";
+import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 
 // No svg — see the matching comment in src/app/api/branding/logo/route.ts. Embedded as a data URI
 // inside an <img> src here, which doesn't execute SVG scripts, but keeping the two maps in sync
@@ -142,6 +143,14 @@ export async function generateReport(formData: FormData): Promise<void> {
     await putObject(key, pdf);
 
     await withOrgScope(orgId, (tx) => tx.report.update({ where: { id: reportId }, data: { pdfStorageKey: key } }));
+
+    // Fires only after the PDF is stored — a report.generated event pointing at a Report the
+    // compensating delete below is about to remove would be worse than no event. Not awaited:
+    // best-effort delivery (spec.md §13.3) must never delay report generation itself.
+    void dispatchWebhookEvent(orgId, {
+      event: "report.generated",
+      data: { reportId, auditId, engagementId, generatedAt: reportData.generatedAt.toISOString() },
+    });
   } catch (err) {
     // The Report row committed but rendering/storing the PDF didn't — remove the row rather than
     // leave a Report with no downloadable PDF behind (same compensating-delete pattern as

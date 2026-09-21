@@ -4,7 +4,7 @@ import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
-import { runTierAAutomation, updateFinding, updateAuditOverride } from "@/lib/actions/audits";
+import { runTierAAutomation, updateFinding, updateAuditOverride, markAuditComplete, reopenAudit } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { isContractItem } from "@/lib/audit/contractItem";
@@ -56,6 +56,14 @@ export default async function AuditPage({
   async function generateReportAction(formData: FormData) {
     "use server";
     await runOrRedirect(() => generateReport(formData), backPath);
+  }
+  async function markAuditCompleteAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => markAuditComplete(formData), backPath);
+  }
+  async function reopenAuditAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => reopenAudit(formData), backPath);
   }
   async function updateAuditOverrideAction(formData: FormData) {
     "use server";
@@ -133,8 +141,13 @@ export default async function AuditPage({
         ← {audit.engagement.businessName}
       </Link>
       <div className="mt-2 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">
+        <h1 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
           {audit.template.name} v{audit.template.version}
+          {audit.status === "COMPLETE" && (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+              Complete
+            </span>
+          )}
         </h1>
         <div className="flex items-center gap-2 text-sm">
           <span>Overall:</span>
@@ -185,6 +198,27 @@ export default async function AuditPage({
             Generate report
           </button>
         </form>
+        {audit.status === "COMPLETE" ? (
+          <form action={reopenAuditAction}>
+            <input type="hidden" name="auditId" value={audit.id} />
+            <button
+              type="submit"
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Reopen audit
+            </button>
+          </form>
+        ) : (
+          <form action={markAuditCompleteAction}>
+            <input type="hidden" name="auditId" value={audit.id} />
+            <button
+              type="submit"
+              className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+            >
+              Mark audit complete
+            </button>
+          </form>
+        )}
         {!audit.engagement.primaryDomain && (
           <p className="self-center text-xs text-amber-600">
             Set a primary domain on the engagement to enable Tier A automation.

@@ -44,7 +44,7 @@ first "Apply Blueprint" click are yours.
    before the app roles exist.
 5. **Trigger a deploy** (or let the blueprint's `preDeployCommand` run on its own) so
    `npm run db:migrate:deploy` runs and creates the `closecheck_app` / `closecheck_auth` /
-   `closecheck_signup` / `closecheck_portal` roles — still on their hardcoded dev passwords at this
+   `closecheck_signup` / `closecheck_portal` / `closecheck_api` roles — still on their hardcoded dev passwords at this
    point (see those migrations' docstrings).
 6. **Rotate the role passwords immediately.** From your own machine, with `DIRECT_DATABASE_URL` set
    to the database's *External Connection String* (you're connecting from outside Render's private
@@ -52,16 +52,18 @@ first "Apply Blueprint" click are yours.
    ```
    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/rotate-production-role-passwords.ts
    ```
-   This prints `DATABASE_URL`, `AUTH_DATABASE_URL`, `SIGNUP_DATABASE_URL`, and `PORTAL_DATABASE_URL`
-   once, to your terminal only. Copy each into the matching env var on the Render web service, then
+   This prints `DATABASE_URL`, `AUTH_DATABASE_URL`, `SIGNUP_DATABASE_URL`, `PORTAL_DATABASE_URL`,
+   and `API_DATABASE_URL` once, to your terminal only. Copy each into the matching env var on the Render web service, then
    clear your terminal scrollback.
 7. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
    domain, once attached).
 8. **Redeploy.** The app should now serve real traffic.
 9. **Seed the templates** (required — without this, no active `Template` row exists for any slug and
-   every `createAudit` call fails):
+   every `createAudit` call fails), then publish the Phase 4 Tier A expansion versions
+    (`docs/spec.md` §13.1 — new template versions, in-progress audits stay pinned):
    ```
    NODE_ENV=production DATABASE_URL="<the rotated production DATABASE_URL>" DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config prisma/seed.ts
+   DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-tierA-expansion.ts
    ```
    `NODE_ENV=production` skips seeding the local dev login (`dev@closecheck.local`) — production
    accounts come from `/signup` instead.
@@ -72,7 +74,7 @@ first "Apply Blueprint" click are yours.
 
 Every subsequent push runs `preDeployCommand` (`prisma migrate deploy`) automatically before the new
 version takes traffic — no manual steps needed unless a migration adds a new narrow-privilege role
-(rare; only the four signup/portal/auth/app roles exist today), which would need step 6 repeated for
+(rare; five roles exist today — app/auth/signup/portal/api), which would need step 6 repeated for
 the new role.
 
 ## Known gaps this runbook does not solve

@@ -1,7 +1,8 @@
 /**
- * Rotates the 4 narrow-privilege Postgres roles (closecheck_app, closecheck_auth, closecheck_signup,
- * closecheck_portal) off the hardcoded dev passwords baked into their CREATE ROLE migrations
- * (prisma/migrations/20260911160500_*, 20260911161500_*, 20260918100000_*, 20260918100100_*) —
+ * Rotates the 5 narrow-privilege Postgres roles (closecheck_app, closecheck_auth, closecheck_signup,
+ * closecheck_portal, closecheck_api) off the hardcoded dev passwords baked into their CREATE ROLE migrations
+ * (prisma/migrations/20260911160500_*, 20260911161500_*, 20260918100000_*, 20260918100100_*,
+ * 20260921120000_*) —
  * those migrations only set a password at first role creation (`IF NOT EXISTS`), so a fresh
  * production database ends up with roles literally named e.g. closecheck_app_dev unless this runs
  * immediately after the first `prisma migrate deploy`.
@@ -16,7 +17,7 @@
 import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 
-const ROLES = ["closecheck_app", "closecheck_auth", "closecheck_signup", "closecheck_portal"] as const;
+const ROLES = ["closecheck_app", "closecheck_auth", "closecheck_signup", "closecheck_portal", "closecheck_api"] as const;
 
 function randomPassword(): string {
   // base64url avoids characters (/, +, =) that would need escaping inside a connection string.

@@ -4,6 +4,8 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { updateOrgBranding, uploadOrgLogo, removeOrgLogo, acknowledgeDisclaimer } from "@/lib/actions/org";
 import { inviteMember, removeMember } from "@/lib/actions/team";
+import { createApiKey, revokeApiKey } from "@/lib/actions/apiKeys";
+import { addWebhookEndpoint, deleteWebhookEndpoint } from "@/lib/actions/webhooks";
 import { REPORT_DISCLAIMER_TEXT } from "@/lib/reports/disclaimer";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
@@ -39,6 +41,22 @@ export default async function SettingsPage({
     "use server";
     await runOrRedirect(() => removeMember(formData), "/settings");
   }
+  async function createApiKeyAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => createApiKey(formData), "/settings");
+  }
+  async function revokeApiKeyAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => revokeApiKey(formData), "/settings");
+  }
+  async function addWebhookEndpointAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => addWebhookEndpoint(formData), "/settings");
+  }
+  async function deleteWebhookEndpointAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => deleteWebhookEndpoint(formData), "/settings");
+  }
 
   const org = await withOrgScope(orgId, (tx) => tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } }));
   const members = await withOrgScope(orgId, (tx) =>
@@ -52,6 +70,17 @@ export default async function SettingsPage({
   const cookieStore = await cookies();
   const tempPasswordCookie = cookieStore.get("closecheck_invite_temp_password")?.value;
   const [invitedEmail, invitedTempPassword] = tempPasswordCookie?.split(":") ?? [];
+  // Same one-time-display pattern for a just-created API key / webhook signing secret
+  // (src/lib/actions/apiKeys.ts, src/lib/actions/webhooks.ts).
+  const newApiKey = cookieStore.get("closecheck_new_api_key")?.value;
+  const newWebhookSecret = cookieStore.get("closecheck_new_webhook_secret")?.value;
+
+  const apiKeys = await withOrgScope(orgId, (tx) =>
+    tx.apiKey.findMany({ orderBy: { createdAt: "desc" } }),
+  );
+  const webhookEndpoints = await withOrgScope(orgId, (tx) =>
+    tx.webhookEndpoint.findMany({ orderBy: { createdAt: "desc" } }),
+  );
 
   return (
     <div>
@@ -234,6 +263,147 @@ export default async function SettingsPage({
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Invite
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-slate-900">API keys</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Read-only access to this firm&apos;s engagements, audits, and report metadata for your own
+          tooling (docs/spec.md §13.2). Pass a key as{" "}
+          <code className="rounded bg-slate-100 px-1">Authorization: Bearer cc_live_...</code> to{" "}
+          <code className="rounded bg-slate-100 px-1">/api/v1/engagements</code>. Only the account
+          owner can create or revoke keys.
+        </p>
+
+        {newApiKey && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">Your new API key</p>
+            <p className="mt-1 break-all font-mono text-xs">{newApiKey}</p>
+            <p className="mt-1 text-xs text-amber-700">
+              Shown once — store it now. CloseCheck keeps only a hash and cannot show it again.
+            </p>
+          </div>
+        )}
+
+        {apiKeys.length > 0 && (
+          <ul className="mt-3 divide-y divide-slate-100 text-sm">
+            {apiKeys.map((k) => (
+              <li key={k.id} className="flex items-center justify-between py-2">
+                <div>
+                  <span className="font-medium text-slate-900">{k.name}</span>
+                  <span className="ml-2 font-mono text-xs text-slate-500">{k.tokenPrefix}…</span>
+                  {k.revokedAt ? (
+                    <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
+                      revoked {k.revokedAt.toISOString().slice(0, 10)}
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-xs text-slate-400">
+                      {k.lastUsedAt
+                        ? `last used ${k.lastUsedAt.toISOString().slice(0, 10)}`
+                        : "never used"}
+                    </span>
+                  )}
+                </div>
+                {isOwner && !k.revokedAt && (
+                  <form action={revokeApiKeyAction}>
+                    <input type="hidden" name="apiKeyId" value={k.id} />
+                    <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
+                      Revoke
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {isOwner && (
+          <form action={createApiKeyAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+            <input
+              name="name"
+              placeholder="Key name (e.g. deal-tracker sync)"
+              required
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Create key
+            </button>
+          </form>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="text-sm font-medium text-slate-900">Webhooks</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          CloseCheck POSTs signed <code className="rounded bg-slate-100 px-1">audit.completed</code>{" "}
+          and <code className="rounded bg-slate-100 px-1">report.generated</code> events to each
+          endpoint (docs/spec.md §13.3). Payloads carry identifiers and status only — use the API
+          above for detail. Verify the{" "}
+          <code className="rounded bg-slate-100 px-1">X-CloseCheck-Signature</code> header
+          (HMAC-SHA256 of the raw body with your signing secret). Only the account owner can manage
+          endpoints.
+        </p>
+
+        {newWebhookSecret && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">Signing secret for your new endpoint</p>
+            <p className="mt-1 break-all font-mono text-xs">{newWebhookSecret}</p>
+            <p className="mt-1 text-xs text-amber-700">
+              Shown once — configure it in your receiver now to verify delivery signatures.
+            </p>
+          </div>
+        )}
+
+        {webhookEndpoints.length > 0 && (
+          <ul className="mt-3 divide-y divide-slate-100 text-sm">
+            {webhookEndpoints.map((w) => (
+              <li key={w.id} className="flex items-center justify-between py-2">
+                <div>
+                  <span className="break-all font-mono text-xs text-slate-900">{w.url}</span>
+                  {w.lastSuccessAt && (
+                    <span className="ml-2 text-xs text-emerald-700">
+                      last delivered {w.lastSuccessAt.toISOString().slice(0, 10)}
+                    </span>
+                  )}
+                  {w.lastFailureAt && (
+                    <span className="ml-2 text-xs text-red-700" title={w.lastFailureReason ?? undefined}>
+                      last failure {w.lastFailureAt.toISOString().slice(0, 10)}
+                    </span>
+                  )}
+                </div>
+                {isOwner && (
+                  <form action={deleteWebhookEndpointAction}>
+                    <input type="hidden" name="webhookEndpointId" value={w.id} />
+                    <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
+                      Delete
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {isOwner && (
+          <form action={addWebhookEndpointAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
+            <input
+              name="url"
+              type="url"
+              placeholder="https://your-tool.example.com/webhooks/closecheck"
+              required
+              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Add endpoint
             </button>
           </form>
         )}
