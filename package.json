@@ -14,6 +14,8 @@
     "db:verify-rls": "tsx -r dotenv/config scripts/verify-rls.ts",
     "db:verify-signup-portal-roles": "tsx -r dotenv/config scripts/verify-signup-portal-roles.ts",
     "db:verify-template-versioning": "tsx -r dotenv/config scripts/verify-template-versioning.ts",
+    "db:publish-tiera-expansion": "tsx -r dotenv/config scripts/publish-tierA-expansion.ts",
+    "db:verify-api-role": "tsx -r dotenv/config scripts/verify-api-role.ts",
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
     "test": "vitest run"

@@ -3,6 +3,9 @@ import { lookupWhois } from "@/lib/checks/whois";
 import { fingerprintDns } from "@/lib/checks/dns";
 import { fingerprintSsl } from "@/lib/checks/ssl";
 import { fingerprintCms } from "@/lib/checks/cms";
+import { checkEmailAuth } from "@/lib/checks/emailAuth";
+import { fingerprintMailProvider } from "@/lib/checks/mx";
+import { checkHttpsHygiene } from "@/lib/checks/httpsHygiene";
 
 export interface TierAResult {
   status: FindingStatus;
@@ -168,11 +171,154 @@ async function runCmsFingerprint(domain: string): Promise<TierAResult> {
   };
 }
 
+async function runEmailAuthPosture(domain: string): Promise<TierAResult> {
+  const result = await checkEmailAuth(domain);
+  const structuredData = { ...result };
+
+  if (result.error) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `Email authentication lookup did not complete (${result.error}). Verify SPF/DMARC records manually.`,
+      structuredData,
+    };
+  }
+
+  // DKIM is deliberately note-only, never a severity input — a not-found probe result is not
+  // evidence of absence (docs/spec.md §4's DKIM note: selectors can't be enumerated from public DNS).
+  const dkimNote =
+    result.dkimSelectorsFound.length > 0
+      ? `DKIM record found at selector(s): ${result.dkimSelectorsFound.join(", ")}.`
+      : "No DKIM record found at common selectors — not evidence of absence; the provider may use a custom selector.";
+
+  if (!result.hasMx) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: result.nullMx
+        ? `${domain} publishes a null MX (RFC 7505) — it explicitly does not receive email. Confirm which domain carries the business's email and re-check there.`
+        : `${domain} has no MX records — this domain does not receive email. Confirm which domain carries the business's email and re-check there.`,
+      structuredData,
+    };
+  }
+
+  if (result.spfRecord && result.dmarcRecord) {
+    const policyNote =
+      result.dmarcPolicy === "none"
+        ? "DMARC policy is p=none (monitor-only — no enforcement)."
+        : `DMARC policy: p=${result.dmarcPolicy ?? "unspecified"}.`;
+    return {
+      status: FindingStatus.PASS,
+      severity: Severity.GREEN,
+      note: `SPF and DMARC records present. ${policyNote} ${dkimNote}`,
+      structuredData,
+    };
+  }
+
+  if (result.spfRecord || result.dmarcRecord) {
+    const present = result.spfRecord ? "SPF" : "DMARC";
+    const missing = result.spfRecord ? "DMARC" : "SPF";
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${present} record present but no ${missing} record found. Partial email authentication leaves the domain more exposed to spoofing and deliverability problems post-transfer. ${dkimNote}`,
+      structuredData,
+    };
+  }
+
+  return {
+    status: FindingStatus.IN_PROGRESS,
+    severity: Severity.YELLOW,
+    note: `Domain receives email (MX present) but has neither SPF nor DMARC records — the buyer inherits a spoofing/deliverability exposure on day one. ${dkimNote}`,
+    structuredData,
+  };
+}
+
+async function runMailProviderFingerprint(domain: string): Promise<TierAResult> {
+  const result = await fingerprintMailProvider(domain);
+  const structuredData = { ...result };
+
+  if (result.error) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `MX lookup did not complete (${result.error}). Verify the business's email host manually.`,
+      structuredData,
+    };
+  }
+
+  if (result.mxHosts.length === 0) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: result.nullMx
+        ? `${domain} publishes a null MX (RFC 7505) — it explicitly does not receive email. Confirm which domain carries the business's email and re-check there.`
+        : `${domain} has no MX records — this domain does not receive email. Confirm which domain carries the business's email and re-check there.`,
+      structuredData,
+    };
+  }
+
+  return {
+    status: FindingStatus.PASS,
+    severity: Severity.GREEN,
+    note: `MX: ${result.mxHosts.join(", ")}${result.likelyProvider ? ` (likely ${result.likelyProvider})` : ""}.`,
+    structuredData,
+  };
+}
+
+async function runHttpsHygiene(domain: string): Promise<TierAResult> {
+  const result = await checkHttpsHygiene(domain);
+  const structuredData = { ...result };
+
+  if (!result.httpReachable && !result.httpsReachable) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `Neither http://${domain} nor https://${domain} responded. Verify the site is live and check redirect behavior manually.`,
+      structuredData,
+    };
+  }
+
+  const hstsNote = result.hstsHeader
+    ? `HSTS header present (${result.hstsHeader}).`
+    : "No HSTS header observed.";
+
+  if (result.httpRedirectsToHttps) {
+    return {
+      status: FindingStatus.PASS,
+      severity: Severity.GREEN,
+      note: `HTTP redirects to HTTPS (${result.httpRedirectChain.join(" → ")}). ${hstsNote}`,
+      structuredData,
+    };
+  }
+
+  if (!result.httpReachable && result.httpsReachable) {
+    return {
+      status: FindingStatus.PASS,
+      severity: Severity.GREEN,
+      note: `Port 80 does not respond; the site is served over HTTPS only. ${hstsNote}`,
+      structuredData,
+    };
+  }
+
+  return {
+    status: FindingStatus.IN_PROGRESS,
+    severity: Severity.YELLOW,
+    note: `http://${domain} responds without reaching HTTPS${
+      result.httpRedirectChain.length > 0 ? ` (redirect chain: ${result.httpRedirectChain.join(" → ")})` : ""
+    } — visitors can land on an unencrypted page. ${hstsNote}`,
+    structuredData,
+  };
+}
+
 const RUNNERS: Record<string, (domain: string) => Promise<TierAResult>> = {
   domain_whois: runDomainWhois,
   dns_hosting_fingerprint: runDnsFingerprint,
   ssl_cert: runSslCheck,
   cms_fingerprint: runCmsFingerprint,
+  email_auth_posture: runEmailAuthPosture,
+  mail_provider_fingerprint: runMailProviderFingerprint,
+  https_hygiene: runHttpsHygiene,
 };
 
 export function isAutomatable(automationKey: string | null): boolean {
