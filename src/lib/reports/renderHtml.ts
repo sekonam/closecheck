@@ -200,7 +200,31 @@ export function readableTextOn(hex: string): string {
 }
 
 /**
- * The accent, darkened only as far as it must be to still read as a *shape* on white paper.
+ * How far an accent is from being a grey: the spread between its strongest and weakest sRGB
+ * channel, 0 for any grey (white included) and 1 for a fully saturated primary.
+ *
+ * Deliberately the raw channel spread rather than HSL saturation, which is useless here — HSL
+ * calls the pale wash #fff3c4 "100% saturated" and it is plainly a tint of the paper.
+ */
+function chroma(hex: string): number {
+  const normalized = normalizeAccentColor(hex);
+  const channels = [1, 3, 5].map((start) => parseInt(normalized.slice(start, start + 2), 16));
+  return (Math.max(...channels) - Math.min(...channels)) / 255;
+}
+
+/**
+ * The floor above which an accent is a colour rather than a shade of the paper.
+ *
+ * Calibrated against real firm brand colours rather than picked: the least saturated brand in a
+ * 24-colour sample of accounting/consulting/tech brands is Shopify's #95bf47 at 0.47, and the
+ * palest thing that has to be caught is the #fff3c4 wash at 0.23. 0.35 sits between them with room
+ * on both sides. Greys are at or near 0 (#e2e8f0 is 0.05), so the white-branded firm this whole
+ * clamp exists for is nowhere near it.
+ */
+const MIN_BRAND_CHROMA = 0.35;
+
+/**
+ * The accent, left exactly as the firm chose it unless it is indistinguishable from the paper.
  *
  * Observed in a rendered PDF: an org whose brandColorHex is "#ffffff" got a document with no
  * structure at all — the cover band, every section rule, every table-header fill and the running
@@ -208,19 +232,39 @@ export function readableTextOn(hex: string): string {
  * nothing looked broken; the deliverable had simply lost every visual boundary a reader navigates
  * by, with no error anywhere to say so.
  *
- * The rule is WCAG 1.4.11's non-text contrast bar, 3:1 against the page — the same line the
- * standard draws for "is this graphical object perceivable at all". An accent that already clears it
- * is returned untouched, so a consultant's deliberately-chosen brand color is never second-guessed:
- * #0d7a6f, #0f172a, and every other normal brand accent come back byte-identical. Only an accent
- * that cannot be seen is changed, and then only by scaling its sRGB channels — which holds the hue,
- * so a pale-gold firm gets a deeper gold rather than a grey, and a white firm gets a neutral grey
- * because grey is what white actually is once it has to be visible.
+ * WHY THIS IS NOT SIMPLY WCAG 1.4.11. The first fix for that used the standard's non-text contrast
+ * bar, 3:1 against the page, and claimed in this docstring that every normal brand accent came back
+ * byte-identical. Measured against 24 real brand hexes, six did not: EY's #ffe600 came back
+ * #a69600, Deloitte's #86bc25 came back #74a220, and Cloudflare, HubSpot, Shopify and Salesforce
+ * were all shifted too. A rendered cover at #ffe600 was olive-gold throughout. That is not an edge
+ * case — saturated yellow, orange and lime cannot clear 3:1 against white at any usable lightness,
+ * so the rule was silently restyling a whole category of real firms' brands.
+ *
+ * Weighed against spec.md §2 principle 4 ("whitelabel by default — the consultant's brand is on the
+ * report"), that is the wrong trade, and the reason is that the contrast ratio is the wrong
+ * instrument. WCAG's formula is luminance-only by design; it cannot tell #ffe600 (1.27:1) from
+ * #e2e8f0 (1.25:1), and on paper those two are not remotely alike. A saturated yellow rule on white
+ * is visible because it is YELLOW; a pale grey rule is invisible because it differs from the paper
+ * in nothing but a little lightness. So the test here is chroma first: an accent with real colour in
+ * it is the firm's decision and is used verbatim, however bright. Only a near-grey — which has
+ * nothing but luminance to be seen by, and for which WCAG's ratio is therefore exactly the right
+ * instrument — is darkened, and then only by scaling its sRGB channels, which holds the hue: a pale
+ * gold firm gets a deeper gold, a white firm gets a neutral grey, because grey is what white
+ * actually is once it has to be visible.
+ *
+ * WHAT THE FIRM GIVES UP by choosing a bright accent is that its rules and bands are faint in
+ * greyscale. That costs the reader nothing: the accent carries no information in this document.
+ * Severity — the one thing that does — is encoded in a glyph, a word and a colour independently
+ * (see SEVERITY_GLYPH), and section structure is carried by headings. The brand is decoration, and
+ * decoration is the consultant's to choose.
  *
  * Deliberately NOT applied to accent-colored *text*, which needs the stricter 4.5:1 and gets
- * `pageTextAccent` instead.
+ * `pageTextAccent` instead — a line of #ffe600 text is genuinely unreadable, chroma or no chroma,
+ * because a glyph's strokes are thin enough that only luminance separates them from the page.
  */
 export function structuralAccent(hex: string): string {
   const normalized = normalizeAccentColor(hex);
+  if (chroma(normalized) >= MIN_BRAND_CHROMA) return normalized;
   if (contrastWithPage(normalized) >= 3) return normalized;
 
   const rgb = [
@@ -448,9 +492,24 @@ function formatDate(date: Date): string {
  * shape can widen it again. Every table in this file consequently declares a width, and its FIRST
  * row declares the column widths, because fixed layout reads the first row and ignores the rest.
  *
- * Cells that must stay atomic — money, percent, date — set `white-space: nowrap` locally. That
- * suppresses every soft wrap opportunity, so this rule cannot touch them and the earlier fix for a
- * term-end column reading "2027-02-" / "28" still holds. Only free text breaks.
+ * WHAT FIXED LAYOUT COSTS, AND WHY THE COLUMNS ARE NOW MEASURED
+ * ------------------------------------------------------------
+ * An earlier version of this note claimed that a `white-space: nowrap` cell "cannot be touched by
+ * this rule", and that atomic money/date cells were therefore safe. That was false, and the
+ * opposite of safe. Fixed layout gives a column the width the first row declared and nothing else;
+ * a nowrap cell wider than that does not clip and does not widen the column — it OVERFLOWS, drawn
+ * on top of its neighbour. Observed in a rendered 6-column vendor register: `$419.00
+ * $5,028.002027-02-2Assignment`, three columns painted over each other, all of them still in the
+ * text layer and none of them readable.
+ *
+ * The declared widths are therefore no longer a share-out of arbitrary weights. `fieldTable` sizes
+ * each atomic column from the widest value it actually has to print (see `computeFieldTableLayout`)
+ * and steps the whole table's type down a size when a dense table cannot hold them all at full
+ * size. `overflow-wrap: anywhere` is also switched OFF on those cells and on every column header —
+ * it is what was breaking labels mid-word into `MONT`/`HLY COST` — so they break only at the
+ * explicit `<wbr>` opportunities between a money value's thousands groups and a date's hyphens,
+ * which only come into play when a table is dense enough that even the smallest step does not fit.
+ * Free text is the only thing that still breaks anywhere, which is the case this rule exists for.
  */
 const PRINT_STYLES = `
   @page { size: A4; }
@@ -502,9 +561,10 @@ export function renderReportHtml(data: ReportData): string {
   const rollup = computeSeverityRollup(data.findings);
   // Everything downstream paints `accent` onto the white page — bands, rules, table-header fills,
   // the running header/footer, the panel washes — so the accent is resolved through
-  // structuralAccent once, here. For every brand color that is already visible on paper this is the
-  // identity function and the whitelabel treatment is byte-for-byte unchanged; it only bites on an
-  // accent so pale that the structure it draws would not exist. See structuralAccent.
+  // structuralAccent once, here. For every accent with any real colour in it — and for every grey
+  // dark enough to see — that is the identity function and the whitelabel treatment is
+  // byte-for-byte unchanged; it only bites on an accent that is a tint of the paper itself, where
+  // the structure it draws would not exist at all. See structuralAccent.
   const accent = structuralAccent(normalizeAccentColor(data.org.brandColorHex));
   const accentText = readableTextOn(accent);
   const logo = safeImageDataUri(data.org.brandLogoDataUri);
@@ -529,8 +589,14 @@ export function renderReportHtml(data: ReportData): string {
         <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
           <thead>
             <tr style="background:${accent};color:${accentText}">
-              <th style="width:72%;text-align:left;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600">${escapeHtml(TIER_SHORT[tier])} finding</th>
-              <th style="width:28%;text-align:right;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;white-space:nowrap">Status &amp; rating</th>
+              <th style="text-align:left;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600">${escapeHtml(TIER_SHORT[tier])} finding</th>
+              <!-- A fixed ${STATUS_COLUMN_PX}px rather than the previous 28%: the status column holds a status
+                   word and a badge and never needs more, while the finding column holds the
+                   structured registers, which were being laid out in 466px of a 688px page and
+                   breaking their own column labels for want of the 100px sitting empty beside
+                   them. Fixed layout gives the declared width to this column and the remainder to
+                   the one left auto. See FIELD_TABLE_WIDTH_PX. -->
+              <th style="width:${STATUS_COLUMN_PX}px;text-align:right;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;white-space:nowrap">Status &amp; rating</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -678,7 +744,10 @@ function executiveSummary(
           .map(
             (f) => `
         <tr>
-          <td style="padding:6px 10px 6px 0;vertical-align:top;width:18px;color:${SEVERITY_COLOR.RED};font-size:13px">${SEVERITY_GLYPH.RED}</td>
+          <!-- 20px, not 18: under fixed layout the declared width is the whole width, and 18px
+               less 10px of padding left the 13px severity glyph 8px of content box to sit in — so
+               it overflowed into the tier label beside it by ~2px. Measured, not guessed. -->
+          <td style="padding:6px 8px 6px 0;vertical-align:top;width:20px;color:${SEVERITY_COLOR.RED};font-size:13px">${SEVERITY_GLYPH.RED}</td>
           <td style="padding:6px 8px 6px 0;vertical-align:top;font-size:12px;color:${MUTED_TEXT};white-space:nowrap;width:56px">${escapeHtml(TIER_SHORT[f.templateItem.tier])}</td>
           <td style="padding:6px 0;vertical-align:top;font-size:13px;font-weight:600">${escapeHtml(f.templateItem.title)}${
             statusContradictsSeverity(f.status, f.severity)
@@ -975,39 +1044,49 @@ function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: str
 
   // Numbers right-align so a column of costs can be read down as a column of costs.
   const align = (c: ColumnDef): string => (c.kind === "money" || c.kind === "percent" ? "right" : "left");
-  // Atomic values — an amount or an ISO date — are never worth breaking across two lines; seen in a
-  // rendered PDF as a term-end column reading "2027-02-" / "28". Free text still wraps.
-  const atomic = (c: ColumnDef): boolean => c.kind === "money" || c.kind === "percent" || c.kind === "date";
-  const wrap = (c: ColumnDef): string => (atomic(c) ? "white-space:nowrap;" : "");
-
-  // Declared column widths, because PRINT_STYLES puts every table in `table-layout: fixed` and fixed
-  // layout reads widths from the first row only. Atomic columns need just enough for an amount or an
-  // ISO date and are given half the share of a free-text column, which is where the long values
-  // actually are.
-  const weight = (c: ColumnDef): number => (atomic(c) || c.kind === "boolean" ? 1 : 2);
-  const totalWeight = columns.reduce((sum, c) => sum + weight(c), 0);
-  const width = (c: ColumnDef): string => `${((weight(c) / totalWeight) * 100).toFixed(2)}%`;
+  const layout = computeFieldTableLayout(columns, rows);
 
   const head = columns
-    .map(
-      // No `white-space: nowrap` on the header: a column labelled "Account owner of record at the
-      // seller organisation" is a schema-declared string of any length, and holding it on one line
-      // was half of what pushed this table off the paper. It wraps instead.
-      (c) => `
-                <th style="width:${width(c)};text-align:${align(c)};padding:4px 8px;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1">${escapeHtml(c.label)}</th>`,
-    )
+    .map((c, i) => {
+      const col = layout.columns[i];
+      // A column label is a schema-declared string of any length, and holding it on one line was
+      // half of what pushed this table off the paper — so it still wraps, at its SPACES. What it
+      // must not do is wrap inside a word ("MONT"/"HLY COST", seen in a rendered PDF), which is
+      // what the document-wide `overflow-wrap: anywhere` was doing to it; the column is sized to
+      // fit the label's longest word, so switching that off here has nothing left to break.
+      //
+      // Where one word is longer than any share of the table could be — "ORGANISATION" in a
+      // six-column register — it falls back to `break-word` and NOT to the document's `anywhere`.
+      // The two differ in exactly the way that matters here: `anywhere` fills each line to the
+      // edge and will split a word that would have fitted whole on the next line, which is how
+      // "ASSIGNMENT ON CHANGE OF CONTROL" came out with "CONTROL" broken too; `break-word` splits
+      // only the word that genuinely does not fit. `anywhere` was chosen document-wide for its
+      // effect on min-content width, which is what auto table layout sizes columns from — inside a
+      // table whose widths are declared, that effect is not wanted and not needed.
+      const wrapRule = col.headerWordFits ? "overflow-wrap:normal;" : "overflow-wrap:break-word;";
+      return `
+                <th style="width:${col.widthPct.toFixed(2)}%;text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.headerFontPx}px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1">${escapeHtml(c.label)}</th>`;
+    })
     .join("");
 
   const body = rows
     .map((row) => {
       const cells = columns
-        .map((c) => {
+        .map((c, i) => {
+          const col = layout.columns[i];
           const raw = row[c.key];
           // An empty cell in an otherwise-filled row is a real, meaningful blank — the consultant
           // did not know. It prints as a blank cell, not as a dropped column.
-          const value =
-            raw === undefined || raw === "" ? "" : escapeHtml(formatFieldValue(columnAsField(c), raw));
-          return `<td style="text-align:${align(c)};${wrap(c)}padding:4px 8px;font-size:11.5px;color:#334155;border-bottom:1px solid #e2e8f0;vertical-align:top">${value}</td>`;
+          const formatted = raw === undefined || raw === "" ? "" : formatFieldValue(columnAsField(c), raw);
+          const value = col.sized ? atomicValueHtml(formatted) : escapeHtml(formatted);
+          // Same reasoning as the header: a sized column is wide enough for its own widest value,
+          // so the value has no reason to break and `anywhere` is switched off. If the table is
+          // dense enough that the column had to be squeezed below that width anyway, the value
+          // breaks at the `<wbr>` between thousands groups rather than mid-digit. Free text keeps
+          // breaking inside a word where it has to, but by `break-word` rather than `anywhere` —
+          // see the header above for why the distinction is worth making.
+          const wrapRule = col.sized ? "overflow-wrap:normal;" : "overflow-wrap:break-word;";
+          return `<td style="text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.fontPx}px;color:#334155;border-bottom:1px solid #e2e8f0;vertical-align:top">${value}</td>`;
         })
         .join("");
       return `<tr>${cells}</tr>`;
@@ -1022,6 +1101,330 @@ function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: str
                 <tbody>${body}</tbody>
               </table>
             </div>`;
+}
+
+/**
+ * Escaped cell text with an explicit break opportunity after each thousands separator and each
+ * date hyphen — and nowhere else.
+ *
+ * `<wbr>` is a zero-width element: it prints nothing and contributes nothing to the PDF's text
+ * layer. It exists only as the answer to "if this value has to break, where?", which under
+ * `table-layout: fixed` is a question with only bad answers otherwise: overflow (drawn on top of
+ * the next column) or a break mid-digit. `$1,234,567.89` breaking to `$1,`/`234,`/`567.89` is
+ * degraded but still reads as the number it is.
+ *
+ * Only after a digit, so the leading minus of a negative amount never separates from its figure.
+ */
+function atomicValueHtml(text: string): string {
+  return escapeHtml(text).replace(/(?<=\d)([,-])/g, "$1<wbr>");
+}
+
+// ---------------------------------------------------------------------------
+// Column sizing for structured tables
+// ---------------------------------------------------------------------------
+
+/**
+ * Approximate advance width of one character, as a fraction of the font size.
+ *
+ * WHY AN ESTIMATE AND NOT A MEASUREMENT. This module produces a string; there is no layout engine
+ * in scope to ask, and the document is rendered by whatever Chromium and whatever font stack the
+ * host happens to have (macOS resolves the stack to SF, a Linux server to DejaVu or Liberation).
+ * So these are deliberately the WIDE end of that range plus a margin. Every value below was checked
+ * against a measurement taken in the rendering engine itself and left 5-13% clear of it:
+ *
+ *   digit    measured 0.633em (SF), 0.636em (DejaVu)      → 0.67
+ *   "-"      measured 0.425em in "2027-02-28"             → 0.45
+ *   A-Z      measured 0.664em average, 0.757em worst case → 0.78
+ *
+ * An over-estimate costs a slightly wide column; an under-estimate costs an overflowing one, which
+ * is the defect this exists to prevent. The first attempt put the hyphen at 0.34em and a six-column
+ * register's term-end column came out 0.35px short — enough to wrap a date.
+ *
+ * Only the characters that appear in a money, percent or ISO-date value — plus upper-case letters,
+ * for the column labels — need to be accurate. Everything else falls through to the default, which
+ * is only ever used for free-text columns whose width is not content-derived anyway.
+ */
+/**
+ * Upper-case advance widths, Helvetica's metrics scaled by 1.08 for headroom. A single average for
+ * all 26 letters compounds badly over a long word: at 0.78em flat, "ORGANISATION" came out 21%
+ * wider than it renders, which is a fifth of a column given away, while "ACCOUNT" had only 0.4%
+ * to spare. Per letter, the same headroom holds for both (8% and 6%).
+ */
+const UPPERCASE_EM: Record<string, number> = {
+  A: 0.72, B: 0.72, C: 0.78, D: 0.78, E: 0.72, F: 0.66, G: 0.84, H: 0.78, I: 0.3,
+  J: 0.54, K: 0.72, L: 0.6, M: 0.9, N: 0.78, O: 0.84, P: 0.72, Q: 0.84, R: 0.78,
+  S: 0.72, T: 0.66, U: 0.78, V: 0.72, W: 1.02, X: 0.72, Y: 0.72, Z: 0.66,
+};
+
+function charWidthEm(ch: string): number {
+  if (ch >= "0" && ch <= "9") return 0.67;
+  if (ch >= "A" && ch <= "Z") return UPPERCASE_EM[ch];
+  switch (ch) {
+    case "$":
+      return 0.67;
+    case "%":
+      return 0.72;
+    case ",":
+    case ".":
+    case ":":
+    case "'":
+      return 0.32;
+    case "-":
+    case "/":
+      return 0.45;
+    case " ":
+      return 0.3;
+    case "@":
+      return 1.0;
+    default:
+      return 0.62;
+  }
+}
+
+/** Width of a string in em. */
+function estimateTextEm(text: string): number {
+  let em = 0;
+  for (const ch of text) em += charWidthEm(ch);
+  return em;
+}
+
+/**
+ * The width a structured table actually gets on the page, in CSS px.
+ *
+ * Derived, and confirmed by measuring a rendered document: A4 is 210mm wide, pdf.ts takes 14mm of
+ * margin off each side (687.9px of content at 96dpi), the tier table's status column takes a fixed
+ * STATUS_COLUMN_PX, and the finding cell spends 12px of padding on each side plus the 4px severity
+ * rail.
+ *
+ * Every table this sizing applies to is rendered inside that cell (fieldTable is reached only from
+ * findingRow), so one constant is honest here. If a structured table is ever rendered somewhere
+ * else, it needs its own budget passed in rather than this one assumed.
+ */
+const PAGE_CONTENT_PX = 688;
+/** Width of the tier table's "Status & rating" column: a status word, a badge, and nothing else.
+ * Measured against its widest contents — "Not applicable" at 11.5px and the "Status & rating"
+ * header itself, which is `nowrap` — with room to spare. */
+const STATUS_COLUMN_PX = 150;
+const FIELD_TABLE_WIDTH_PX = PAGE_CONTENT_PX - STATUS_COLUMN_PX - 24 - 4;
+
+/**
+ * Type sizes to try, densest table last. A 4-column inventory keeps the body size the rest of the
+ * document uses; only a table that genuinely cannot hold its own values at that size steps down,
+ * and it steps the horizontal padding down with it, which is where a surprising amount of a narrow
+ * column's width goes (8px each side of an 8-column table is 128px of the 466 available).
+ */
+const FIELD_TABLE_DENSITY_STEPS = [
+  { fontPx: 11.5, headerFontPx: 10.5, padPx: 8 },
+  { fontPx: 10.5, headerFontPx: 9.5, padPx: 6 },
+  { fontPx: 9.5, headerFontPx: 8.5, padPx: 5 },
+  { fontPx: 8.5, headerFontPx: 7.5, padPx: 4 },
+];
+
+/** The floor for a free-text column: roughly seven lower-case characters. Below this a wrapping
+ * column stops being a column and becomes a vertical stack of syllables. */
+const MIN_FLEX_CONTENT_EM = 4.5;
+
+/** Letter-spacing on column headers (`letter-spacing: 0.04em` in the markup), which is real width
+ * and has to be counted or a header word is mis-sized by 4% per character. */
+const HEADER_LETTER_SPACING_EM = 0.04;
+
+export interface FieldColumnLayout {
+  /** Declared width, as a percentage of the table. Fixed layout reads these from the first row. */
+  widthPct: number;
+  /** True for a column sized from its own content — money, percent, date, boolean. */
+  sized: boolean;
+  /** Content-box px this column's share works out to, at the chosen type size. */
+  contentPx: number;
+  /** Px the widest value in this column needs. 0 for a free-text column, which wraps by design. */
+  valuePx: number;
+  /** Px the longest single word of the column's label needs. */
+  headerWordPx: number;
+  /** Whether that word fits, i.e. whether the label can be forbidden from breaking mid-word. */
+  headerWordFits: boolean;
+}
+
+export interface FieldTableLayout {
+  fontPx: number;
+  headerFontPx: number;
+  padPx: number;
+  columns: FieldColumnLayout[];
+}
+
+/**
+ * Column widths for a structured table, sized from the values the table actually contains.
+ *
+ * THE DEFECT THIS REPLACES. The previous rule gave every column a share of the table proportional
+ * to a hand-assigned weight — an atomic column 1, a free-text column 2. At four columns that
+ * happened to be enough for a money value; at six it was 51.8px against the 77.6px
+ * `$1,234,567.89` needs, and under `table-layout: fixed` a column that is too narrow for a nowrap
+ * value does not clip it, it paints it over the next column. The schema permits eight columns, so
+ * "tune the weights" was never going to be the answer: no fixed ratio can know that this table has
+ * three money columns and that one of them holds seven figures.
+ *
+ * WHAT IT DOES INSTEAD. A money, percent, date or boolean column is measured — the widest value it
+ * has to print, and the longest word of its label, at the type size in play — and gets exactly
+ * that. Free-text columns wrap by design and split what is left. If the measured columns plus a
+ * readable floor for the text columns do not fit, the whole table steps down a type size
+ * (`FIELD_TABLE_DENSITY_STEPS`) rather than overflowing, which is the trade a consultant would
+ * make: a dense eight-column register in smaller type is a normal-looking exhibit, and an
+ * eight-column register printed on top of itself is not a deliverable at all.
+ *
+ * At the densest step, if even that does not fit, the measured columns are squeezed proportionally
+ * and their values break at the `<wbr>` opportunities `atomicValueHtml` leaves between thousands
+ * groups. That is the only case where a money value wraps, and it is reached only by a table that
+ * cannot be laid out any other way; the guarantee that is never traded is the one fixed layout was
+ * bought for, that nothing is pushed off the page and out of the PDF's text layer.
+ */
+export function computeFieldTableLayout(
+  columns: ColumnDef[],
+  rows: Record<string, string>[],
+  availablePx: number = FIELD_TABLE_WIDTH_PX,
+): FieldTableLayout {
+  // Money, percent, date and boolean all have a bounded, known-width rendering, so they can be
+  // sized exactly. `enum` deliberately is not: its options are consultant-authored strings that can
+  // be sentences, so it is treated as free text and allowed to wrap.
+  const sized = columns.map(
+    (c) => c.kind === "money" || c.kind === "percent" || c.kind === "date" || c.kind === "boolean",
+  );
+
+  // Longest WORD, not the whole label: the label wraps at its spaces, so "Monthly cost" only needs
+  // room for "Monthly". Measured upper-cased because `text-transform: uppercase` is what prints.
+  const headerWordEm = columns.map((c) =>
+    c.label
+      .toUpperCase()
+      .split(/\s+/)
+      .reduce(
+        (widest, word) =>
+          Math.max(widest, estimateTextEm(word) + word.length * HEADER_LETTER_SPACING_EM),
+        0,
+      ),
+  );
+
+  const valueEm = columns.map((c, i) => {
+    if (!sized[i]) return 0;
+    const field = columnAsField(c);
+    return rows.reduce((widest, row) => {
+      const raw = row[c.key];
+      if (raw === undefined || raw === "") return widest;
+      return Math.max(widest, estimateTextEm(formatFieldValue(field, raw)));
+    }, 0);
+  });
+
+  const flexCount = sized.filter((s) => !s).length;
+
+  const demand = (step: (typeof FIELD_TABLE_DENSITY_STEPS)[number]) => {
+    const sizedPx = columns.map((_, i) =>
+      sized[i]
+        ? Math.max(valueEm[i] * step.fontPx, headerWordEm[i] * step.headerFontPx) + 2 * step.padPx
+        : 0,
+    );
+    const sizedTotal = sizedPx.reduce((sum, px) => sum + px, 0);
+    // The HARD floor a free-text column needs: enough to be a column at all. Its label is not part
+    // of it — a column headed "Account owner of record at the seller organisation" would demand
+    // more than the whole table for one word of it.
+    const flexTotal = flexCount * (MIN_FLEX_CONTENT_EM * step.fontPx + 2 * step.padPx);
+    // The SOFT one: enough for every column's longest label word as well, so that nothing in the
+    // header breaks inside a word.
+    const flexLabelTotal = columns.reduce(
+      (sum, _, i) =>
+        sized[i]
+          ? sum
+          : sum +
+            Math.max(MIN_FLEX_CONTENT_EM * step.fontPx, headerWordEm[i] * step.headerFontPx) +
+            2 * step.padPx,
+      0,
+    );
+    return { sizedPx, sizedTotal, flexTotal, flexLabelTotal };
+  };
+
+  // Two passes, because the two things being traded are not equal. Nothing may overflow, ever —
+  // that is the hard pass. Beyond it, a step down in type buys whole column labels, and a label
+  // reading "ASSIGN"/"MENT ON CHANGE OF CONTROL" in a client deliverable is worth half a point of
+  // type to be rid of. So the largest type size that fits every label is preferred, and the
+  // largest that merely fits the values is the fallback when no step can hold the labels.
+  const fitsLabels = FIELD_TABLE_DENSITY_STEPS.find((step) => {
+    const { sizedTotal, flexLabelTotal } = demand(step);
+    return sizedTotal + flexLabelTotal <= availablePx;
+  });
+  const chosen =
+    fitsLabels ??
+    FIELD_TABLE_DENSITY_STEPS.find((step) => {
+      const { sizedTotal, flexTotal } = demand(step);
+      return sizedTotal + flexTotal <= availablePx;
+    }) ??
+    FIELD_TABLE_DENSITY_STEPS[FIELD_TABLE_DENSITY_STEPS.length - 1];
+
+  const { sizedPx, sizedTotal, flexTotal } = demand(chosen);
+
+  // The squeeze: only reachable at the densest step, and only by a table whose measured columns
+  // alone exceed the page. Scaling them all by the same factor keeps the columns in proportion to
+  // each other, so the widest value is still in the widest column.
+  const squeeze =
+    sizedTotal + flexTotal > availablePx && sizedTotal > 0
+      ? Math.max(0, availablePx - flexTotal) / sizedTotal
+      : 1;
+
+  const widthsPx = sizedPx.map((px) => px * squeeze);
+  const leftover = Math.max(0, availablePx - widthsPx.reduce((sum, px) => sum + px, 0));
+
+  // What is left goes to the free-text columns, smallest need first.
+  //
+  // Equal shares are not right: they put "Vendor" and "Account owner of record at the seller
+  // organisation" in identical columns, and — measured on a rendered page — left the longer label
+  // too narrow for even its own first word. Shares proportional to the labels are not right
+  // either: they starve the short column instead, so "VENDOR" was the word that broke. Filling the
+  // smallest need first means a short label always fits, and the shortfall — when there is one —
+  // lands on the long prose label, which is the one that can carry a break with the least harm.
+  const flexNeedPx = columns.map((_, i) =>
+    sized[i]
+      ? 0
+      : Math.max(MIN_FLEX_CONTENT_EM * chosen.fontPx, headerWordEm[i] * chosen.headerFontPx) +
+        2 * chosen.padPx,
+  );
+  const flexIndexes = columns
+    .map((_, i) => i)
+    .filter((i) => !sized[i])
+    .sort((a, b) => flexNeedPx[a] - flexNeedPx[b]);
+  let pot = leftover;
+  let remaining = flexIndexes.length;
+  for (const i of flexIndexes) {
+    widthsPx[i] = Math.min(flexNeedPx[i], pot / remaining);
+    pot -= widthsPx[i];
+    remaining--;
+  }
+  // Anything still unspent — every label was satisfied — is shared out in proportion to need, so
+  // the column asked to hold a sentence ends up wider than the one holding a vendor name.
+  const satisfiedTotal = flexIndexes.reduce((sum, i) => sum + flexNeedPx[i], 0);
+  if (pot > 0 && satisfiedTotal > 0) {
+    for (const i of flexIndexes) widthsPx[i] += (flexNeedPx[i] / satisfiedTotal) * pot;
+  }
+  // Every column sized and space still left over (a table of nothing but dates): hand it back
+  // proportionally rather than leaving the table narrower than its container, which fixed layout
+  // would otherwise distribute by its own rules and defeat the point of declaring widths at all.
+  if (flexCount === 0 && leftover > 0 && sizedTotal > 0) {
+    for (let i = 0; i < columns.length; i++) {
+      widthsPx[i] += (widthsPx[i] / (sizedTotal * squeeze)) * leftover;
+    }
+  }
+
+  const totalPx = widthsPx.reduce((sum, px) => sum + px, 0) || 1;
+
+  return {
+    fontPx: chosen.fontPx,
+    headerFontPx: chosen.headerFontPx,
+    padPx: chosen.padPx,
+    columns: columns.map((_, i) => {
+      const contentPx = widthsPx[i] - 2 * chosen.padPx;
+      return {
+        widthPct: (widthsPx[i] / totalPx) * 100,
+        sized: sized[i],
+        contentPx,
+        valuePx: valueEm[i] * chosen.fontPx,
+        headerWordPx: headerWordEm[i] * chosen.headerFontPx,
+        headerWordFits: contentPx >= headerWordEm[i] * chosen.headerFontPx,
+      };
+    }),
+  };
 }
 
 /** A table column is a scalar field in everything but name — formatted by the same rules, so a
@@ -1072,7 +1475,7 @@ function findingRow(f: ReportFinding, accent: string): string {
 
   return `
         <tr class="${rowClass}" style="border-bottom:1px solid #e2e8f0">
-          <td style="padding:9px 12px;vertical-align:top;width:72%;border-left:4px solid ${rail}">
+          <td style="padding:9px 12px;vertical-align:top;border-left:4px solid ${rail}">
             <div style="font-weight:600">${escapeHtml(f.templateItem.title)}</div>
             ${f.templateItem.description ? `<div style="color:${NEUTRAL_TEXT};font-size:12.5px;margin-top:2px">${escapeHtml(f.templateItem.description)}</div>` : ""}
             ${f.note ? `<div style="margin-top:6px;font-size:12.5px;color:#334155"><em>Finding:</em> ${escapeHtml(f.note)}</div>` : ""}
