@@ -110,15 +110,34 @@ this product holds.
   strip paths. Recorded here rather than omitted as "latent" because the consumer of these
   operations is a scheduled job that deletes.
 
-**Not yet true, and material:** object storage is still a local-filesystem stand-in. Encryption at
-rest is therefore whatever the underlying volume provides, not application-managed, and the module
-is marked in-source as not for production. This is the largest single gap in this document.
+**Storage backend, stated precisely, because this was the largest gap in this document and is now
+a smaller and differently-shaped one.**
 
-The containment guard above narrows what a swap has to re-examine; it does not narrow this gap.
-Encryption at rest is a property of the substrate and is simply absent. What the guard buys is that
-replacing the writer — which is what moving to S3-compatible storage does — cannot silently reopen
-traversal, because the refusal lives with the operation rather than with the code that happened to
-build the key.
+Every read, write and delete goes through a backend interface with two implementations. The
+default is the local filesystem, and that is what every deployment runs today. An S3-compatible
+backend (AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO — one protocol, so this is
+not a commitment to a provider) activates when it is configured; nothing is configured yet, because
+choosing one is a decision the firm running this has not made.
+
+- **The S3 backend has not been exercised against a live bucket.** It is written, unit-tested on the
+  half where a bug would be ours — key containment, the reachability pre-flight, and the rule that a
+  missing object is distinguishable from an unreadable one — and it has never stored a real byte.
+  That is a claim and not yet a fact, and this sentence stays here until someone uploads, reads and
+  purges a document through it.
+- **On S3, objects are written with server-side encryption on by default.** This is *provider*-managed:
+  the provider holds the key, so it protects against disk theft and the disposal of physical media,
+  and protects nothing against anyone who obtains our credentials. It does not close the
+  application-managed-encryption gap below, which needs a key-management decision nobody has made.
+- **On local storage, encryption at rest is whatever the volume provides.** In the currently
+  documented production setup that is a mounted persistent disk: documents survive deploys, there is
+  no redundancy, and the encryption is the substrate's. Running production on local storage without
+  acknowledging it produces a startup warning naming exactly that.
+
+The containment guard above is what made replacing the writer safe to do rather than a re-audit —
+the refusal lives with the operation, so neither backend trusts a key it was handed. Each enforces
+what it can actually reason about: local refuses a key resolving outside the storage root, S3
+refuses one that is not a plain relative object name, because a key with `..` or a leading slash
+still lands somewhere on S3 — just outside the per-tenant prefix that makes separation legible.
 
 ---
 
@@ -183,7 +202,9 @@ Stated plainly, because the omissions are what a reader is really checking for.
 - **No independent penetration test.** Security review to date has been internal, including
   adversarial passes that execute the code rather than read it — which has found real defects,
   including two in guards that had already been reviewed and believed correct.
-- **No application-managed encryption at rest for uploaded documents** (§4 above).
+- **No application-managed encryption at rest for uploaded documents** (§4 above). Provider-managed
+  server-side encryption is enabled on the S3 backend, which is not the same control.
+- **No production deployment running object storage.** The S3 backend exists and is unexercised.
 - **No formal incident-response plan, breach-notification process, or named security contact.**
 - **No business-continuity or disaster-recovery testing** beyond a backup drill script.
 - **No data-processing agreement, sub-processor list, or privacy policy** as published documents.
@@ -201,8 +222,9 @@ absence is what makes a reader doubt everything above.
 The honest summary: the isolation and least-privilege work is genuinely thorough and independently
 verified, the credential decision removes the largest category of risk by design rather than by
 control, and the document-handling path is validated and defensively served. The gaps are the
-production storage substrate, the absence of any external assessment, and the process-and-paperwork
-layer that has not been written because nobody has asked for it yet.
+absence of any external assessment, the process-and-paperwork layer that has not been written
+because nobody has asked for it yet, and a storage substrate that is now a configuration decision
+rather than missing code — the S3 backend is written and has never been pointed at a bucket.
 
 If any of the §8 items is a blocker for you, say which one. That is exactly the evidence `spec.md`
 §8 gates this work on, and it is more useful than a guess about what buyers want.
