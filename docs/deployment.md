@@ -104,6 +104,13 @@ guaranteed path. To actually deliver email:
 4. Redeploy. Delivery status per message is visible in the `email_messages` table (`SENT` with the
    provider id, or `FAILED` with the provider error).
 
+**Sandbox-sender caveat (verified 2026-09-22):** before you verify a custom domain, Resend only lets
+you send from its shared `onboarding@resend.dev` sender, and that sender **only delivers to your own
+Resend account's email address** — every other recipient is accepted by the API (`SENT`) but not
+delivered. This is fine for a smoke test but means real team-invite / portal-link / receipt emails to
+clients won't arrive until you own a sending domain and complete step 1's DNS verification. Treat
+domain verification as a required step before onboarding a real design partner, not a deploy blocker.
+
 ## Billing (Stripe — Phase 2.5)
 
 Without configuration the app runs in grace mode: no checkout surface appears on Settings, no
