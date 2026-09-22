@@ -223,12 +223,20 @@ export async function updateFinding(formData: FormData) {
   }
   const parsed = result.data;
 
+  // A not-applicable finding carries no severity. Both fields live on the same form, so rating an
+  // item Red and later switching its status to NOT APPLICABLE (having learned the business has no
+  // such system) left the stale Red persisted — and the roll-up excludes not-applicable findings
+  // from both severity and coverage, so the report showed that row as Red underneath a tier header
+  // reading Green. A visible self-contradiction in the document handed to the buyer. Normalising
+  // here means the two can never be stored together in the first place.
+  const severity = parsed.status === FindingStatus.NOT_APPLICABLE ? null : (parsed.severity ?? null);
+
   // spec.md §4's severity model: "Red items require a note, Yellow items recommend one, Green
   // items don't need one." Enforced here rather than only in the UI because this is a claim that
   // ends up in a client deliverable — an unexplained Red is the one finding a buyer will push back
   // on hardest, and the consultant has to be able to answer. Yellow stays a recommendation, per
   // the spec; the audit page nudges for it without blocking.
-  if (parsed.severity === Severity.RED && !parsed.note?.trim()) {
+  if (severity === Severity.RED && !parsed.note?.trim()) {
     throw new Error("A Red finding needs a note explaining it — spec §4 requires one.");
   }
 
@@ -280,7 +288,7 @@ export async function updateFinding(formData: FormData) {
       where: { id: parsed.findingId },
       data: {
         status: parsed.status,
-        severity: parsed.severity ? parsed.severity : null,
+        severity,
         note: parsed.note ?? null,
         // Omitting the key entirely (rather than writing null/{}) leaves Tier A's automated check
         // output untouched on findings this form has no structured fields for, since the same

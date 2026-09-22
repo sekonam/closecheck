@@ -7,6 +7,7 @@ import { DealStage } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { normalizeDomain, validatePrimaryDomain } from "@/lib/validation/domain";
+import { TERMINAL_DEAL_STAGES, defaultPurgeDateFor } from "@/lib/retention/policy";
 
 const createEngagementSchema = z.object({
   // Trimmed before the length check — otherwise a whitespace-only name passes validation and saves,
@@ -74,7 +75,15 @@ const updateEngagementSchema = z.object({
     .string()
     .trim()
     .optional()
-    .transform((v) => (v ? new Date(v) : undefined)),
+    .transform((v, ctx) => {
+      if (!v) return undefined;
+      const parsed = new Date(v);
+      if (Number.isNaN(parsed.getTime())) {
+        ctx.addIssue({ code: "custom", message: "Enter a valid purge date." });
+        return undefined;
+      }
+      return parsed;
+    }),
 });
 
 /**
@@ -96,17 +105,43 @@ export async function updateEngagement(formData: FormData): Promise<void> {
   }
   const parsed = result.data;
 
-  await withOrgScope(orgId, (tx) =>
-    tx.engagement.update({
+  await withOrgScope(orgId, async (tx) => {
+    // findUnique-then-check rather than update() directly: a foreign-org engagementId resolves to
+    // zero rows under RLS, and update() on zero rows throws a raw PrismaClientKnownRequestError
+    // that surfaces to the user as a Prisma error string. Every other mutating action in this
+    // codebase already does it this way; this one was the exception.
+    const existing = await tx.engagement.findUnique({ where: { id: parsed.engagementId } });
+    if (!existing) {
+      throw new Error("Engagement not found.");
+    }
+
+    // docs/spec.md §8's "no indefinite default retention", which the schema comment on
+    // Engagement.documentPurgeAt has always asserted and nothing implemented: the field was only
+    // ever written from this form, so a consultant who moved a deal to DEAD and left the date
+    // blank — which is the default state of that input, and easy to miss — kept the seller's
+    // contracts and merchant statements forever, with no job that would ever find them.
+    //
+    // Only fills a date that isn't already set, and only on the transition into a terminal stage.
+    // An explicit value the consultant typed always wins, including a deliberate blank on an
+    // engagement that was already closed.
+    const enteringTerminalStage =
+      TERMINAL_DEAL_STAGES.includes(parsed.dealStage) && !TERMINAL_DEAL_STAGES.includes(existing.dealStage);
+    const documentPurgeAt =
+      parsed.documentPurgeAt ??
+      (enteringTerminalStage && !existing.documentPurgeAt
+        ? defaultPurgeDateFor(parsed.dealStage, new Date())
+        : null);
+
+    await tx.engagement.update({
       where: { id: parsed.engagementId },
       data: {
         businessName: parsed.businessName,
         primaryDomain: parsed.primaryDomain || null,
         dealStage: parsed.dealStage,
-        documentPurgeAt: parsed.documentPurgeAt ?? null,
+        documentPurgeAt,
       },
-    }),
-  );
+    });
+  });
 
   revalidatePath(`/engagements/${parsed.engagementId}`);
   revalidatePath("/engagements");
