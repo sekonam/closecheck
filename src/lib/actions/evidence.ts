@@ -7,6 +7,7 @@ import { EvidenceKind } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { putObject, evidenceKey } from "@/lib/storage/local";
+import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadPolicy";
 
 /**
  * Attaches an uploaded document as Evidence on a Finding (docs/spec.md §4, Tier B). The file itself
@@ -28,8 +29,25 @@ export async function attachEvidence(formData: FormData): Promise<void> {
     return;
   }
 
+  // Checked before the row is created and before any bytes are read into memory. docs/spec.md §8
+  // calls these documents "the most sensitive data at rest", yet this path accepted any file of
+  // any type at any size while the far lower-risk firm-logo upload already had both an allowlist
+  // and a cap.
+  const verdict = checkEvidenceUpload(file);
+  if (!verdict.ok) {
+    throw new Error(verdict.message);
+  }
+
   const evidenceId = randomUUID();
   const bytes = Buffer.from(await file.arrayBuffer());
+
+  // Second gate, now that the content is in hand: file.type is an assertion by the uploader, not a
+  // fact, so the bytes have to match the claim.
+  const contentVerdict = checkEvidenceContent(verdict.mimeType, bytes);
+  if (!contentVerdict.ok) {
+    throw new Error(contentVerdict.message);
+  }
+
   const key = evidenceKey(orgId, findingId, evidenceId, file.name);
 
   // Confirms the finding belongs to this org and creates the Evidence row first, then writes the
@@ -55,7 +73,12 @@ export async function attachEvidence(formData: FormData): Promise<void> {
         id: evidenceId,
         orgId,
         findingId,
-        kind: EvidenceKind.DOCUMENT,
+        // SCREENSHOT has existed in the schema since the first migration and nothing ever wrote
+        // it — every upload was recorded as DOCUMENT regardless. The distinction is not cosmetic:
+        // a screenshot is the natural artifact of a Tier C live-access check (spec.md §4's
+        // consultant-attested model), and it is the one kind of evidence that should be embedded
+        // in a report rather than merely listed, since looking at it IS reading it.
+        kind: verdict.isImage ? EvidenceKind.SCREENSHOT : EvidenceKind.DOCUMENT,
         storageKey: key,
         text: file.name,
       },
