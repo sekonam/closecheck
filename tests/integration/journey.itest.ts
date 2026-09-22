@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { type Browser, type Page } from "playwright";
 import { PrismaClient } from "@prisma/client";
-import { BASE_URL, serverIsReachable } from "./helpers/http";
+import { BASE_URL } from "./helpers/http";
+import { collectPageErrors, launchBrowser, requireServer, submitAndSettle } from "./helpers/browser";
 
 /**
  * The consultant's whole journey, in a real browser, against the running app.
@@ -26,46 +27,18 @@ const ORG_NAME = `E2E Journey ${suffix}`;
 const EMAIL = `e2e-journey-${suffix}@itest.invalid`;
 const PASSWORD = "correct-horse-battery-staple-9";
 
-/**
- * Clicks a server-action submit button and waits for the action's own POST to come back.
- *
- * Neither obvious wait works here. A server action re-renders in place rather than navigating, so
- * a load-state wait never fires for it — and waiting for network idle is actively useless under
- * `next dev`, where the HMR websocket means the network never goes idle: it either times out after
- * 30 seconds or resolves at an arbitrary unrelated moment. Every spurious failure this suite
- * produced traced to that, the same code passing and failing on alternate runs.
- *
- * Worse, navigating away before the action completes CANCELS it. "Click save, then go to the page,
- * then assert" therefore cancels the save, and the page correctly shows nothing saved — which
- * presents as a persistence bug in code that is working perfectly.
- *
- * Waiting on the POST response is the only signal that actually means "the action finished".
- */
-async function submitAndSettle(page: Page, locator: Locator): Promise<void> {
-  await Promise.all([
-    page.waitForResponse((response) => response.request().method() === "POST", { timeout: 30_000 }),
-    locator.click(),
-  ]);
-}
-
 describe("a stranger can complete the core loop in a real browser", () => {
   let browser: Browser;
   let page: Page;
-  const consoleErrors: string[] = [];
+  let pageErrors: ReturnType<typeof collectPageErrors>;
 
   beforeAll(async () => {
-    expect(await serverIsReachable(), `No app server at ${BASE_URL}`).toBe(true);
-    browser = await chromium.launch({
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
-    });
+    await requireServer();
+    browser = await launchBrowser();
     page = await browser.newPage();
-
     // A page that renders but logs a React hydration or server-action error is broken in a way a
     // status-code assertion cannot see, so failures are collected and asserted at the end.
-    page.on("console", (message) => {
-      if (message.type() === "error") consoleErrors.push(message.text());
-    });
-    page.on("pageerror", (error) => consoleErrors.push(String(error)));
+    pageErrors = collectPageErrors(page);
   });
 
   afterAll(async () => {
@@ -250,12 +223,7 @@ describe("a stranger can complete the core loop in a real browser", () => {
   });
 
   it("reports no console or page errors across the whole journey", () => {
-    // Next's dev overlay and browser extensions are noisy; only surface genuine application
-    // failures rather than asserting on an empty array.
-    const real = consoleErrors.filter(
-      (message) =>
-        !/favicon|DevTools|Download the React DevTools|Extension|sourcemap/i.test(message),
-    );
+    const real = pageErrors.significant();
     expect(real, `console errors during the journey:\n${real.join("\n")}`).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   checkRateLimit,
   clearRateLimit,
@@ -64,8 +65,33 @@ function budget(envVar: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/**
+ * Both components are hashed into the key rather than interpolated raw, for two reasons that only
+ * became visible when the "derived keys are access-control decisions" lens was applied to them.
+ *
+ * **The separator was ambiguous.** `${email}:${address}` is not injective when either part can
+ * contain a colon — and both can: IPv6 addresses are full of them, and `authorize()` does no format
+ * validation whatsoever on the submitted email before it reaches here, so an attacker chooses that
+ * string freely. Two different (email, address) pairs producing one key means two identities
+ * sharing one budget, which is the same class of defect as a vendor-name normaliser collapsing two
+ * companies onto one profile: the database can enforce nothing, because the key is computed a layer
+ * above anything it can see.
+ *
+ * **The email was unbounded.** An unvalidated string goes straight into a Map key, so a caller
+ * could submit a multi-megabyte "email" and spend the limiter's own memory. The key cap bounds the
+ * number of entries, not their size.
+ *
+ * A fixed-width digest of each component removes both at once. The hash is not a security boundary
+ * — it is not protecting the email from anyone, since the value never leaves this process — it
+ * exists purely to make the key injective and fixed-length. Truncation to 32 hex characters is
+ * ample: a collision here costs a shared guess budget, not disclosure.
+ */
+function keyComponent(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 32);
+}
+
 function failureKey(email: string, address: string): string {
-  return `login:fail:${email}:${address}`;
+  return `login:fail:${keyComponent(email)}:${keyComponent(address)}`;
 }
 
 function failureOptions() {
@@ -96,7 +122,7 @@ export { clientAddressFrom };
  */
 export function addressAttemptAllowed(address: string): boolean {
   if (address === "unknown") return true;
-  return checkRateLimit(`login:addr:${address}`, {
+  return checkRateLimit(`login:addr:${keyComponent(address)}`, {
     limit: budget("AUTH_RATE_LIMIT_PER_MINUTE_ADDRESS", DEFAULT_PER_ADDRESS),
   }).allowed;
 }

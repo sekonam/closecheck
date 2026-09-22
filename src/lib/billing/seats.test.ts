@@ -214,3 +214,57 @@ describe("resolveSubscriptionPlan", () => {
     expect(resolveSubscriptionPlan(["price_rotated"], "TEAM_ANNUAL")).toBe(BillingPlan.TEAM_ANNUAL);
   });
 });
+
+describe("the credit-grant idempotency key cannot suppress another plan's grant", () => {
+  /**
+   * grantPlanCreditsIfDue matches a prior grant with `note: { startsWith: "<PLAN> yearly included
+   * audits" }`, because the note also records the seat count the bundle was sized for. That is a
+   * DERIVED key, and derived keys are correctness decisions: if one plan name were a prefix of
+   * another, the shorter plan's matcher would find the longer plan's grant and conclude a grant had
+   * already been made — silently withholding a year of audit credits a customer had paid for.
+   *
+   * It is safe today, and safe by construction rather than by luck: the space after the plan name
+   * means "SOLO" could not match "SOLO_ANNUAL yearly…" even if both existed. But that reasoning
+   * lives nowhere in the code, so this asserts the property rather than trusting the next person to
+   * rederive it when adding a plan.
+   */
+  const NOTE_SUFFIX = " yearly included audits";
+
+  it("has no plan name that is a prefix of another", () => {
+    const plans = Object.values(BillingPlan);
+    for (const shorter of plans) {
+      for (const longer of plans) {
+        if (shorter === longer) continue;
+        expect(
+          longer.startsWith(shorter),
+          `"${shorter}" is a prefix of "${longer}" — their credit-grant matchers can collide`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("does not let one plan's matcher match another plan's note", () => {
+    const plans = Object.values(BillingPlan);
+    for (const matcherPlan of plans) {
+      const matcher = `${matcherPlan}${NOTE_SUFFIX}`;
+      for (const notePlan of plans) {
+        if (notePlan === matcherPlan) continue;
+        const note = `${notePlan}${NOTE_SUFFIX} (2 seats)`;
+        expect(
+          note.startsWith(matcher),
+          `a ${matcherPlan} grant check would match a ${notePlan} grant`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("still matches its own plan's note, with or without the seat suffix", () => {
+    // The seat count was appended later; grants written before that have the bare note. Both must
+    // still be found, or a mid-year seat change would trigger a duplicate grant.
+    for (const plan of Object.values(BillingPlan)) {
+      const matcher = `${plan}${NOTE_SUFFIX}`;
+      expect(`${plan}${NOTE_SUFFIX}`.startsWith(matcher)).toBe(true);
+      expect(`${plan}${NOTE_SUFFIX} (3 seats)`.startsWith(matcher)).toBe(true);
+    }
+  });
+});

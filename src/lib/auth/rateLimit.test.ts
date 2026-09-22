@@ -228,3 +228,47 @@ describe("the two budgets cannot evict each other", () => {
     expect(checkRateLimit(tenantKey, { limit: 5 }).remaining).toBe(2);
   });
 });
+
+describe("the failure key is injective", () => {
+  /**
+   * `${email}:${address}` is not injective when either part can contain a colon — and both can.
+   * IPv6 addresses are full of them, and authorize() performs no format validation on the submitted
+   * email before it reaches the limiter, so that string is attacker-chosen. Two identities sharing
+   * one budget is the same class of defect as a vendor-name normaliser collapsing two companies
+   * onto one profile: nothing in the database can catch it, because the key is computed above
+   * anything the database can see.
+   */
+  it("does not let a colon in the email collide with a different email and address", () => {
+    // Under raw interpolation both of these produce "login:fail:u@x.test:2001:db8::1".
+    recordFailedSignIn("u@x.test:2001", "db8::1");
+    recordFailedSignIn("u@x.test:2001", "db8::1");
+    recordFailedSignIn("u@x.test:2001", "db8::1");
+    expect(focusedGuessingAllowed("u@x.test:2001", "db8::1")).toBe(false);
+
+    // The genuinely different identity must still have its full budget.
+    expect(focusedGuessingAllowed("u@x.test", "2001:db8::1")).toBe(true);
+  });
+
+  it("keeps IPv6 addresses distinct from one another", () => {
+    for (let i = 0; i < 3; i++) recordFailedSignIn("a@b.test", "2001:db8::1");
+    expect(focusedGuessingAllowed("a@b.test", "2001:db8::1")).toBe(false);
+    expect(focusedGuessingAllowed("a@b.test", "2001:db8::2")).toBe(true);
+  });
+
+  it("bounds key size regardless of what was submitted as an email", () => {
+    // authorize() does not validate length, so a caller can submit a multi-megabyte string. The
+    // limiter caps the NUMBER of tracked keys, not their size.
+    const huge = "x".repeat(1_000_000) + "@x.test";
+    recordFailedSignIn(huge, "1.2.3.4");
+    // Still addressable, and still its own budget rather than colliding with anything.
+    expect(focusedGuessingAllowed(huge, "1.2.3.4")).toBe(true);
+    expect(focusedGuessingAllowed("x@x.test", "1.2.3.4")).toBe(true);
+  });
+
+  it("still clears exactly the key it recorded", () => {
+    for (let i = 0; i < 3; i++) recordFailedSignIn("c@d.test", "5.6.7.8");
+    expect(focusedGuessingAllowed("c@d.test", "5.6.7.8")).toBe(false);
+    clearFailedSignIns("c@d.test", "5.6.7.8");
+    expect(focusedGuessingAllowed("c@d.test", "5.6.7.8")).toBe(true);
+  });
+});
