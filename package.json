@@ -25,7 +25,8 @@
     "ops:backup-drill": "tsx -r dotenv/config scripts/ops-backup-drill.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mts",
-    "db:publish-evidence-depth": "tsx -r dotenv/config scripts/publish-evidence-depth.ts"
+    "db:publish-evidence-depth": "tsx -r dotenv/config scripts/publish-evidence-depth.ts",
+    "db:backfill-retention-dates": "tsx -r dotenv/config scripts/backfill-retention-dates.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

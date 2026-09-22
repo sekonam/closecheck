@@ -7,7 +7,7 @@ import { DealStage } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { normalizeDomain, validatePrimaryDomain } from "@/lib/validation/domain";
-import { TERMINAL_DEAL_STAGES, defaultPurgeDateFor } from "@/lib/retention/policy";
+import { resolvePurgeDate } from "@/lib/retention/policy";
 
 const createEngagementSchema = z.object({
   // Trimmed before the length check — otherwise a whitespace-only name passes validation and saves,
@@ -82,6 +82,16 @@ const updateEngagementSchema = z.object({
         ctx.addIssue({ code: "custom", message: "Enter a valid purge date." });
         return undefined;
       }
+      // A date in the past schedules deletion on the very next purge run, and a mistyped year
+      // ("2016" for "2026") looks identical to a deliberate choice. Refuse it and let the
+      // consultant say what they meant.
+      if (parsed.getTime() < Date.now()) {
+        ctx.addIssue({
+          code: "custom",
+          message: "The purge date is in the past — documents would be deleted on the next run.",
+        });
+        return undefined;
+      }
       return parsed;
     }),
 });
@@ -115,22 +125,15 @@ export async function updateEngagement(formData: FormData): Promise<void> {
       throw new Error("Engagement not found.");
     }
 
-    // docs/spec.md §8's "no indefinite default retention", which the schema comment on
-    // Engagement.documentPurgeAt has always asserted and nothing implemented: the field was only
-    // ever written from this form, so a consultant who moved a deal to DEAD and left the date
-    // blank — which is the default state of that input, and easy to miss — kept the seller's
-    // contracts and merchant statements forever, with no job that would ever find them.
-    //
-    // Only fills a date that isn't already set, and only on the transition into a terminal stage.
-    // An explicit value the consultant typed always wins, including a deliberate blank on an
-    // engagement that was already closed.
-    const enteringTerminalStage =
-      TERMINAL_DEAL_STAGES.includes(parsed.dealStage) && !TERMINAL_DEAL_STAGES.includes(existing.dealStage);
-    const documentPurgeAt =
-      parsed.documentPurgeAt ??
-      (enteringTerminalStage && !existing.documentPurgeAt
-        ? defaultPurgeDateFor(parsed.dealStage, new Date())
-        : null);
+    // docs/spec.md §8: retention is "tied to the Engagement lifecycle", with "no indefinite
+    // default retention". Both halves live in resolvePurgeDate, which documents why the rule is
+    // stated in terms of the stage the engagement is in rather than the transition it just made.
+    const documentPurgeAt = resolvePurgeDate({
+      targetStage: parsed.dealStage,
+      submitted: parsed.documentPurgeAt ?? null,
+      existing: existing.documentPurgeAt,
+      now: new Date(),
+    });
 
     await tx.engagement.update({
       where: { id: parsed.engagementId },

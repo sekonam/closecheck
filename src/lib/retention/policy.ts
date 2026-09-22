@@ -35,3 +35,35 @@ export function defaultPurgeDateFor(stage: DealStage, now: Date): Date | null {
   purgeAt.setUTCDate(purgeAt.getUTCDate() + DEFAULT_POST_CLOSE_RETENTION_DAYS);
   return purgeAt;
 }
+
+/**
+ * The purge date an engagement should carry after an edit.
+ *
+ * Stated in terms of the stage the engagement is IN, not the transition it just made. An earlier
+ * version keyed on the transition — default a date only when *entering* a terminal stage — which
+ * left two holes and opened a third:
+ *
+ *   - every engagement already CLOSED or DEAD when that shipped kept indefinite retention, which
+ *     is exactly the population it was written for;
+ *   - CLOSED → DEAD is terminal-to-terminal, so it wrote null and retained indefinitely;
+ *   - worst, a revived deal kept its date. DEAD (auto-filled) → POST_LOI re-submitted the stored
+ *     value from the prefilled input, nothing cleared it, and the purge job selects on the date
+ *     alone — so on day 90 it would delete the seller's contracts out of a live diligence
+ *     engagement, from a date the consultant never typed.
+ *
+ * The rule: a terminal engagement always has a purge date, a live one never does. A consultant who
+ * wants longer than the default sets a later date. A consultant who clears it on a closed deal
+ * gets the default back, because indefinite retention of a dead deal's documents is the thing
+ * spec.md §8 rules out, not a preference to honour.
+ */
+export function resolvePurgeDate(params: {
+  targetStage: DealStage;
+  /** A date the consultant typed in this submission, if any. */
+  submitted: Date | null;
+  /** What the engagement currently carries. */
+  existing: Date | null;
+  now: Date;
+}): Date | null {
+  if (!TERMINAL_DEAL_STAGES.includes(params.targetStage)) return null;
+  return params.submitted ?? params.existing ?? defaultPurgeDateFor(params.targetStage, params.now);
+}

@@ -1,7 +1,12 @@
 import { DealStage } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_POST_CLOSE_RETENTION_DAYS, TERMINAL_DEAL_STAGES, defaultPurgeDateFor } from "./policy";
+import {
+  DEFAULT_POST_CLOSE_RETENTION_DAYS,
+  TERMINAL_DEAL_STAGES,
+  defaultPurgeDateFor,
+  resolvePurgeDate,
+} from "./policy";
 
 const NOW = new Date("2026-09-22T12:00:00.000Z");
 
@@ -40,5 +45,67 @@ describe("defaultPurgeDateFor", () => {
     // the same reason — see the pin_database_timezone_utc migration).
     const purgeAt = defaultPurgeDateFor(DealStage.CLOSED, new Date("2026-11-15T23:30:00.000Z"));
     expect(purgeAt?.toISOString()).toBe("2027-02-13T23:30:00.000Z");
+  });
+});
+
+describe("resolvePurgeDate", () => {
+  const NINETY_DAYS_ON = "2026-12-21T12:00:00.000Z";
+
+  it("fills the default on a terminal engagement that has no date", () => {
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.DEAD, submitted: null, existing: null, now: NOW })?.toISOString(),
+    ).toBe(NINETY_DAYS_ON);
+  });
+
+  it("fills the default on an engagement that was ALREADY terminal", () => {
+    // The transition-based version missed exactly this population — every engagement already
+    // CLOSED or DEAD when the change shipped kept indefinite retention, which is the group the
+    // change was written for.
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.CLOSED, submitted: null, existing: null, now: NOW }),
+    ).not.toBeNull();
+  });
+
+  it("fills the default moving between two terminal stages", () => {
+    // CLOSED → DEAD is terminal-to-terminal; the transition-based version wrote null here.
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.DEAD, submitted: null, existing: null, now: NOW }),
+    ).not.toBeNull();
+  });
+
+  it("clears the date when a deal is revived", () => {
+    // The dangerous case. A deal marked DEAD gets an auto-filled date; two weeks later it revives
+    // and the form re-submits that stored date from its prefilled input. The purge job selects on
+    // the date alone with no stage filter, so leaving it set would delete the seller's contracts
+    // out of a live diligence engagement — from a date the consultant never typed.
+    const stale = new Date("2026-11-01T00:00:00.000Z");
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.POST_LOI, submitted: stale, existing: stale, now: NOW }),
+    ).toBeNull();
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.PRE_LOI, submitted: null, existing: stale, now: NOW }),
+    ).toBeNull();
+  });
+
+  it("honours a date the consultant typed on a terminal engagement", () => {
+    const chosen = new Date("2027-06-30T00:00:00.000Z");
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.CLOSED, submitted: chosen, existing: null, now: NOW }),
+    ).toEqual(chosen);
+  });
+
+  it("keeps an existing date rather than resetting it to the default on every save", () => {
+    const existing = new Date("2027-01-15T00:00:00.000Z");
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.CLOSED, submitted: null, existing, now: NOW }),
+    ).toEqual(existing);
+  });
+
+  it("restores the default if a terminal engagement's date is cleared", () => {
+    // Indefinite retention of a dead deal's documents is what spec.md §8 rules out, so a cleared
+    // field is not a preference to honour. A consultant needing longer sets a later date.
+    expect(
+      resolvePurgeDate({ targetStage: DealStage.DEAD, submitted: null, existing: null, now: NOW })?.toISOString(),
+    ).toBe(NINETY_DAYS_ON);
   });
 });
