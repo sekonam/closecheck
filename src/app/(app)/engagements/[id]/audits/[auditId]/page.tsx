@@ -547,6 +547,7 @@ export default async function AuditPage({
                         />
                       </div>
                       <FindingGuidance
+                        itemTitle={finding.templateItem.title}
                         guidance={finding.templateItem.guidance}
                         severityGuidance={finding.templateItem.severityGuidance}
                         unavailable={unavailable}

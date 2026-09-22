@@ -322,6 +322,43 @@ credential-based check. This removes the single largest trust/security liability
 be revisited only if a design partner explicitly needs credential handoff and a proper secrets-vault
 architecture is built for it — not before. See §8.
 
+### 4.6 Dated thresholds, and who holds them
+
+Template versioning stops *us* moving a rubric underneath an audit in flight: `Audit.templateId` is
+a hard FK, so an audit started on v4 stays on v4 (§3). It does nothing about the **world** moving
+underneath a pinned template. Several of v4's thresholds are correct as of a date, and the sharpest
+is ICANN's Transfer Policy — the revision removing the 60-day transfer lock was adopted 2026-06-07
+(Res. 2026.06.07.04) with no effective date, no published implementation text, and registrars asking
+for an 18-month buffer after implementation concludes. The 60-day lock is right today and will stop
+being right without an announcement anyone is watching for.
+
+v4 handled this in template prose: *RE-VERIFY AT THE AUDIT DATE*. Honest, and the wrong place — it
+moves a maintenance burden we created onto the person paying us to carry less of it, which is
+§2 principle 2 inverted.
+
+**The rule is who can actually know**, because the dated facts are three problems rather than one:
+
+| Kind | Example | Who holds it |
+|---|---|---|
+| **Scheduled** — change and effective date both published | CA/Browser Forum certificate-lifetime cap: 398 → 200 (2026-03-15) → 100 (2027-03-15) → 47 (2029-03-15) | **The product.** It holds the timetable and resolves the value at the audit date. Nobody is told, because nothing needs deciding. |
+| **Adopted, undated** — change known, date genuinely unknowable | ICANN Transfer Policy revision | **The consultant**, at the audit date — the only party who can ask the registrar. Surfaced on the item, naming the specific change and what to confirm. |
+| **Dated reading** — no known change, a fact read on a date that can move silently | A vendor help article's export retention window | **Us.** Never surfaced: a notice on most of the checklist teaches consultants to scroll past the one that matters. |
+
+**Who re-verifies, concretely:** not a person who remembers. Every watched fact carries a review
+date, and the test suite fails once it passes, naming the entry, what to re-read and the primary
+source. That is the whole answer to the cadence question — the commitment was previously real and
+unowned, and it is now a build failure. Declarations live in `src/lib/templates/policyWatch.ts` as
+code rather than data, because they are product-owned facts like the templates, they must be
+reviewable in a diff, and the enforcement is a test.
+
+The consultant-facing notice is internal working context, not report content: a buyer reading "this
+threshold may have moved" would take it as the firm hedging its own finding. It is rendered only in
+the audit workspace, and a report test holds that line — internal methodology has reached a
+whitelabeled PDF before (§7).
+
+**Not claimed:** this catches facts someone thought to declare. A threshold nobody recognised as
+dated is still silently wrong, and no mechanism here finds one.
+
 ## 5. Template library
 
 One Template per business type, each a curated subset/superset of the tier structure above plus
@@ -715,18 +752,21 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   obligations may cut against it in either direction — ask in Phase 0 discovery, since a firm with a
   seven-year record-keeping obligation and a firm that wants documents gone at close will both be
   in the target population.
-- **Who re-verifies the dated thresholds, and how often.** Several of template v4's thresholds are
-  correct as of a date rather than indefinitely, and the sharpest case is the ICANN Transfer Policy:
-  the revision adopted 2026-06-07 removes the 60-day transfer lock, but it has no effective date, no
-  published implementation text, and registrars have asked for an 18-month buffer after implementation
-  concludes — so the 60-day lock is correct today and will stop being correct without warning. The
-  item tells the consultant to re-verify at the audit date, which is honest but puts the maintenance
-  burden on the person running the audit, the opposite of what §2 principle 2 sells. A threshold that
-  is right now and wrong in six months is a standing maintenance commitment, and the spec does not yet
-  say who holds it, on what cadence the dated items get re-read, or whether the product should carry a
-  dated policy-status note on the item and surface it at audit time
-  (`docs/research/audit-thresholds-2026-09.md` §7.3 proposes the latter). Decide before a second dated
-  threshold moves underneath an audit in flight.
+- ~~**Who re-verifies the dated thresholds, and how often.**~~ **Resolved — see §4.6.** The question
+  was who holds the standing maintenance commitment created by thresholds that are correct as of a
+  date rather than indefinitely, and whether the product should carry a dated policy-status note
+  surfaced at audit time (`docs/research/audit-thresholds-2026-09.md` §7.3 proposed the latter).
+  Resolved without waiting for evidence because it needed none: nothing a design partner could say
+  would change who is able to know these facts, and the cost of being wrong is a report that states
+  a superseded rule as current.
+
+  The reasoning that produced the answer, kept because it is what stopped it becoming a banner on
+  every item: the dated facts are three different problems. Where a change and its effective date
+  are both published, nobody needs to be told anything — the product holds the timetable. Where a
+  change is adopted with no effective date, no amount of diligence on our side produces the answer,
+  so the consultant's judgement at the audit date is load-bearing and they are told, specifically.
+  Where there is no known change at all and only a reading that could go stale, the commitment is
+  ours and handing it over is what §2 principle 2 sells against.
 - **Whether "the seller will not represent X" should be a first-class input to §6's roll-up.** The
   pattern recurs across unrelated items — terminated-merchant status, DNS control, retrieval of a
   domain's AuthInfo code, booking-platform transferability — and the refusal is consistently a

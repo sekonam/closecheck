@@ -18,6 +18,7 @@
 import { BlockingDependency, EvidenceExpectation } from "@prisma/client";
 
 import { BLOCKING_LABEL } from "@/lib/audit/blocking";
+import { consultantNoticesFor } from "@/lib/templates/policyWatch";
 
 const CHIP = "rounded-full px-2 py-0.5 text-xs font-medium";
 
@@ -77,15 +78,23 @@ export function EvidenceChip({
 }
 
 export function FindingGuidance({
+  itemTitle,
   guidance,
   severityGuidance,
   unavailable,
 }: {
+  itemTitle: string;
   guidance: string | null;
   severityGuidance: string | null;
   unavailable: string | null;
 }) {
-  if (!guidance && !severityGuidance && !unavailable) return null;
+  // Only ever an ADOPTED_UNDATED watch — a published change with no published effective date, where
+  // the consultant's judgement at the audit date is the only thing that can resolve it. Facts on a
+  // known timetable resolve themselves, and facts we simply need to re-read are held by a review
+  // date and the test suite, not handed to the person paying us to carry less of this. See
+  // src/lib/templates/policyWatch.ts.
+  const policyNotices = consultantNoticesFor(itemTitle);
+  if (!guidance && !severityGuidance && !unavailable && policyNotices.length === 0) return null;
 
   return (
     <div className="mt-2 space-y-1.5">
@@ -94,6 +103,15 @@ export function FindingGuidance({
           {unavailable}
         </p>
       )}
+      {policyNotices.map((notice) => (
+        <p
+          key={notice.slice(0, 40)}
+          className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs leading-relaxed text-sky-900"
+        >
+          <span className="font-medium">Policy in flux · </span>
+          {notice}
+        </p>
+      ))}
       {guidance && (
         <details className="group">
           <summary className="cursor-pointer text-xs font-medium text-slate-600 hover:text-slate-900">

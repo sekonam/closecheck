@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { POLICY_WATCHES } from "@/lib/templates/policyWatch";
 import { CheckMethod, Severity, Tier } from "@prisma/client";
 import {
   EIGHT_COLUMNS,
@@ -506,6 +507,43 @@ describe("renderReportHtml", () => {
     expect(html).not.toContain("INTERNAL");
     expect(html).not.toContain("merchant agreement");
     expect(html).not.toContain("3 months&#39; fees");
+  });
+
+  it("never leaks a policy-in-flux notice into the client deliverable", () => {
+    // Policy watch notices (src/lib/templates/policyWatch.ts) are consultant-facing working
+    // context: "this threshold may have moved, confirm it before making it a closing condition".
+    // That is the right thing to tell the person forming the judgement and the wrong thing to put
+    // in front of a buyer, who would read it as the firm hedging its own finding. The notice is
+    // rendered by FindingGuidance, which is app-only — this is the standing proof that it cannot
+    // reach the report the way guidance and severityGuidance once did.
+    const watched = POLICY_WATCHES.filter((w) => w.consultantNotice);
+    expect(watched.length).toBeGreaterThan(0);
+
+    const html = renderReportHtml(
+      report({
+        findings: watched.flatMap((watch) =>
+          watch.appliesTo.map((title) =>
+            finding({
+              tier: Tier.A,
+              title,
+              templateItem: {
+                tier: Tier.A,
+                title,
+                description: "Registrant of record, expiry and transfer locks.",
+              } as ReportFinding["templateItem"],
+            }),
+          ),
+        ),
+      }),
+    );
+
+    expect(html).toContain("Registrant of record");
+    for (const watch of watched) {
+      // A distinctive phrase from each notice rather than the whole string, so the assertion still
+      // bites after the notice is reworded.
+      expect(html).not.toContain("Policy in flux");
+      expect(html).not.toContain(watch.consultantNotice!.slice(0, 60));
+    }
   });
 
   it("escapes schema-driven labels and values", () => {
