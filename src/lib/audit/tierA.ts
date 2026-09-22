@@ -217,10 +217,15 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
       structuredData,
     };
   }
+  // IN_PROGRESS, not PASS. The 30/90-day bands above are measured from the audit date because no
+  // expected-close date exists in the data model, while the rubric states the threshold relative to
+  // the close — and from template v5 it tells the consultant in as many words to re-read every
+  // Green here against the real one. A finished PASS on an item whose own rubric instructs a
+  // re-read is the product contradicting itself.
   return {
-    status: FindingStatus.PASS,
+    status: FindingStatus.IN_PROGRESS,
     severity: Severity.GREEN,
-    note: `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).${registrant}`,
+    note: `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).${registrant} Measured from today, not from your closing date — re-check it against the real one.`,
     structuredData,
   };
 }
@@ -259,10 +264,23 @@ async function runDnsFingerprint(domain: string): Promise<TierAResult> {
     };
   }
 
+  // IN_PROGRESS, not PASS, and the note says what is left.
+  //
+  // Template v5's rubric reserves Green for accounts "the seller can demonstrate control of and
+  // that are on the asset schedule" — neither of which any automated check can observe. Returning
+  // PASS presented an identification as a verified control finding: the same Green that a target
+  // whose DNS sits with an agency outside the sale would get, which the rubric calls Red.
+  //
+  // The severity stays Green because what WAS observed is genuinely unremarkable, and downgrading
+  // it would invent a concern rather than state a gap. The status is what carries the honesty, and
+  // the coverage count reads it — this now shows as "awaiting confirmation" rather than as a
+  // finished rating (spec.md §6). Corrected alongside template v6; see
+  // src/lib/audit/rubricAlignment.ts, which fails the build if an automated item's rubric requires
+  // something the runner cannot see and the template does not say so.
   return {
-    status: FindingStatus.PASS,
+    status: FindingStatus.IN_PROGRESS,
     severity: Severity.GREEN,
-    note: `Nameservers: ${result.nameservers.join(", ")}${result.likelyProvider ? ` (likely ${result.likelyProvider})` : ""}. A records: ${result.aRecords.join(", ") || "none"}.`,
+    note: `Nameservers: ${result.nameservers.join(", ")}${result.likelyProvider ? ` (likely ${result.likelyProvider})` : ""}. A records: ${result.aRecords.join(", ") || "none"}. This identifies the provider only — confirm the seller controls the DNS account, that it is on the asset schedule, and that they can publish a TXT record on request.`,
     structuredData,
   };
 }
@@ -562,14 +580,41 @@ async function runEmailAuthPosture(domain: string): Promise<TierAResult> {
   }
 
   if (result.spfRecord && result.dmarcRecord) {
-    const policyNote =
-      result.dmarcPolicy === "none"
-        ? "DMARC policy is p=none (monitor-only — no enforcement)."
-        : `DMARC policy: p=${result.dmarcPolicy ?? "unspecified"}.`;
+    // Whether DMARC is ENFORCING, not whether it exists.
+    //
+    // This rated Green on the presence of the two records and said so in the same sentence that
+    // described the policy as monitor-only — the product naming the exact condition it then
+    // declined to act on. Found on toasttab.com, which publishes p=none: mail forged as the target
+    // is delivered exactly as it would be with no DMARC at all, which is the risk a buyer inherits
+    // and the template's stated Yellow.
+    //
+    // A record with no `p` counts as unenforcing too. `p` is mandatory in RFC 7489 and RFC 9989, so
+    // a record without one is not a policy — and treating something unparseable as equivalent to
+    // p=reject fails in the direction that under-reports.
+    const enforcing = result.dmarcPolicy === "quarantine" || result.dmarcPolicy === "reject";
+    const policyNote = !result.dmarcPolicy
+      ? "The DMARC record publishes no p= policy, so nothing is enforced (p is mandatory in RFC 9989)."
+      : result.dmarcPolicy === "none"
+        ? "DMARC policy is p=none (monitor-only — no enforcement), so a receiver acts on nothing: mail forged as this domain is delivered as it would be with no DMARC at all."
+        : `DMARC policy: p=${result.dmarcPolicy}.`;
+
+    if (!enforcing) {
+      return {
+        status: FindingStatus.IN_PROGRESS,
+        severity: Severity.YELLOW,
+        note: `SPF and DMARC records present. ${policyNote} ${dkimNote} Moving to an enforcing policy is usually cheap and is worth raising as a pre-close item.`,
+        structuredData,
+      };
+    }
+
+    // IN_PROGRESS, not PASS: the rubric grades DKIM key length and rotation, and neither is
+    // measurable from DNS — selectors are provider-chosen and unenumerable, so this check probes
+    // common ones and an absence proves nothing (spec.md §4). Recorded in
+    // src/lib/audit/rubricAlignment.ts and stated in the template from v6.
     return {
-      status: FindingStatus.PASS,
+      status: FindingStatus.IN_PROGRESS,
       severity: Severity.GREEN,
-      note: `SPF and DMARC records present. ${policyNote} ${dkimNote}`,
+      note: `SPF and DMARC records present. ${policyNote} ${dkimNote} DKIM key length and rotation need a real message from the business's sending system to grade.`,
       structuredData,
     };
   }
@@ -630,10 +675,23 @@ async function runMailProviderFingerprint(domain: string): Promise<TierAResult> 
     };
   }
 
+  // IN_PROGRESS, not PASS, and the note says what is left.
+  //
+  // Template v5's rubric reserves Green for accounts "the seller can demonstrate control of and
+  // that are on the asset schedule" — neither of which any automated check can observe. Returning
+  // PASS presented an identification as a verified control finding: the same Green that a target
+  // whose DNS sits with an agency outside the sale would get, which the rubric calls Red.
+  //
+  // The severity stays Green because what WAS observed is genuinely unremarkable, and downgrading
+  // it would invent a concern rather than state a gap. The status is what carries the honesty, and
+  // the coverage count reads it — this now shows as "awaiting confirmation" rather than as a
+  // finished rating (spec.md §6). Corrected alongside template v6; see
+  // src/lib/audit/rubricAlignment.ts, which fails the build if an automated item's rubric requires
+  // something the runner cannot see and the template does not say so.
   return {
-    status: FindingStatus.PASS,
+    status: FindingStatus.IN_PROGRESS,
     severity: Severity.GREEN,
-    note: `MX: ${result.mxHosts.join(", ")}${result.likelyProvider ? ` (likely ${result.likelyProvider})` : ""}.`,
+    note: `MX: ${result.mxHosts.join(", ")}${result.likelyProvider ? ` (likely ${result.likelyProvider})` : ""}. This identifies the provider only — confirm the seller has administrative control of the mail tenant and that the account is on the asset schedule. A tenant owned personally by a departing founder looks identical here.`,
     structuredData,
   };
 }
@@ -686,20 +744,25 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
     };
   }
 
+  // Same correction as the DNS and mail fingerprints above: the rubric's Green also requires no
+  // blockable mixed content and no TLS 1.0/1.1 offered, and this runner checks neither. A redirect
+  // is most of the answer, not all of it.
+  const UNCHECKED = "Redirect behaviour only — mixed content on customer-facing pages and the TLS versions actually offered were not checked here.";
+
   if (result.httpRedirectsToHttps) {
     return {
-      status: FindingStatus.PASS,
+      status: FindingStatus.IN_PROGRESS,
       severity: Severity.GREEN,
-      note: `HTTP redirects to HTTPS (${result.httpRedirectChain.join(" → ")}). ${hstsNote}`,
+      note: `HTTP redirects to HTTPS (${result.httpRedirectChain.join(" → ")}). ${hstsNote} ${UNCHECKED}`,
       structuredData,
     };
   }
 
   if (!result.httpReachable && result.httpsReachable) {
     return {
-      status: FindingStatus.PASS,
+      status: FindingStatus.IN_PROGRESS,
       severity: Severity.GREEN,
-      note: `Port 80 does not respond; the site is served over HTTPS only. ${hstsNote}`,
+      note: `Port 80 does not respond; the site is served over HTTPS only. ${hstsNote} ${UNCHECKED}`,
       structuredData,
     };
   }
