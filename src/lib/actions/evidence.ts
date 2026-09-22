@@ -8,6 +8,9 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { putObject, evidenceKey } from "@/lib/storage/local";
 import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadPolicy";
+import { parseSourceRef, withFieldCitation } from "@/lib/audit/sourceRef";
+import { parseFieldSchema } from "@/lib/templates/fieldSchema";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Attaches an uploaded document as Evidence on a Finding (docs/spec.md §4, Tier B). The file itself
@@ -144,6 +147,77 @@ export async function deleteEvidence(formData: FormData): Promise<void> {
     // docs/spec.md §8's retention model (purge is a lifecycle-driven job, not an on-delete side
     // effect of removing one reference) and avoids a half-built deletion path that looks complete.
     return { engagementId: evidence.finding.audit.engagementId, auditId: evidence.finding.auditId };
+  });
+
+  revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
+}
+
+const citeEvidenceSchema = z.object({
+  evidenceId: z.string().min(1),
+  fieldKey: z.string().min(1).max(60),
+  locator: z.string().max(120).optional(),
+  excerpt: z.string().max(2000).optional(),
+});
+
+/**
+ * Records where in a document a structured claim comes from.
+ *
+ * This is the step that turns "Transferable: no" into "Transferable: no — §14.2, p.7 of
+ * toast-msa-2023.pdf: 'This Agreement may not be assigned…'", which a buyer's counsel can check
+ * without asking anyone (docs/spec.md §2.1: the report is the product).
+ *
+ * Submitting both fields blank removes the citation for that field, which is how a consultant
+ * corrects one they attached to the wrong clause.
+ */
+export async function citeEvidence(formData: FormData): Promise<void> {
+  const { orgId } = await requireOrgSession();
+  const result = citeEvidenceSchema.safeParse({
+    evidenceId: formData.get("evidenceId"),
+    fieldKey: formData.get("fieldKey"),
+    locator: formData.get("locator") || undefined,
+    excerpt: formData.get("excerpt") || undefined,
+  });
+  if (!result.success) {
+    throw new Error(result.error.issues[0]?.message ?? "Invalid citation.");
+  }
+  const parsed = result.data;
+
+  const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
+    // findUnique, not findUniqueOrThrow — a foreign-org evidenceId resolves to zero rows under
+    // RLS, same reasoning as the other actions in this file.
+    const evidence = await tx.evidence.findUnique({
+      where: { id: parsed.evidenceId },
+      include: { finding: { include: { audit: true, templateItem: true } } },
+    });
+    if (!evidence) {
+      throw new Error("Evidence not found.");
+    }
+
+    // The field must be one the finding's own pinned template item declares. Checking against the
+    // row rather than the submitted form means a crafted POST cannot attach a citation to a field
+    // that does not exist — the schema is the allowlist here exactly as it is for field values.
+    const schema =
+      evidence.finding.templateItem.method === "MANUAL"
+        ? parseFieldSchema(evidence.finding.templateItem.fieldSchema)
+        : null;
+    if (!schema?.fields.some((field) => field.key === parsed.fieldKey)) {
+      throw new Error("That field isn't part of this checklist item.");
+    }
+
+    const updated = withFieldCitation(parseSourceRef(evidence.sourceRef), parsed.fieldKey, {
+      locator: parsed.locator,
+      excerpt: parsed.excerpt,
+    });
+
+    await tx.evidence.update({
+      where: { id: parsed.evidenceId },
+      data: { sourceRef: updated as unknown as Prisma.InputJsonValue },
+    });
+
+    return {
+      engagementId: evidence.finding.audit.engagementId,
+      auditId: evidence.finding.auditId,
+    };
   });
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);

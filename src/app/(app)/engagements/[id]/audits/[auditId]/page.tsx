@@ -6,9 +6,11 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { runTierAAutomation, updateFinding, updateAuditOverride, markAuditComplete, reopenAudit } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
-import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
+import { attachEvidence, citeEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSchema";
+import { citationsByField } from "@/lib/audit/sourceRef";
 import { StructuredFields } from "./StructuredFields";
+import { FieldSources } from "./FieldCitations";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
 import { PortalAccessHistory } from "./PortalAccessHistory";
 import { describeEvidence } from "@/lib/storage/describeEvidence";
@@ -98,6 +100,10 @@ export default async function AuditPage({
   async function deleteEvidenceAction(formData: FormData) {
     "use server";
     await runOrRedirect(() => deleteEvidence(formData), backPath);
+  }
+  async function citeEvidenceAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => citeEvidence(formData), backPath);
   }
 
   const audit = await withOrgScope(orgId, (tx) =>
@@ -446,6 +452,15 @@ export default async function AuditPage({
                   ? parseFieldSchema(finding.templateItem.fieldSchema)
                   : null;
               const structured = schema ? readPersistedValues(schema, finding.structuredData) : {};
+              // Citations are pinned to the same template version the finding was rated against:
+              // a citation against a field a later version removed is dropped rather than rendered
+              // attached to nothing.
+              const citations = schema
+                ? citationsByField(finding.evidence, new Set(schema.fields.map((f) => f.key)))
+                : new Map();
+              const citableDocuments = finding.evidence
+                .filter((e) => e.storageKey)
+                .map((e) => ({ id: e.id, name: e.label ?? e.text ?? "document" }));
               // Advisory only — spec.md §2.3's pre-LOI/post-LOI distinction made visible. A
               // cooperative broker hands over documents earlier than the tidy model expects, so
               // this labels and never disables.
@@ -533,6 +548,15 @@ export default async function AuditPage({
                     {schema && <StructuredFields schema={schema} values={structured} />}
 
                   </form>
+
+                  {schema && (
+                    <FieldSources
+                      schema={schema}
+                      citations={citations}
+                      documents={citableDocuments}
+                      citeAction={citeEvidenceAction}
+                    />
+                  )}
 
                   <div className="mt-3 border-t border-slate-100 pt-3">
                     <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Evidence</div>

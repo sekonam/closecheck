@@ -11,6 +11,8 @@ import {
   type ItemFieldSchema,
 } from "@/lib/templates/fieldSchema";
 import { computeSeverityRollup, type Coverage, type FindingForRollup } from "./rollup";
+import { formatCitation, type ResolvedCitation } from "@/lib/audit/sourceRef";
+
 import { REPORT_DISCLAIMER_TEXT } from "./disclaimer";
 
 export interface ReportFinding extends FindingForRollup {
@@ -23,6 +25,12 @@ export interface ReportFinding extends FindingForRollup {
    */
   structuredData?: unknown;
   evidenceCount?: number;
+  /**
+   * Where each structured answer came from, keyed by field. Rendered inline beneath the value it
+   * substantiates — this is the difference between the report asserting something and the report
+   * showing a reader the clause it read it from (docs/spec.md §2.1).
+   */
+  citations?: Map<string, ResolvedCitation[]>;
   /**
    * Deliberately a narrow projection of TemplateItem rather than the row itself: `guidance` and
    * `severityGuidance` are INTERNAL methodology (see prisma/schema.prisma's TemplateItem — they are
@@ -664,19 +672,40 @@ interface RenderedField {
  * The method guard mirrors the audit form's (src/app/(app)/.../page.tsx): `structuredData` doubles
  * as the automated runner's output store, so a schema is honoured on manual items only.
  */
+/**
+ * The citation line under a value: where it was read from, and the words themselves.
+ *
+ * Rendered as part of the value rather than as a footnote, because a reader deciding whether to
+ * trust "Transferable: No" should not have to look anywhere else to see the clause behind it.
+ */
+function citationHtml(citations: ResolvedCitation[] | undefined): string {
+  if (!citations || citations.length === 0) return "";
+  return citations
+    .map(
+      (citation) =>
+        `<div style="font-size:11px;color:${NEUTRAL_TEXT};margin-top:2px">${escapeHtml(formatCitation(citation))}</div>`,
+    )
+    .join("");
+}
+
 function structuredFields(f: ReportFinding, accent: string): string {
   const schema =
     f.templateItem.method === CheckMethod.AUTOMATED ? null : parseFieldSchema(f.templateItem.fieldSchema);
 
   // Path 1.
-  if (schema) return schemaDrivenFields(schema, f.structuredData, accent);
+  if (schema) return schemaDrivenFields(schema, f.structuredData, accent, f.citations);
 
   // Paths 2 and 3.
   return legacyStructuredFields(f.structuredData);
 }
 
 /** Path 1: values keyed by the item's own declared schema. */
-function schemaDrivenFields(schema: ItemFieldSchema, raw: unknown, accent: string): string {
+function schemaDrivenFields(
+  schema: ItemFieldSchema,
+  raw: unknown,
+  accent: string,
+  citations?: Map<string, ResolvedCitation[]>,
+): string {
   const values = readPersistedValues(schema, raw);
   if (!hasAnyFieldValue(values)) return "";
 
@@ -700,11 +729,11 @@ function schemaDrivenFields(schema: ItemFieldSchema, raw: unknown, accent: strin
     scalars.push({
       label: field.label,
       html:
-        field.kind === "longtext"
+        (field.kind === "longtext"
           ? // Preserve the consultant's own paragraphing in a quoted clause or an observation;
             // everything else is a single short value.
             `<span style="white-space:pre-line">${escapeHtml(formatted)}</span>`
-          : escapeHtml(formatted),
+          : escapeHtml(formatted)) + citationHtml(citations?.get(field.key)),
     });
   }
 

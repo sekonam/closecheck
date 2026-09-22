@@ -608,3 +608,89 @@ describe("appendix", () => {
     expect(html).toContain("&lt;img src=x");
   });
 });
+
+describe("citations in the report", () => {
+  const schema = {
+    fields: [
+      { key: "transferable", label: "Transfers to the buyer", kind: "enum", options: ["transfers", "does-not-transfer"] },
+      { key: "penaltyAmount", label: "Early-termination penalty", kind: "money" },
+    ],
+  };
+
+  function citedFinding(citations: Map<string, unknown[]>) {
+    return finding({
+      tier: Tier.B,
+      title: "Primary business-system contract terms",
+      structuredData: { transferable: "does-not-transfer", penaltyAmount: "12000" },
+      templateItem: {
+        tier: Tier.B,
+        title: "Primary business-system contract terms",
+        description: null,
+        fieldSchema: schema,
+        method: CheckMethod.MANUAL,
+      },
+      citations,
+    } as never);
+  }
+
+  it("prints the clause under the value it supports", () => {
+    // This is the difference between the report asserting something and showing the reader what it
+    // read — a buyer's counsel can judge the rating without opening the file or asking anyone.
+    const html = renderReportHtml(
+      report({
+        findings: [
+          citedFinding(
+            new Map([
+              [
+                "transferable",
+                [
+                  {
+                    fieldKey: "transferable",
+                    evidenceId: "ev1",
+                    documentName: "toast-msa-2023.pdf",
+                    locator: "§14.2, p.7",
+                    excerpt: "This Agreement may not be assigned",
+                  },
+                ],
+              ],
+            ]),
+          ),
+        ],
+      }),
+    );
+    expect(html).toContain("§14.2, p.7 of toast-msa-2023.pdf");
+    expect(html).toContain("This Agreement may not be assigned");
+  });
+
+  it("renders values with no citation exactly as before", () => {
+    const html = renderReportHtml(report({ findings: [citedFinding(new Map())] }));
+    expect(html).toContain("Early-termination penalty");
+    expect(html).toContain("$12,000.00");
+  });
+
+  it("escapes a hostile excerpt", () => {
+    const html = renderReportHtml(
+      report({
+        findings: [
+          citedFinding(
+            new Map([
+              [
+                "transferable",
+                [
+                  {
+                    fieldKey: "transferable",
+                    evidenceId: "ev1",
+                    documentName: "x.pdf",
+                    excerpt: `<script>alert(1)</script>`,
+                  },
+                ],
+              ],
+            ]),
+          ),
+        ],
+      }),
+    );
+    expect(html).not.toContain("<script>alert(1)</script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+});

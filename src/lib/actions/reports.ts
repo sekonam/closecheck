@@ -10,6 +10,8 @@ import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtm
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
 import { putObject, getObject, deleteObject, reportPdfKey } from "@/lib/storage/local";
 import { attributionFor } from "@/lib/storage/describeEvidence";
+import { citationsByField } from "@/lib/audit/sourceRef";
+import { parseFieldSchema } from "@/lib/templates/fieldSchema";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { recordMetric } from "@/lib/metrics/record";
 
@@ -189,7 +191,19 @@ export async function generateReport(formData: FormData): Promise<void> {
         orgName: report.brandSnapshotFirmName ?? org.name,
         brandColorHex: report.brandSnapshotColorHex,
         brandLogoStorageKey: org.brandLogoUrl,
-        findings: audit.findings.map((f) => ({ ...f, evidenceCount: f.evidence.length })),
+        findings: audit.findings.map((f) => {
+          // Citations are keyed by fields the finding's own pinned template item declares, so a
+          // citation against a field a later template version removed never reaches the report.
+          const schema =
+            f.templateItem.method === "MANUAL" ? parseFieldSchema(f.templateItem.fieldSchema) : null;
+          return {
+            ...f,
+            evidenceCount: f.evidence.length,
+            citations: schema
+              ? citationsByField(f.evidence, new Set(schema.fields.map((field) => field.key)))
+              : undefined,
+          };
+        }),
         overallRatingOverride: audit.overallRatingOverride,
         overallRatingOverrideNote: audit.overallRatingOverrideNote,
         appendixDocuments,
