@@ -42,6 +42,22 @@ otherwise report directly to the user as plain findings with file/line and concr
   the immediate change seems harmless — this is exactly the kind of thing that's fine in isolation and
   bad in aggregate.
 
+**Any change touching Vendor Term Profiles** (`spec.md` §3, §8):
+- **Nothing may write a recalled value into a Finding.** The panel is reference-only by product
+  decision, not by omission: a prefilled value is indistinguishable, in the audit form and then in
+  the generated report, from one the consultant read out of *this* deal's contract — so a "use
+  this" control would let the previous deal's termination penalty ship to this buyer as a finding
+  about their target, with a name and a severity attached. A browser test asserts the panel offers
+  no control that writes; a change that adds one is a spec-level decision, not a UI improvement.
+- **This is a firm's reading of its clients' confidential documents**, not shared product content
+  like a Template — tenant-scoped with the usual two layers, and it cascades from the Engagement so
+  a reading cannot outlive the retention of the contract it came from.
+- **`vendorKeyFor`'s conservative matching is load-bearing for isolation within an org.** It strips
+  corporate suffixes and category words so "Toast, Inc." and "toast pos" match — and a name made
+  entirely of those words ("Payments Inc") keeps its unstripped form, because otherwise every such
+  vendor shares one profile and a consultant is shown another company's contract terms. Widening
+  the normalisation merges vendors; check what a change makes collide.
+
 **Any change touching credentials, live logins, or anything that looks like Tier C automation**
 (`spec.md` §4):
 - The product decision is **no live credential storage or proxying in v1**. Any code that accepts,

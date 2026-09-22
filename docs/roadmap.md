@@ -129,7 +129,11 @@ materialized in the way it predicted: all four templates now exist without desig
 evidence for their sequencing.
 
 **Update (2026-09-22):** all four templates are published at **v4** (`spec.md` §5) — v3 added
-structured capture and per-item guidance, v4 put sources behind the severity thresholds. Every manual
+structured capture and per-item guidance, v4 put sources behind the severity thresholds. A Vendor
+Term Profile (`spec.md` §3) also landed: what a firm recorded about a named vendor on a previous
+engagement, shown for reference beside the same item on the next deal. Not new scope — it is what
+Phase 2's "consistency across engagements" rationale always implied, arriving late — and like
+everything above it, built capability rather than validation. Every manual
 item now carries a verification procedure and severity thresholds — twelve had neither, which meant
 one consultant's Yellow was another's Red on the same evidence — and three methodology defects were
 fixed: the franchise and e-commerce templates silently had no platform-transferability item, the
