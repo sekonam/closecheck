@@ -86,6 +86,13 @@ skips itself quietly is worse than no suite when a launch gate cites it as evide
 `.github/workflows/ci.yml` runs all of it on push, with the five `db:verify-*` scripts executed
 before the app is even built — if tenant isolation is wrong, nothing else about that run matters.
 
+**Run the integration suite against a production build, not `next dev`.** CI does
+(`npm run build && npm start`), and it is the reliable way to run it locally too. Against a dev
+server the browser journey can fail spuriously: `next dev` compiles a route on its first request, so
+a run that coincides with someone editing files hits compile latency and times out, producing a
+failure that looks like a real regression and disappears on the next run. If a journey test fails
+once and passes immediately afterwards with nothing changed, that is what happened.
+
 ## Operations
 
 ```bash
