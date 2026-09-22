@@ -128,8 +128,16 @@ paid" cannot happen until Phase 2.5 below lands. Note the template-proliferation
 materialized in the way it predicted: all four templates now exist without design-partner deal-flow
 evidence for their sequencing.
 
-**Update (2026-09-22):** all four templates are published at **v4** (`spec.md` §5) — v3 added
-structured capture and per-item guidance, v4 put sources behind the severity thresholds. A Vendor
+**Update (2026-09-22):** all four templates are published at **v6** (`spec.md` §5) — v3 added
+structured capture and per-item guidance, v4 put sources behind the severity thresholds, and v5 and
+v6 corrected the content against the product's own behaviour. v5 found two rubrics describing a
+judgement the automated check cannot make and saying nothing about it; v6 found three more, plus a
+mis-rating where the runner rated a monitor-only DMARC policy Green in the same sentence that called
+it unenforced. Both are the same defect and it is worth naming here because it is a *content* risk
+rather than a code one: a consultant reading a rubric that contradicts the rating overrides a
+correct finding, and signs their name to it. The comparison is now enforced for every automated item
+(`src/lib/audit/rubricAlignment.ts`) rather than repeated per revision — v5 shipped without it and
+that is exactly how v5 missed three. A Vendor
 Term Profile (`spec.md` §3) also landed: what a firm recorded about a named vendor on a previous
 engagement, shown for reference beside the same item on the next deal. Not new scope — it is what
 Phase 2's "consistency across engagements" rationale always implied, arriving late — and like
