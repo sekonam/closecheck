@@ -27,6 +27,8 @@ interface RdapEntity {
 export interface RdapDomainResponse {
   events?: RdapEvent[];
   entities?: RdapEntity[];
+  /** EPP status codes, per RFC 9083 §4.6. */
+  status?: string[];
 }
 
 interface BootstrapFile {
@@ -95,6 +97,13 @@ export function parseRdapDomain(response: RdapDomainResponse): Omit<WhoisResult,
   return {
     registrar: registrarEntity ? vcardValue(registrarEntity, "fn") : null,
     createdDate: eventDate(response, "registration"),
+    // "transfer" is the registry's own record of the registration changing hands, which is what
+    // the 60-day transfer lock runs from. "last changed" is any modification and is a weaker
+    // signal — kept separate rather than collapsed, because conflating them would turn a routine
+    // contact-detail edit into a false transfer-lock warning.
+    lastTransferDate: eventDate(response, "transfer"),
+    lastChangedDate: eventDate(response, "last changed"),
+    statuses: response.status ?? [],
     // Registrant org is frequently redacted post-GDPR; null here means "read `raw` manually",
     // matching the legacy WHOIS behavior the consultant workflow already expects.
     registrantOrg: registrantEntity
@@ -105,7 +114,15 @@ export function parseRdapDomain(response: RdapDomainResponse): Omit<WhoisResult,
 }
 
 export async function lookupRdap(domain: string): Promise<WhoisResult> {
-  const empty = { registrar: null, createdDate: null, expiryDate: null, registrantOrg: null };
+  const empty = {
+    registrar: null,
+    createdDate: null,
+    expiryDate: null,
+    registrantOrg: null,
+    lastTransferDate: null,
+    lastChangedDate: null,
+    statuses: [] as string[],
+  };
   const tld = domain.split(".").pop();
   if (!tld) return { ...empty, raw: null, error: "Could not determine TLD" };
 

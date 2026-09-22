@@ -37,6 +37,9 @@ describe("parseRdapDomain", () => {
       createdDate: "1997-09-15T04:00:00Z",
       expiryDate: "2028-09-14T04:00:00Z",
       registrantOrg: "Example LLC",
+      lastTransferDate: null,
+      lastChangedDate: "2019-09-09T15:39:04Z",
+      statuses: [],
     });
   });
 
@@ -70,6 +73,9 @@ describe("parseRdapDomain", () => {
       createdDate: null,
       expiryDate: null,
       registrantOrg: null,
+      lastTransferDate: null,
+      lastChangedDate: null,
+      statuses: [],
     });
   });
 });
@@ -145,5 +151,34 @@ describe("lookupRdap", () => {
     ]);
     const result = await lookupRdap("missing.com");
     expect(result.error).toContain("404");
+  });
+});
+
+describe("transfer and lifecycle signals", () => {
+  it("reads the transfer event and EPP statuses a buyer needs", () => {
+    // ICANN's Transfer Policy locks a domain for 60 days after a change of registrant, so when it
+    // last changed hands decides whether it can move again before the close.
+    const parsed = parseRdapDomain({
+      events: [
+        { eventAction: "registration", eventDate: "2019-01-02T00:00:00Z" },
+        { eventAction: "expiration", eventDate: "2027-01-02T00:00:00Z" },
+        { eventAction: "transfer", eventDate: "2026-09-01T00:00:00Z" },
+        { eventAction: "last changed", eventDate: "2026-09-10T00:00:00Z" },
+      ],
+      status: ["client transfer prohibited", "server hold"],
+    });
+    expect(parsed.lastTransferDate).toBe("2026-09-01T00:00:00Z");
+    expect(parsed.lastChangedDate).toBe("2026-09-10T00:00:00Z");
+    expect(parsed.statuses).toEqual(["client transfer prohibited", "server hold"]);
+  });
+
+  it("keeps a transfer distinct from any other modification", () => {
+    // Conflating the two would turn a routine contact-detail edit into a false transfer-lock
+    // warning, which is worse than no warning: it trains a consultant to ignore the signal.
+    const parsed = parseRdapDomain({
+      events: [{ eventAction: "last changed", eventDate: "2026-09-10T00:00:00Z" }],
+    });
+    expect(parsed.lastTransferDate).toBeNull();
+    expect(parsed.lastChangedDate).toBe("2026-09-10T00:00:00Z");
   });
 });

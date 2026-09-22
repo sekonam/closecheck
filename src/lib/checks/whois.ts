@@ -7,8 +7,55 @@ export interface WhoisResult {
   createdDate: string | null;
   expiryDate: string | null;
   registrantOrg: string | null;
+  /**
+   * When the registration last changed hands, per the registry's own transfer event.
+   *
+   * Load-bearing for an acquisition, not trivia: ICANN's Transfer Policy imposes a 60-day lock
+   * after a change of registrant, so a domain that moved recently cannot move again inside that
+   * window — which can strand it past a closing date. A consultant needs to know this before the
+   * date is set, not after. (The policy revision removing the lock was adopted 2026-06-07 with no
+   * effective date, so this is correct today and is one to re-verify at each audit.)
+   */
+  lastTransferDate: string | null;
+  /** When the registration record was last modified at all — a weaker signal than a transfer. */
+  lastChangedDate: string | null;
+  /**
+   * EPP status codes on the registration. Some are protective and expected
+   * (`clientTransferProhibited` is a registrar lock the owner can lift); others say the domain is
+   * in a lifecycle state that will block or complicate a transfer at close.
+   */
+  statuses: string[];
   raw: string | null;
   error: string | null;
+}
+
+/** Every field absent. Spread into each failure path so a new field can't be forgotten in one. */
+const EMPTY_WHOIS_RESULT = {
+  registrar: null,
+  createdDate: null,
+  expiryDate: null,
+  registrantOrg: null,
+  lastTransferDate: null,
+  lastChangedDate: null,
+  statuses: [] as string[],
+  raw: null,
+  error: null,
+} satisfies WhoisResult;
+
+/**
+ * Collects every EPP status code from a legacy WHOIS response.
+ *
+ * Registries print one "Domain Status:" line per code, usually with an explanatory URL after it
+ * ("clientTransferProhibited https://icann.org/epp#clientTransferProhibited"), so the code is the
+ * first token.
+ */
+function extractAllStatuses(raw: string): string[] {
+  const statuses = new Set<string>();
+  for (const line of raw.split(/\r?\n/)) {
+    const match = /^\s*(?:Domain\s+)?Status:\s*(\S+)/i.exec(line);
+    if (match) statuses.add(match[1]);
+  }
+  return [...statuses];
 }
 
 function queryWhoisServer(server: string, query: string, timeoutMs = 8000): Promise<string> {
@@ -69,11 +116,7 @@ async function legacyWhoisLookup(domain: string): Promise<WhoisResult> {
   const tld = domain.split(".").pop();
   if (!tld) {
     return {
-      registrar: null,
-      createdDate: null,
-      expiryDate: null,
-      registrantOrg: null,
-      raw: null,
+      ...EMPTY_WHOIS_RESULT,
       error: "Could not determine TLD",
     };
   }
@@ -90,15 +133,19 @@ async function legacyWhoisLookup(domain: string): Promise<WhoisResult> {
       createdDate: extractField(raw, ["Creation Date:", "created:", "Registered on:"]),
       expiryDate: extractField(raw, ["Registry Expiry Date:", "Expiration Date:", "expires:"]),
       registrantOrg: extractField(raw, ["Registrant Organization:", "Registrant:"]),
+      lastTransferDate: extractField(raw, ["Transfer Date:", "transferred:"]),
+      lastChangedDate: extractField(raw, ["Updated Date:", "changed:", "Last Modified:"]),
+      // Legacy WHOIS prints one "Domain Status:" line per code, and `extractField` returns only
+      // the first match. Collected properly here rather than silently reporting one of several —
+      // a domain showing `clientTransferProhibited` and `pendingDelete` must not read as only the
+      // first of those.
+      statuses: extractAllStatuses(raw),
       raw,
       error: null,
     };
   } catch (err) {
     return {
-      registrar: null,
-      createdDate: null,
-      expiryDate: null,
-      registrantOrg: null,
+      ...EMPTY_WHOIS_RESULT,
       raw: null,
       error: err instanceof Error ? err.message : "WHOIS lookup failed",
     };

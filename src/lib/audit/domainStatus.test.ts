@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+
+import { __domainStatusInternals } from "./tierA";
+
+const { normalizeStatus, BLOCKING_DOMAIN_STATUSES, TRANSFER_FRICTION_STATUSES } =
+  __domainStatusInternals;
+
+describe("EPP status normalisation", () => {
+  it("treats every spelling registries actually use as the same status", () => {
+    // Verified against live registry responses: RDAP returns "server transfer prohibited" while
+    // legacy WHOIS returns "serverTransferProhibited". Matching either literally misses the other,
+    // and a status check that quietly matches nothing reads as "checked, nothing found".
+    for (const spelling of [
+      "server transfer prohibited",
+      "serverTransferProhibited",
+      "SERVER_TRANSFER_PROHIBITED",
+      "server-transfer-prohibited",
+    ]) {
+      expect(TRANSFER_FRICTION_STATUSES[normalizeStatus(spelling)], spelling).toBeDefined();
+    }
+  });
+
+  it("recognises the statuses that stop a transfer outright", () => {
+    for (const status of ["pending delete", "redemptionPeriod", "server hold", "clientHold"]) {
+      expect(BLOCKING_DOMAIN_STATUSES[normalizeStatus(status)], status).toBeDefined();
+    }
+  });
+
+  it("does not flag the ordinary registrar lock", () => {
+    // clientTransferProhibited sits on most domains by default. Flagging it would fire on nearly
+    // every audit, which is how a check gets ignored.
+    const key = normalizeStatus("client transfer prohibited");
+    expect(BLOCKING_DOMAIN_STATUSES[key]).toBeUndefined();
+    expect(TRANSFER_FRICTION_STATUSES[key]).toBeUndefined();
+  });
+
+  it("does not flag an ordinary healthy domain", () => {
+    // These are the exact statuses live lookups returned for example.com and robertos.com.
+    for (const status of ["ok", "client delete prohibited", "client update prohibited", "client renew prohibited"]) {
+      const key = normalizeStatus(status);
+      expect(BLOCKING_DOMAIN_STATUSES[key], status).toBeUndefined();
+      expect(TRANSFER_FRICTION_STATUSES[key], status).toBeUndefined();
+    }
+  });
+});
