@@ -100,10 +100,25 @@ this product holds.
   dead) schedules deletion after 90 days by default, which the consultant can move. Reviving a deal
   clears the schedule. A purge job deletes the files and requires the engagement still be terminal.
 - **Provenance is recorded**: what a document is, how large, and which named person attached it.
+- **Storage keys are contained at the operation, not at the generator.** Every read, write and
+  delete resolves the key and refuses anything landing outside the storage root — absolute paths and
+  `..` traversal included. This matters because the key generators are not the only source of keys:
+  a `storageKey` read back from the database is a bare string, and before this guard a row carrying
+  a traversing key made the retention job delete a file outside the root while reporting a clean
+  run, and the authenticated download route returned its contents. Demonstrated, then fixed; it was
+  not reachable through the application, because the upload path sanitises filenames and browsers
+  strip paths. Recorded here rather than omitted as "latent" because the consumer of these
+  operations is a scheduled job that deletes.
 
 **Not yet true, and material:** object storage is still a local-filesystem stand-in. Encryption at
 rest is therefore whatever the underlying volume provides, not application-managed, and the module
 is marked in-source as not for production. This is the largest single gap in this document.
+
+The containment guard above narrows what a swap has to re-examine; it does not narrow this gap.
+Encryption at rest is a property of the substrate and is simply absent. What the guard buys is that
+replacing the writer — which is what moving to S3-compatible storage does — cannot silently reopen
+traversal, because the refusal lives with the operation rather than with the code that happened to
+build the key.
 
 ---
 
