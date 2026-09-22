@@ -89,8 +89,23 @@ otherwise report directly to the user as plain findings with file/line and concr
   already happened once. `assertClientFacingDescriptions` catches the obvious shapes; a reviewer
   should catch the rest.
 
+**Any change to a shared cache, rate limiter, or anything with an eviction policy**:
+- Do two things with different lifetimes share one eviction policy? The policy always picks a
+  loser. This has already produced a defect and then its own inverse: insertion-order eviction was
+  flushing long-lived sign-in buckets, and the fix made those buckets the most privileged entries
+  in a shared map — so a flood of them would evict every paying tenant's API budget instead. A
+  failed sign-in mints a bucket keyed on any email string, so that flood is free. Partition the
+  map; do not tune the policy.
+- Does a limiter hard-reject before doing the work it is protecting? Then its degraded state is an
+  outage, not a restriction. The same config value that safely over-restricts an API limiter made
+  sign-in return null for every user on the deployment.
+
 **Any change that reads the client's network address** (rate limiting, access logging, abuse
 controls):
+- Never use `in` to test membership of a generated enum or plain object. Prisma's generated enums
+  are plain objects with `Object.prototype` on the chain, so `"constructor" in BillingPlan` is
+  `true` — verified empirically, not theorised. Use `Object.values(...).includes(...)`, a `Set`, or
+  a zod schema.
 - Is it parsed with `clientAddressFrom` (`src/lib/api/rateLimit.ts`), or read straight off
   `X-Forwarded-For`? The leftmost hop of that header is supplied by the client under every
   appending proxy, so anything keyed on it is keyed on a value an attacker chooses. This has
