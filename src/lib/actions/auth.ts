@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { AuthError } from "next-auth";
 import { signIn } from "@/lib/auth/config";
 import { signupPrisma } from "@/lib/auth/signupDb";
+import { recordMetric } from "@/lib/metrics/record";
 
 const signUpSchema = z
   .object({
@@ -74,6 +75,11 @@ export async function signUp(formData: FormData): Promise<void> {
     }
     throw err;
   }
+
+  // spec.md §11 signup metric — via the signup client: this action's only connection is
+  // closecheck_signup, which got the same INSERT-only telemetry grant as the app role. Not awaited:
+  // telemetry must never delay the user's first sign-in.
+  void recordMetric("org.signed_up", { orgId, client: signupPrisma });
 
   try {
     await signIn("credentials", { email, password, redirectTo: "/engagements" });

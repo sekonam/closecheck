@@ -87,3 +87,17 @@ the new role.
   pricing page and signup flow do not charge anything.
 - **The report disclaimer text is unreviewed by counsel** — flagged in-app on the settings page,
   unchanged by this runbook.
+
+## Transactional email (Resend — Phase 2.5)
+
+Without configuration the app still works: every system email (team invite, portal-link share,
+receipt) is recorded in the `email_messages` table with status `LOGGED` and echoed to the server
+console, and the in-app relays (invite temp-password display, copy-paste portal URL) remain the
+guaranteed path. To actually deliver email:
+
+1. Create a Resend account (resend.com) and add your sending domain under Domains; add the DKIM/SPF
+   DNS records Resend shows you and wait for verification.
+2. Create an API key (Full Access → Sending) and set it as `RESEND_API_KEY` on the web service.
+3. Set `EMAIL_FROM` to a verified-domain sender, e.g. `CloseCheck <notifications@yourdomain.com>`.
+4. Redeploy. Delivery status per message is visible in the `email_messages` table (`SENT` with the
+   provider id, or `FAILED` with the provider error).

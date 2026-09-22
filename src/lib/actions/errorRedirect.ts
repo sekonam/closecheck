@@ -1,4 +1,5 @@
 import { redirect, unstable_rethrow } from "next/navigation";
+import { recordError } from "@/lib/metrics/record";
 
 /**
  * Runs a Server Action and, on failure, redirects to `path` with the error message in a query
@@ -23,6 +24,9 @@ export async function runOrRedirect(action: () => Promise<void>, path: string): 
     await action();
   } catch (err) {
     unstable_rethrow(err);
+    // Phase 2.5 error tracking: every server-action failure that reaches a user as an error message
+    // also lands in error_events. Fire-and-forget — recording must never delay or alter the redirect.
+    void recordError("server-action", err);
     const message = err instanceof Error ? err.message : "Something went wrong.";
     redirect(`${path}?error=${encodeURIComponent(message)}`);
   }

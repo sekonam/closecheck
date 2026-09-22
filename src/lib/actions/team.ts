@@ -7,16 +7,19 @@ import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
+import { sendEmail } from "@/lib/email/send";
+import { teamInvite } from "@/lib/email/templates";
 
 const inviteMemberSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address"),
   name: z.string().trim().optional(),
 });
 
-/** Generates a temporary password the invited teammate uses for their first sign-in. There is no
- * email-sending infrastructure in this codebase — this is an explicit placeholder for a real
- * invite-by-email flow (docs/roadmap.md Phase 2's "team-tier multi-seat support"): the owner sees it
- * once (via the short-lived cookie below) and has to relay it to the invitee themselves. */
+/** Generates a temporary password the invited teammate uses for their first sign-in. Email
+ * infrastructure now exists (src/lib/email/send.ts, Phase 2.5) and the invite IS emailed below —
+ * but the short-lived-cookie relay stays as the guaranteed path: with no RESEND_API_KEY configured
+ * the email is only LOGGED, and even with one configured, delivery is best-effort while the cookie
+ * is synchronous and certain. */
 function generateTempPassword(): string {
   return randomBytes(9).toString("base64url");
 }
@@ -41,7 +44,7 @@ export async function inviteMember(formData: FormData): Promise<void> {
   const tempPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 10);
 
-  await withOrgScope(orgId, async (tx) => {
+  const { inviterName, orgName } = await withOrgScope(orgId, async (tx) => {
     const caller = await tx.user.findUnique({ where: { id: userId } });
     if (!caller) {
       throw new Error("Your account could not be found.");
@@ -49,6 +52,7 @@ export async function inviteMember(formData: FormData): Promise<void> {
     if (caller.role !== "OWNER") {
       throw new Error("Only the account owner can invite teammates.");
     }
+    const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
 
     try {
       await tx.user.create({
@@ -71,6 +75,20 @@ export async function inviteMember(formData: FormData): Promise<void> {
       }
       throw err;
     }
+
+    return { inviterName: caller.name || caller.email, orgName: org.name };
+  });
+
+  // Best-effort by design (sendEmail never throws) — the member row is committed above, and the
+  // cookie relay below remains the guaranteed way the invitee gets their password.
+  const invite = teamInvite({ inviterName, orgName, email, tempPassword });
+  await sendEmail({
+    orgId,
+    to: email,
+    subject: invite.subject,
+    template: "team-invite",
+    html: invite.html,
+    text: invite.text,
   });
 
   // One-time display only: a 60-second cookie is enough time for the owner to copy the password and

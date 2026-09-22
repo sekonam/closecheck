@@ -17,6 +17,7 @@
     "db:publish-tiera-expansion": "tsx -r dotenv/config scripts/publish-tierA-expansion.ts",
     "db:verify-api-role": "tsx -r dotenv/config scripts/verify-api-role.ts",
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
+    "metrics:report": "tsx -r dotenv/config scripts/metrics-report.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
     "test": "vitest run"
   },
@@ -29,6 +30,7 @@
     "prisma": "^6.19.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "stripe": "^22.6.2",
     "zod": "^4.6.2"
   },
   "devDependencies": {
