@@ -51,6 +51,28 @@ export async function resolvePortalAccess(
     const report = await tx.report.findFirst({ where: { id: link.reportId } });
     if (!report) return null;
 
+    // The link and the report must agree about whose report this is.
+    //
+    // These are two rows read separately, and nothing else compares them: the org returned below
+    // came from the LINK while the document comes from the REPORT. A row where they disagree serves
+    // one firm's diligence report resolved against another firm's identity — and for any report
+    // generated before brand snapshots existed, the portal would wrap a seller's report in a
+    // different consultancy's name and logo and hand it to a buyer.
+    //
+    // Not reachable through the application: createPortalLink takes the org from the session and
+    // cannot see another org's report under RLS, so it refuses before writing. That makes this
+    // latent rather than absent, and latent is the wrong thing to leave on the one anonymous
+    // surface in the product — spec.md §8 asks for two independent layers precisely so a bug in
+    // either alone cannot cross tenants, and until now the application layer was the only one
+    // holding this.
+    //
+    // Refuses rather than preferring one of them. Two rows disagreeing about who owns a report is a
+    // corrupt row, and the only safe reading of a corrupt row here is that there is nothing to
+    // serve — the same choice the storage containment guard makes for a key resolving outside its
+    // root. Deliberately before the access-log write, so a request that resolves to nothing does
+    // not leave a view in a consultant's trail.
+    if (report.orgId !== link.orgId) return null;
+
     if (options.log) {
       // Raw INSERT, not portalAccessLogEntry.create(): closecheck_portal has no SELECT grant on
       // portal_access_log (see src/lib/portal/db.ts's docstring and
