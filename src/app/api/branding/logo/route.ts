@@ -3,6 +3,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getObject } from "@/lib/storage/objectStore";
 import { logoContentTypeFor } from "@/lib/branding/logoContentType";
+import { UNTRUSTED_CONTENT_CSP, fileResponseHeaders } from "@/lib/http/fileResponseHeaders";
 
 
 /**
@@ -35,10 +36,19 @@ export async function GET() {
   const contentType = logoContentTypeFor(org.brandLogoUrl) ?? "application/octet-stream";
 
   return new NextResponse(new Uint8Array(bytes), {
-    headers: {
-      "Content-Type": contentType,
-      // Always fetch fresh — the settings page just wrote a possibly-new logo under the same URL.
-      "Cache-Control": "no-store",
-    },
+    // This route previously set only the content type and a bare `no-store`, while the other three
+    // file-serving routes had all converged on nosniff, `private`, and a robots tag. Nothing had
+    // gone wrong, and nothing signalled the difference either — which is why the invariants now
+    // live in fileResponseHeaders rather than in each route's own judgement.
+    //
+    // `inline` is correct here specifically: this is consumed as an <img> src on the settings page.
+    // What makes that safe is the content type, which comes from an extension allowlist that has
+    // never included SVG — plus nosniff, so an unrecognised extension served as octet-stream
+    // cannot be re-interpreted as markup on the app's own origin.
+    headers: fileResponseHeaders({
+      contentType,
+      disposition: "inline",
+      csp: UNTRUSTED_CONTENT_CSP,
+    }),
   });
 }

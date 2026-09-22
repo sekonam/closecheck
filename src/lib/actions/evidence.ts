@@ -14,8 +14,10 @@ import type { Prisma } from "@prisma/client";
 
 /**
  * Attaches an uploaded document as Evidence on a Finding (docs/spec.md §4, Tier B). The file itself
- * goes through src/lib/storage/local.ts (swap for real object storage before production, per
- * docs/spec.md §8's retention/encryption requirements — this is a local-dev stand-in only).
+ * goes through src/lib/storage/objectStore.ts, which selects a backend from configuration: the
+ * local filesystem by default, S3-compatible object storage when a bucket is named. The instruction
+ * that used to sit here — swap for real object storage before production — has been carried out,
+ * and what remains is a deployment decision rather than a code change.
  */
 export async function attachEvidence(formData: FormData): Promise<void> {
   const { orgId, userId } = await requireOrgSession();

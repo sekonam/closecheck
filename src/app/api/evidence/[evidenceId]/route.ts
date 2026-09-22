@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getObject } from "@/lib/storage/objectStore";
+import { UNTRUSTED_CONTENT_CSP, fileResponseHeaders } from "@/lib/http/fileResponseHeaders";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ evidenceId: string }> }) {
   const { evidenceId } = await params;
@@ -40,23 +41,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ evi
   const encodedFilename = encodeURIComponent(rawFilename.replace(/[\r\n]/g, ""));
 
   return new NextResponse(new Uint8Array(bytes), {
-    headers: {
+    headers: fileResponseHeaders({
       // Deliberately NOT the file's own MIME type. A seller's document is content this product
       // neither authored nor can vouch for, and serving it inline from the app's own origin would
       // make any HTML or SVG among it a stored-XSS vector against the consultant's session.
       // octet-stream plus an attachment disposition means the browser saves it rather than
       // rendering it, whatever it turns out to be.
-      "Content-Type": "application/octet-stream",
-      "Content-Disposition": `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
-      // Removes the "browser decides it knows better than the Content-Type" case entirely. Close
-      // to moot alongside the attachment disposition above, but it is one header and it means the
-      // protection no longer depends on the disposition being right.
-      "X-Content-Type-Options": "nosniff",
+      contentType: "application/octet-stream",
+      disposition: "attachment",
+      filename: asciiFilename,
+      filenameEncoded: encodedFilename,
       // Covers the case where some future change makes a response here inline: with no sources
       // permitted, a document that did get rendered still cannot load or execute anything.
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-      // Evidence is a seller's confidential document. Keep it out of shared caches.
-      "Cache-Control": "private, no-store",
-    },
+      csp: UNTRUSTED_CONTENT_CSP,
+    }),
   });
 }

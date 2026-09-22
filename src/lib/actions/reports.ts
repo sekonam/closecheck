@@ -58,8 +58,9 @@ async function resolveLogo(storageKey: string | null): Promise<ResolvedLogo | nu
 
 /**
  * Where a Report's own copy of the firm's logo lives — beside its PDF, under the same per-tenant
- * prefix `reportPdfKey` uses (src/lib/storage/local.ts), so a future move to object storage carries
- * both across unchanged.
+ * prefix `reportPdfKey` uses (src/lib/storage/objectStore.ts), so both carry across backends
+ * unchanged — which is what a move to object storage turned out to need: the keys are identical
+ * and only the thing interpreting them differs.
  *
  * WHY A COPY, RATHER THAN POINTING AT THE ORG'S LIVE LOGO KEY
  * A Report is a point-in-time document (spec.md §6) and the PDF has these bytes baked in for good.

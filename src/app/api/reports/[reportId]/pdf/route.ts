@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
+import { fileResponseHeaders } from "@/lib/http/fileResponseHeaders";
 import { withOrgScope, type ScopedTx } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getObject } from "@/lib/storage/objectStore";
@@ -34,14 +35,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
   const filename = `closecheck-${report.audit.engagement.businessName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${report.id}.pdf`;
 
   return new NextResponse(new Uint8Array(pdf), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      // Tenant-scoped content behind a session: never hold it in a shared cache.
-      "Cache-Control": "private, no-store",
-      "X-Robots-Tag": "noindex, nofollow",
-      "X-Content-Type-Options": "nosniff",
-    },
+    // No content-security policy: `sandbox` is what would stop a browser rendering the PDF, and
+    // this one the product authored — it is not untrusted content. See fileResponseHeaders.
+    headers: fileResponseHeaders({
+      contentType: "application/pdf",
+      disposition: "attachment",
+      filename,
+    }),
   });
 }
 
