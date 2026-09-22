@@ -40,18 +40,18 @@ describe("checkRateLimit", () => {
 
   it("starts a fresh window once the old one has passed", () => {
     const start = 1_000_000;
-    for (let i = 0; i < 4; i++) checkRateLimit("k", start);
-    expect(checkRateLimit("k", start).allowed).toBe(false);
+    for (let i = 0; i < 4; i++) checkRateLimit("k", { now: start });
+    expect(checkRateLimit("k", { now: start }).allowed).toBe(false);
     // One millisecond past the window boundary the budget is new again.
-    expect(checkRateLimit("k", start + 60_001).allowed).toBe(true);
+    expect(checkRateLimit("k", { now: start + 60_001 }).allowed).toBe(true);
   });
 
   it("always reports a retry-after of at least one second", () => {
     const start = 1_000_000;
-    for (let i = 0; i < 4; i++) checkRateLimit("k", start);
+    for (let i = 0; i < 4; i++) checkRateLimit("k", { now: start });
     // Sampled at the very last millisecond of the window, a naive ceil could produce 0 and invite
     // an immediate retry that is still refused.
-    const result = checkRateLimit("k", start + 59_999);
+    const result = checkRateLimit("k", { now: start + 59_999 });
     expect(result.retryAfterSeconds).toBeGreaterThanOrEqual(1);
   });
 
@@ -74,11 +74,15 @@ describe("rateLimitKeyForRequest", () => {
     expect(key).toBe("key:apikey_1");
   });
 
-  it("uses the first hop of x-forwarded-for for anonymous requests", () => {
-    expect(rateLimitKeyForRequest(req({ "x-forwarded-for": "1.1.1.1, 2.2.2.2" }))).toBe("ip:1.1.1.1");
+  it("keys an anonymous request on the address the trusted proxy appended", () => {
+    // NOT the leftmost hop — that one is supplied by the caller. See clientAddressFrom's comment
+    // and the forgery cases in src/lib/auth/rateLimit.test.ts.
+    process.env.TRUSTED_PROXY_HOPS = "1";
+    expect(rateLimitKeyForRequest(req({ "x-forwarded-for": "1.1.1.1, 2.2.2.2" }))).toBe("ip:2.2.2.2");
   });
 
   it("falls back to x-real-ip, then to a single shared anonymous bucket", () => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
     expect(rateLimitKeyForRequest(req({ "x-real-ip": "3.3.3.3" }))).toBe("ip:3.3.3.3");
     // Degrading to one global budget for unidentifiable anonymous traffic is the safe direction:
     // it over-restricts strangers rather than under-restricting them.
@@ -88,7 +92,7 @@ describe("rateLimitKeyForRequest", () => {
 
 describe("rateLimitHeaders", () => {
   it("reports the reset time in seconds, as HTTP consumers expect", () => {
-    const result = checkRateLimit("k", 1_000_000);
+    const result = checkRateLimit("k", { now: 1_000_000 });
     const headers = rateLimitHeaders(result);
     expect(headers["X-RateLimit-Limit"]).toBe("3");
     expect(Number(headers["X-RateLimit-Reset"])).toBe(Math.ceil((1_000_000 + 60_000) / 1000));

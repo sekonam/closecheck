@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateApiRequest, apiUnauthorized, type ApiAuthResult } from "./auth";
 import {
+  apiRateLimitOptions,
   apiTooManyRequests,
   checkRateLimit,
   rateLimitHeaders,
@@ -34,12 +35,12 @@ export async function guardApiRequest(request: Request): Promise<ApiGuardResult>
   const auth = await authenticateApiRequest(request);
 
   if (!auth) {
-    const anonymous = checkRateLimit(rateLimitKeyForRequest(request));
+    const anonymous = checkRateLimit(rateLimitKeyForRequest(request), apiRateLimitOptions());
     if (!anonymous.allowed) return { ok: false, response: apiTooManyRequests(anonymous) };
     return { ok: false, response: apiUnauthorized() };
   }
 
-  const budget = checkRateLimit(rateLimitKeyForRequest(request, auth.apiKeyId));
+  const budget = checkRateLimit(rateLimitKeyForRequest(request, auth.apiKeyId), apiRateLimitOptions());
   if (!budget.allowed) return { ok: false, response: apiTooManyRequests(budget) };
 
   return { ok: true, auth, headers: rateLimitHeaders(budget) };
