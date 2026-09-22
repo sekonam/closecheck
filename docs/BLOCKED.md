@@ -74,7 +74,33 @@ URL to point at.
 
 ---
 
-## 4. Design partners — the evidence gates
+## 4. Object storage — a provider decision, then credentials
+
+**State.** Built and tested, not yet run against a real bucket. `src/lib/storage/objectStore.ts`
+has two backends: local disk (the default, unchanged, needs no configuration) and an S3-compatible
+one that activates the moment `STORAGE_S3_BUCKET` is set. Written against the S3 protocol rather
+than a provider, so AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces and MinIO all work.
+
+**This is a different kind of blocker from the rest of this file, and worth separating.** Everything
+else here waits on evidence you have to go and find — a design partner, a paying customer. This
+waits on a decision you could make in an afternoon, and then a credential. No effort will unblock
+the others; a choice unblocks this one.
+
+**What only you can do:** pick a provider, create a bucket, and set `STORAGE_S3_BUCKET` plus its
+credentials (see `.env.example`). Then run the five-minute exercise in `deployment.md`: upload a
+document to an audit, download it back, set that engagement to a terminal stage with a past purge
+date, and run `npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and
+delete, which is the whole surface — and it is what lets the "not yet exercised against a real
+endpoint" caveat come out of `s3.ts`, `.env.example` and the runbook.
+
+**Why it matters before a design partner, not after.** Local-on-a-mounted-volume is a supported
+production configuration and the app says so at boot — but it gives no encryption at rest beyond
+whatever the volume provides, and no redundancy: the volume is a single copy. A design partner
+running a real audit means real seller contracts and merchant statements landing on it. That is the
+largest remaining item in `docs/security-posture.md`, and it is the one gap on this list that a
+firm's own security reviewer would ask about.
+
+## 5. Design partners — the evidence gates
 
 **Gate:** `roadmap.md` Phase 0 exit, Phase 1 exit, Phase 2 exit.
 
@@ -92,7 +118,7 @@ free-sample-audit offer.
 
 ---
 
-## 5. Distribution channel decision
+## 6. Distribution channel decision
 
 **Gate:** `spec.md` §12; `releases.md` §5 "before any GTM push toward a marketplace partnership".
 
@@ -103,7 +129,7 @@ comes first. Not a code task and not one to default into.
 
 ---
 
-## 6. Phase 4 customer enablement
+## 7. Phase 4 customer enablement
 
 **Gate:** `releases.md` §5, "before enabling the Phase 4 depth set for customers".
 
@@ -120,7 +146,7 @@ feature stays dark. That is the gate working, not a gap.
 
 ---
 
-## 7. The deferred Phase 4 items — deliberately not built
+## 8. The deferred Phase 4 items — deliberately not built
 
 `spec.md` §13.4 and `roadmap.md` Phase 4 list several things as "indicative, not committed". They
 were reconsidered on 2026-09-22 under an explicit instruction to build the deferred set, and the
@@ -153,7 +179,7 @@ The honest summary: the Phase 4 scope that could be built without new evidence o
 *was* built, and is covered by tests and documentation. What remains is gated on things code cannot
 supply.
 
-## 8. Read the report disclaimer and decide whether it says what you want
+## 9. Read the report disclaimer and decide whether it says what you want
 
 **Gate:** none — this is not blocking anything. It is here because it is the one piece of content
 in the product that carries your consultants' professional exposure, and it was last edited by
@@ -171,7 +197,7 @@ Note the cost curve: changing it clears every firm's acknowledgement and blocks 
 until each owner re-acknowledges. Today that is one development org. After the first paying
 customers it is a coordinated interruption for all of them — so this is cheapest to settle now.
 
-## 9. SOC 2 posture
+## 10. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
