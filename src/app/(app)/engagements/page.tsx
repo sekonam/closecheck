@@ -44,7 +44,7 @@ export default async function EngagementsPage({
     <div>
       <h1 className="text-lg font-semibold text-slate-900">Engagements</h1>
       <p className="mt-1 text-sm text-slate-500">
-        One Engagement per acquisition deal being diligenced (docs/spec.md §3).
+        One Engagement per acquisition deal being diligenced.
       </p>
 
       {error && (

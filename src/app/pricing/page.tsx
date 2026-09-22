@@ -23,7 +23,7 @@ export default function PricingPage() {
         Simple annual pricing with bundled audit credits — no per-seat metering to think about.
       </p>
       <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        These numbers are placeholders pending real-world validation (docs/spec.md §9), not committed
+        These numbers are placeholders pending real-world validation, not committed
         pricing — they may change before General Availability.
       </p>
 

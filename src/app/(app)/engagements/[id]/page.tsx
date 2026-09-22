@@ -107,7 +107,7 @@ export default async function EngagementPage({
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="documentPurgeAt">
-              Purge uploaded documents on/after (docs/spec.md §8)
+              Purge uploaded documents on/after
             </label>
             <input
               id="documentPurgeAt"

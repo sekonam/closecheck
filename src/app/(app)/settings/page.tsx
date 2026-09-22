@@ -113,7 +113,7 @@ export default async function SettingsPage({
       <h1 className="mt-2 text-lg font-semibold text-slate-900">Firm branding</h1>
       <p className="text-sm text-slate-500">
         Your logo, name, and brand color appear on the cover and footer of every generated report
-        (docs/spec.md §6) — never CloseCheck&apos;s.
+        — never CloseCheck&apos;s.
       </p>
 
       {error && (
@@ -127,6 +127,31 @@ export default async function SettingsPage({
         className="mt-6 rounded-lg border border-slate-200 bg-white p-4"
       >
         <h2 className="text-sm font-medium text-slate-900">Firm name and color</h2>
+        {/* Firm-scoped (spec.md §3): this rewrites the branding on every report the firm has ever
+            issued. Enforced server-side — rendering the form to a member anyway would be a control
+            that presents itself and then refuses, which is the same failure as a message telling
+            someone to do what only an owner can. The values stay visible, because a member needs to
+            know what is on the reports they produce; only the control is owner-only. */}
+        {!isOwner && (
+          <div className="mt-3 text-sm text-slate-600">
+            <p>
+              {org.name}
+              {org.brandColorHex && (
+                <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
+                  <span
+                    className="inline-block h-3 w-3 rounded-full border border-slate-300"
+                    style={{ backgroundColor: org.brandColorHex }}
+                  />
+                  {org.brandColorHex}
+                </span>
+              )}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Your account owner sets the firm&apos;s name and colour.
+            </p>
+          </div>
+        )}
+        {isOwner && (
         <form action={updateOrgBrandingAction} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="name">
@@ -162,6 +187,7 @@ export default async function SettingsPage({
             </button>
           </div>
         </form>
+        )}
       </div>
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
@@ -183,6 +209,12 @@ export default async function SettingsPage({
               No logo
             </div>
           )}
+          {!isOwner && (
+            <p className="text-xs text-slate-500">
+              Your account owner sets the firm&apos;s logo.
+            </p>
+          )}
+          {isOwner && (
           <form action={uploadOrgLogoAction} className="flex items-center gap-2">
             <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
             <button
@@ -192,7 +224,8 @@ export default async function SettingsPage({
               Upload
             </button>
           </form>
-          {org.brandLogoUrl && (
+          )}
+          {isOwner && org.brandLogoUrl && (
             <form action={removeOrgLogoAction}>
               <button type="submit" className="text-sm text-slate-500 underline hover:text-slate-700">
                 Remove
@@ -205,8 +238,8 @@ export default async function SettingsPage({
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-medium text-slate-900">Report disclaimer</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Every generated report includes this language (docs/spec.md §6). Review it once — report
-          generation is blocked until you do.
+          Every generated report includes this language. It has to be accepted once, on the
+          firm&apos;s behalf, before any report can be generated.
         </p>
         <blockquote className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
           {REPORT_DISCLAIMER_TEXT}
@@ -214,6 +247,11 @@ export default async function SettingsPage({
         {org.disclaimerAcknowledgedAt ? (
           <p className="mt-3 text-sm text-emerald-700">
             Reviewed on {org.disclaimerAcknowledgedAt.toISOString().slice(0, 10)}.
+          </p>
+        ) : !isOwner ? (
+          <p className="mt-3 text-sm text-amber-700">
+            Your account owner needs to accept this language before anyone in the firm can generate
+            a report.
           </p>
         ) : (
           <form action={acknowledgeDisclaimerAction} className="mt-3">
@@ -231,7 +269,7 @@ export default async function SettingsPage({
         <h2 className="text-sm font-medium text-slate-900">Team</h2>
         <p className="mt-1 text-xs text-slate-500">
           Everyone listed here shares this firm&apos;s engagements, templates, and branding
-          (docs/roadmap.md Phase 2). Only the account owner can invite or remove teammates.
+          Only the account owner can invite or remove teammates.
         </p>
 
         {invitedEmail && invitedTempPassword && (
@@ -295,7 +333,7 @@ export default async function SettingsPage({
         <h2 className="text-sm font-medium text-slate-900">Plan &amp; billing</h2>
         <p className="mt-1 text-xs text-slate-500">
           Base plan includes a yearly bundle of full audits; additional audits are batched onto your
-          next monthly invoice, never charged one-by-one (docs/spec.md §9). Tier A checks are always
+          next monthly invoice, never charged one-by-one. Tier A checks are always
           unmetered. Only the account owner can change the plan.
         </p>
 
@@ -422,7 +460,7 @@ export default async function SettingsPage({
         <h2 className="text-sm font-medium text-slate-900">API keys</h2>
         <p className="mt-1 text-xs text-slate-500">
           Read-only access to this firm&apos;s engagements, audits, and report metadata for your own
-          tooling (docs/spec.md §13.2). Pass a key as{" "}
+          tooling. Pass a key as{" "}
           <code className="rounded bg-slate-100 px-1">Authorization: Bearer cc_live_...</code> to{" "}
           <code className="rounded bg-slate-100 px-1">/api/v1/engagements</code>. Only the account
           owner can create or revoke keys.
@@ -493,7 +531,7 @@ export default async function SettingsPage({
         <p className="mt-1 text-xs text-slate-500">
           CloseCheck POSTs signed <code className="rounded bg-slate-100 px-1">audit.completed</code>{" "}
           and <code className="rounded bg-slate-100 px-1">report.generated</code> events to each
-          endpoint (docs/spec.md §13.3). Payloads carry identifiers and status only — use the API
+          endpoint. Payloads carry identifiers and status only — use the API
           above for detail. Verify the{" "}
           <code className="rounded bg-slate-100 px-1">X-CloseCheck-Signature</code> header
           (HMAC-SHA256 of the raw body with your signing secret). Only the account owner can manage
