@@ -82,6 +82,42 @@ copy a firm's own accumulated readings, because those exist only where the work 
 makes this the first thing here worth positioning against the 12–24 month window, not merely
 listing.
 
+### Template-version event: v5 — shipped 2026-09-22 (rubrics vs. what the runner computes)
+
+A different kind of correction from v4's, and the distinction is the point. v4 changed what the
+thresholds *are*. v5 changes nothing about the automated ratings at all — it corrects two published
+rubrics that disagreed with the code already producing those ratings. The runner was right in both
+cases; the document a consultant reads was wrong.
+
+That matters because of who the rubric is for. A consultant checking a machine rating against the
+published rule would have found a disagreement and resolved it the wrong way — overriding a correct
+Green to Yellow, and signing their name to it.
+
+| Rubric said | Runner computes | Consequence |
+|---|---|---|
+| Rate certificates on proportion of lifetime remaining; day counts are vendor folklore | The **shorter** of one third of lifetime (capped at 30 days) and one sixth (capped at 14) | A 395-day certificate with 105 days left rates Green; the rubric put Yellow at 132 |
+| Domain expiry Yellow within "expected close plus 90 days" | 30/90 days from the **audit date** | For a deal six months out, a domain expiring in 100 days is Green by the runner and Yellow by the rubric |
+
+Both corrections adopt the runner's behaviour rather than changing it, and for reasons worth keeping:
+
+**The certificate cap is not a retreat to vendor convention.** Proportion alone fails at the long
+end — one third of a one-year certificate is four months, so a healthy DigiCert certificate with 45
+days left would rate Red, and §6's worst-item rule turns that into an entirely Red audit for a
+target doing nothing wrong. A day count alone fails at the short end, rating every six-day
+Let's Encrypt certificate Red for its whole life. Taking the shorter of the two is what survives
+both ends, which is the shape v4 was reaching for and expressed incompletely.
+
+**The domain-expiry rubric referenced data the product does not have.** There is no expected-close
+date anywhere in the model — `Engagement` carries a `dealStage` and no date — so "expected close
+plus 90 days" was a rule no code could implement. v5 states what the automated rating measured and
+what it could not, instead of describing a capability that does not exist. That gap is worth naming
+rather than quietly deleting: a consultant who wants the rating to account for their closing date
+is asking for something real, and it is now a visible absence rather than a phantom instruction.
+
+**In-progress audits stay on v4's rules**, as every template version does. At publication the
+database held audits pinned across v1, v3, v4 and v5 simultaneously — the versioning machinery
+exercised by four real content revisions rather than by a test.
+
 ### Template-version event: v4 — shipped 2026-09-22 (severity thresholds)
 
 Large enough to need its own entry, because this is the first revision that changes what existing
