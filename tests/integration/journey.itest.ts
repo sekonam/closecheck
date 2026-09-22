@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { PrismaClient } from "@prisma/client";
 import { BASE_URL, serverIsReachable } from "./helpers/http";
 
@@ -25,6 +25,28 @@ const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 
 const ORG_NAME = `E2E Journey ${suffix}`;
 const EMAIL = `e2e-journey-${suffix}@itest.invalid`;
 const PASSWORD = "correct-horse-battery-staple-9";
+
+/**
+ * Clicks a server-action submit button and waits for the action's own POST to come back.
+ *
+ * Neither obvious wait works here. A server action re-renders in place rather than navigating, so
+ * a load-state wait never fires for it — and waiting for network idle is actively useless under
+ * `next dev`, where the HMR websocket means the network never goes idle: it either times out after
+ * 30 seconds or resolves at an arbitrary unrelated moment. Every spurious failure this suite
+ * produced traced to that, the same code passing and failing on alternate runs.
+ *
+ * Worse, navigating away before the action completes CANCELS it. "Click save, then go to the page,
+ * then assert" therefore cancels the save, and the page correctly shows nothing saved — which
+ * presents as a persistence bug in code that is working perfectly.
+ *
+ * Waiting on the POST response is the only signal that actually means "the action finished".
+ */
+async function submitAndSettle(page: Page, locator: Locator): Promise<void> {
+  await Promise.all([
+    page.waitForResponse((response) => response.request().method() === "POST", { timeout: 30_000 }),
+    locator.click(),
+  ]);
+}
 
 describe("a stranger can complete the core loop in a real browser", () => {
   let browser: Browser;
@@ -98,9 +120,8 @@ describe("a stranger can complete the core loop in a real browser", () => {
     // Three forms live on this page (edit engagement, start audit, sign out); target the one that
     // carries the template picker.
     const startAudit = page.locator('form:has(select[name="templateSlug"])');
-    await expect(await startAudit.count()).toBeGreaterThan(0);
-    await startAudit.locator('button[type="submit"]').click();
-    await page.waitForLoadState("networkidle");
+    expect(await startAudit.count()).toBeGreaterThan(0);
+    await submitAndSettle(page, startAudit.locator('button[type="submit"]'));
 
     const audit = await directPrisma.audit.findFirst({ where: { engagementId: engagement.id } });
     expect(audit, "no Audit row was created").toBeTruthy();
@@ -142,8 +163,7 @@ describe("a stranger can complete the core loop in a real browser", () => {
 
   it("enables report generation once the disclaimer is acknowledged on Settings", async () => {
     await page.goto(`${BASE_URL}/settings`, { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /reviewed this language/i }).click();
-    await page.waitForLoadState("networkidle");
+    await submitAndSettle(page, page.getByRole("button", { name: /reviewed this language/i }));
 
     const org = await directPrisma.consultantOrg.findFirstOrThrow({ where: { name: ORG_NAME } });
     expect(org.disclaimerAcknowledgedAt).toBeTruthy();
@@ -156,8 +176,10 @@ describe("a stranger can complete the core loop in a real browser", () => {
     await page.goto(`${BASE_URL}/engagements/${audit.engagementId}/audits/${audit.id}`, {
       waitUntil: "domcontentloaded",
     });
-    await page.locator('form:has(input[name="includeAppendix"]) button[type="submit"]').click();
-    await page.waitForLoadState("networkidle");
+    await submitAndSettle(
+      page,
+      page.locator('form:has(input[name="includeAppendix"]) button[type="submit"]'),
+    );
 
     const report = await directPrisma.report.findFirst({ where: { auditId: audit.id } });
     expect(report, "no Report row was created").toBeTruthy();
@@ -187,8 +209,7 @@ describe("a stranger can complete the core loop in a real browser", () => {
       `${BASE_URL}/engagements/${report.audit.engagementId}/audits/${report.auditId}`,
       { waitUntil: "domcontentloaded" },
     );
-    await page.getByRole("button", { name: /create client link/i }).first().click();
-    await page.waitForLoadState("networkidle");
+    await submitAndSettle(page, page.getByRole("button", { name: /create client link/i }).first());
 
     const link = await directPrisma.clientPortalLink.findFirstOrThrow({
       where: { reportId: report.id },

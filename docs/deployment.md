@@ -127,15 +127,42 @@ nothing can, short of restarting it — so the symptom above is still worth reco
 three times in one day across two people working the same tree, every time presenting as a bug in
 whatever code had just been written.
 
+One residue even that does not cover: a `prisma generate` run while `schema.prisma` was mid-edit
+produces a client missing whatever had not been saved yet. A relation added in that window gives
+`Unknown field '<name>' for include statement on model <Model>` — which reads exactly like a bad
+migration, and survives a restart, because the generated client itself is incomplete rather than
+stale. Re-run `prisma generate` and restart.
+
 A second trap in the same family, for anyone writing browser tests against a server action: reading
 an input's value straight after the action can return what you typed rather than what was stored.
 The action re-renders in place, and if the persisted value round-trips to something different (a
 price canonicalised from "$20.50" to "20.50", say), a read taken before that render shows your own
-input and looks exactly like a normalisation bug. `waitForLoadState("networkidle")` is not
-sufficient — it settles first. Re-navigate to the page before asserting persistence, since a fresh
-load can only show what came back from the database; and for an action you expect to be *refused*,
-wait for `waitForURL(/error=/)` rather than for the network, because the redirect lands after
-networkidle.
+input and looks exactly like a normalisation bug.
+
+Two things make this worse than it first appears, and both cost debugging cycles here:
+
+- **Waiting for network idle does not work under `next dev` at all.** The HMR websocket means the
+  network never goes idle, so the wait either times out after 30 seconds or resolves at an
+  arbitrary unrelated moment. Tests that use it pass and fail on alternate runs against unchanged
+  code, which is the worst possible signal — it trains you to re-run rather than investigate.
+- **Navigating away before a server action finishes CANCELS it.** So the obvious fix —
+  re-navigate to the page and assert persistence against a fresh load — silently cancels the save
+  when applied too early, and the page then correctly shows nothing saved. That presents as a
+  persistence bug in code that is working perfectly.
+
+The reliable signal is the action's own POST completing:
+
+```ts
+await Promise.all([
+  page.waitForResponse((r) => r.request().method() === "POST"),
+  form.locator('button[type="submit"]').click(),
+]);
+// only now is it safe to navigate and assert persistence
+```
+
+For an action you expect to be *refused*, wait on `waitForURL(/error=/)` instead — the redirect is
+the completion signal in that case. `tests/integration/journey.itest.ts` has this as a
+`submitAndSettle` helper with the reasoning at the call site.
 
 Finally: `prisma migrate dev` may offer to reset the database, reporting drift. The hand-written
 partial unique index on `templates` is not representable in `schema.prisma`, so dev-mode's shadow
