@@ -25,6 +25,9 @@ if (!directUrl) {
   throw new Error("DIRECT_DATABASE_URL must be set — template publishing needs migration-level rights.");
 }
 
+/** The version this revision is built on top of: v1 seed content plus the Tier A expansion. */
+const EXPECTED_PREVIOUS_VERSION = 2;
+
 const prisma = new PrismaClient({ datasources: { db: { url: directUrl } } });
 
 async function main() {
@@ -50,6 +53,19 @@ async function main() {
     if (active.changeNote === V3_CHANGE_NOTE) {
       console.log(`Skipping "${definition.name}" — v${active.version} is already the evidence-depth version.`);
       continue;
+    }
+
+    // Refuses to run once a later revision has been published. The change-note check above makes
+    // this idempotent against a double run today, but after a v4 exists the active version's note
+    // would be v4's — and this script would happily publish v3's content as v5, silently reverting
+    // whatever v4 changed. A publish script for an older revision must never be able to move a
+    // template forwards into the past.
+    if (active.version > EXPECTED_PREVIOUS_VERSION) {
+      throw new Error(
+        `"${definition.slug}" is at v${active.version}; this script publishes the evidence-depth ` +
+          `revision on top of v${EXPECTED_PREVIOUS_VERSION} and would otherwise republish older ` +
+          "content as a newer version. It has already been superseded — don't run it.",
+      );
     }
 
     const published = await publishTemplateVersion(prisma, {

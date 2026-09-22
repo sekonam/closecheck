@@ -29,7 +29,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ evi
   // isn't enough. `filename` is a plain-ASCII fallback for older clients; `filename*` (RFC 5987)
   // carries the real name for everything else.
   const rawFilename = evidence.text ?? "evidence";
-  const asciiFilename = rawFilename.replace(/[\r\n"]/g, "").replace(/[^\x20-\x7e]/g, "_") || "evidence";
+  // Backslash is stripped along with the quote: it is the escape character inside a quoted-string,
+  // so a file named `a\` produces `filename="a\"; filename*=...` and a compliant parser swallows
+  // the filename* parameter as part of the quoted value — losing the real name entirely.
+  const asciiFilename =
+    rawFilename.replace(/[\r\n"\\]/g, "").replace(/[^\x20-\x7e]/g, "_") || "evidence";
   const encodedFilename = encodeURIComponent(rawFilename.replace(/[\r\n]/g, ""));
 
   return new NextResponse(new Uint8Array(bytes), {

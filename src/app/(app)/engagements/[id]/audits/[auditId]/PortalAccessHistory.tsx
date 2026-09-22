@@ -16,7 +16,12 @@
  * consultant doesn't over-read it when relaying it to a client.
  */
 
-import { labelOrigins, type AccessEntry } from "@/lib/portal/accessHistory";
+import {
+  describeAccessSummary,
+  labelOrigins,
+  summarizeAccess,
+  type AccessEntry,
+} from "@/lib/portal/accessHistory";
 
 type Props = {
   createdAt: Date;
@@ -31,19 +36,16 @@ function formatTimestamp(value: Date): string {
 
 export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog }: Props) {
   const originLabels = labelOrigins(accessLog);
-  const distinctOrigins = originLabels.size;
-  const unattributed = accessLog.filter((entry) => !entry.ipHash).length;
-
-  const summary =
-    accessLog.length === 0
-      ? "never viewed"
-      : `viewed ${accessLog.length} time${accessLog.length === 1 ? "" : "s"}` +
-        (distinctOrigins > 1 ? ` from ${distinctOrigins} origins` : "");
+  const summary = summarizeAccess(accessLog);
+  // Oldest first. This is a trail: "created" then what happened, in the order it happened, ending
+  // at revoked or expiry. Rendering the views newest-first inside a list that starts with the
+  // link's creation and ends with its revocation reads as neither order.
+  const chronologicalViews = [...accessLog].sort((a, b) => a.viewedAt.getTime() - b.viewedAt.getTime());
 
   return (
     <details className="mt-1">
       <summary className="cursor-pointer text-slate-500 hover:text-slate-800">
-        Access history — {summary}
+        Access history — {describeAccessSummary(summary)}
       </summary>
 
       <ol className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3">
@@ -58,8 +60,7 @@ export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog
           </li>
         )}
 
-        {/* Newest first — the consultant's question is almost always "what happened most recently". */}
-        {accessLog.map((entry) => (
+        {chronologicalViews.map((entry) => (
           <li key={entry.id} className="text-slate-500">
             <span className="font-medium text-slate-600">Viewed</span> · {formatTimestamp(entry.viewedAt)}
             {entry.ipHash ? (
@@ -85,8 +86,12 @@ export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog
         Origins are grouped from a one-way hash of the viewer&rsquo;s network address — enough to tell
         a repeat visit from a new one, not enough to identify anyone. Several people behind one
         office connection will appear as a single viewer.
-        {unattributed > 0 &&
-          ` ${unattributed} view${unattributed === 1 ? "" : "s"} arrived without a recordable origin.`}
+        {summary.unattributedViews > 0 &&
+          ` ${summary.unattributedViews} view${
+            summary.unattributedViews === 1 ? "" : "s"
+          } arrived without a recordable origin, and ${
+            summary.unattributedViews === 1 ? "is" : "are"
+          } not counted as a viewer either way.`}
       </p>
     </details>
   );

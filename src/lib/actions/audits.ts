@@ -272,10 +272,15 @@ export async function updateFinding(formData: FormData) {
 
     let structuredUpdate: { structuredData: Prisma.InputJsonValue } | Record<string, never> = {};
     if (schema) {
-      const values = readFieldValues(schema, (name) => {
-        const raw = formData.get(name);
-        return typeof raw === "string" ? raw : null;
-      });
+      // Materialise the submitted fields once. FormData.get is a linear scan of the entry list,
+      // and readFieldValues probes a bounded but non-trivial number of names (up to 16 fields plus
+      // 200 table rows x 8 columns), so a crafted submission padded with junk entries would make
+      // each probe walk the whole list. One pass to build the map keeps it linear overall.
+      const submitted = new Map<string, string>();
+      for (const [name, value] of formData.entries()) {
+        if (typeof value === "string" && !submitted.has(name)) submitted.set(name, value);
+      }
+      const values = readFieldValues(schema, (name) => submitted.get(name) ?? null);
       if (!values.ok) {
         throw new Error(
           values.errors.map((error) => `${error.label} ${error.message}`).join("; "),

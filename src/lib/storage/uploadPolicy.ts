@@ -41,10 +41,14 @@ const ALLOWED_EVIDENCE_MIME_TYPES = new Map<string, string>([
  * Explicitly refused, with the reason, because "unsupported file type" is an unhelpful thing to
  * tell someone holding a document they were told to review.
  *
- * SVG is refused for the same reason the firm logo refuses it: an SVG is a script-execution vector,
- * and unlike a logo an evidence file can be opened by anyone the consultant shares access with.
- * Archives are refused because their contents cannot be checked — allowing one means allowing
- * whatever is inside it, unexamined.
+ * NOT the security boundary, and it is worth being precise about that: this list is keyed on the
+ * DECLARED type, and the types with no magic number (plain text, CSV) are accepted on that
+ * declaration alone — so a file announcing itself as text/plain while containing `<svg onload=…>`
+ * is stored. What actually makes that inert is the download path, which serves every evidence file
+ * as `application/octet-stream` with an attachment disposition, `nosniff`, and a
+ * `default-src 'none'` CSP, so nothing renders in the app's origin whatever it turns out to be.
+ * This list exists to give a consultant a clear answer at upload time rather than to be the thing
+ * standing between the product and stored XSS.
  */
 const REFUSED_WITH_REASON = new Map<string, string>([
   ["image/svg+xml", "SVG files can carry executable script, so they aren't accepted as evidence. Export it as a PNG or PDF instead."],

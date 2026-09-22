@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { labelOrigins, type AccessEntry } from "./accessHistory";
+import {
+  describeAccessSummary,
+  labelOrigins,
+  summarizeAccess,
+  type AccessEntry,
+} from "./accessHistory";
 
 function entry(id: string, iso: string, ipHash: string | null): AccessEntry {
   return { id, viewedAt: new Date(iso), ipHash };
@@ -59,5 +64,47 @@ describe("labelOrigins", () => {
     );
     const labels = labelOrigins(entries);
     expect([...labels.values()]).toEqual(["Viewer A", "Viewer B", "Viewer C", "Viewer D"]);
+  });
+});
+
+describe("labelling past the alphabet", () => {
+  it("rolls over to AA rather than running off the end", () => {
+    // String.fromCharCode(65 + n) labels the 27th origin "Viewer [" — the kind of thing nobody
+    // notices until a widely forwarded report produces it in front of a client.
+    const entries = Array.from({ length: 28 }, (_, index) =>
+      entry(`${index}`, new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(), `hash-${index}`),
+    );
+    const labels = [...labelOrigins(entries).values()];
+    expect(labels[25]).toBe("Viewer Z");
+    expect(labels[26]).toBe("Viewer AA");
+    expect(labels[27]).toBe("Viewer AB");
+  });
+});
+
+describe("summary line", () => {
+  it("counts views, origins and unattributed views separately", () => {
+    // The bug this guards: distinctOrigins skips null-hash entries, so 2 hashed + 3 unattributed
+    // views rendered "viewed 5 times from 2 origins" — on the one line a consultant is most likely
+    // to repeat to a client.
+    const summary = summarizeAccess([
+      entry("1", "2026-09-18T10:00:00Z", "a"),
+      entry("2", "2026-09-18T11:00:00Z", "b"),
+      entry("3", "2026-09-18T12:00:00Z", null),
+      entry("4", "2026-09-18T13:00:00Z", null),
+      entry("5", "2026-09-18T14:00:00Z", null),
+    ]);
+    expect(summary).toEqual({ totalViews: 5, distinctOrigins: 2, unattributedViews: 3 });
+    expect(describeAccessSummary(summary)).toBe(
+      "viewed 5 times — 2 origins, 3 without a recorded origin",
+    );
+  });
+
+  it("stays quiet when there is nothing to qualify", () => {
+    const summary = summarizeAccess([entry("1", "2026-09-18T10:00:00Z", "a")]);
+    expect(describeAccessSummary(summary)).toBe("viewed 1 time");
+  });
+
+  it("says never viewed for an empty log", () => {
+    expect(describeAccessSummary(summarizeAccess([]))).toBe("never viewed");
   });
 });

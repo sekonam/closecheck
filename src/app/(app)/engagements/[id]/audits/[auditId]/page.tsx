@@ -475,7 +475,10 @@ export default async function AuditPage({
                         unavailable={unavailable}
                       />
                     </div>
-                    {finding.severity && (
+                    {/* Rows written before severity and NOT_APPLICABLE were stopped from being
+                        stored together still carry both. The roll-up excludes them, so showing the
+                        dot would put a Red marker on an item the tier header counts as resolved. */}
+                    {finding.severity && finding.status !== "NOT_APPLICABLE" && (
                       <span className={`h-3 w-3 shrink-0 rounded-full ${SEVERITY_DOT[finding.severity]}`} />
                     )}
                   </div>
