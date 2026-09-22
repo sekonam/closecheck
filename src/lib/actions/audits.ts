@@ -8,6 +8,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { isAutomatable, runTierACheck } from "@/lib/audit/tierA";
+import { assertPublicHost } from "@/lib/net/hostSafety";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { consumeCreditForAudit } from "@/lib/billing/credits";
 import { getStripe } from "@/lib/billing/stripe";
@@ -153,6 +154,19 @@ export async function runTierAAutomation(formData: FormData) {
         .map((f) => ({ id: f.id, automationKey: f.templateItem.automationKey!, updatedAt: f.updatedAt })),
     };
   });
+
+  // Second safety layer, immediately before anything connects. `validatePrimaryDomain` already
+  // refused non-public literals when the domain was stored, but that check is name-based, and a
+  // name can point anywhere: `evil.com` resolving to 169.254.169.254 satisfies every syntactic
+  // rule. Resolving here and refusing a domain whose addresses aren't public closes that, and it
+  // matters more for Tier A than for webhook delivery because these responses — redirect chains,
+  // headers, CMS fingerprints, certificate subjects — get written into a Finding the user reads
+  // back. See src/lib/net/hostSafety.ts on what this does and does not defend against; it is not
+  // a rebinding defence.
+  const hostVerdict = await assertPublicHost(domain);
+  if (!hostVerdict.safe) {
+    throw new Error(`Tier A checks were not run: ${hostVerdict.reason}.`);
+  }
 
   // Sequential, not Promise.all: these are outbound network calls against a third party's
   // infrastructure — a handful of sequential requests for one domain is a reasonable, low-impact

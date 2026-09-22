@@ -6,13 +6,21 @@ import { redirect } from "next/navigation";
 import { DealStage } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
-import { normalizeDomain } from "@/lib/validation/domain";
+import { normalizeDomain, validatePrimaryDomain } from "@/lib/validation/domain";
 
 const createEngagementSchema = z.object({
   // Trimmed before the length check — otherwise a whitespace-only name passes validation and saves,
   // leaving an engagement/report with a name that renders blank everywhere it's displayed.
   businessName: z.string().trim().min(1, "Business name is required"),
-  primaryDomain: z.string().trim().transform(normalizeDomain).optional(),
+  primaryDomain: z
+    .string()
+    .trim()
+    .transform(normalizeDomain)
+    .superRefine((domain, ctx) => {
+      const verdict = validatePrimaryDomain(domain);
+      if (!verdict.ok) ctx.addIssue({ code: "custom", message: verdict.message });
+    })
+    .optional(),
 });
 
 export async function createEngagement(formData: FormData) {
@@ -49,7 +57,15 @@ const updateEngagementSchema = z.object({
   // Blank means "clear the domain" here, same as create — there is no separate "leave unchanged"
   // affordance in a plain text input, and that's the right default: re-submitting the form with the
   // field emptied is the only way a consultant has to remove a domain they'd previously set.
-  primaryDomain: z.string().trim().transform(normalizeDomain).optional(),
+  primaryDomain: z
+    .string()
+    .trim()
+    .transform(normalizeDomain)
+    .superRefine((domain, ctx) => {
+      const verdict = validatePrimaryDomain(domain);
+      if (!verdict.ok) ctx.addIssue({ code: "custom", message: verdict.message });
+    })
+    .optional(),
   dealStage: z.nativeEnum(DealStage),
   // docs/spec.md §8: "consultant-configurable deletion policy" — the consultant sets the actual
   // purge date directly rather than us computing one from a hardcoded N-days constant. Blank clears
