@@ -1,0 +1,142 @@
+name: CI
+
+# The suite is only worth what it is actually run against. There was none of this until
+# 2026-09-22, while the test count grew past 290 across unit, integration and a browser journey —
+# all of it only ever executed when someone remembered to.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref; nothing here is a deploy, so there is
+  # no reason to finish a run whose result is already stale.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  # Fast feedback with no services: everything that can fail without a database should fail here,
+  # in under a minute, rather than after Postgres and a browser have been provisioned.
+  static:
+    name: Lint, types, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # The Prisma client is generated code that nothing commits, and both tsc and the unit suite
+      # import types from it.
+      - run: npx prisma generate
+      - run: npx eslint .
+      # --incremental false: tsconfig.tsbuildinfo is committed, and a stale one would let a real
+      # type error be skipped as already-checked.
+      - run: npx tsc --noEmit --incremental false
+      - run: npm test
+
+  integration:
+    name: Integration and browser journey
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: closecheck
+          POSTGRES_PASSWORD: closecheck_dev
+          POSTGRES_DB: closecheck
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The role passwords here are the hardcoded development ones the migrations create
+      # (prisma/migrations/*_least_privilege_app_role and friends). They are not secrets and must
+      # not be treated as such — production rotates them immediately via
+      # scripts/rotate-production-role-passwords.ts, per docs/deployment.md step 6.
+      DIRECT_DATABASE_URL: postgresql://closecheck:closecheck_dev@localhost:5432/closecheck?schema=public
+      DATABASE_URL: postgresql://closecheck_app:closecheck_app_dev@localhost:5432/closecheck?schema=public
+      AUTH_DATABASE_URL: postgresql://closecheck_auth:closecheck_auth_dev@localhost:5432/closecheck?schema=public
+      SIGNUP_DATABASE_URL: postgresql://closecheck_signup:closecheck_signup_dev@localhost:5432/closecheck?schema=public
+      PORTAL_DATABASE_URL: postgresql://closecheck_portal:closecheck_portal_dev@localhost:5432/closecheck?schema=public
+      API_DATABASE_URL: postgresql://closecheck_api:closecheck_api_dev@localhost:5432/closecheck?schema=public
+      AUTH_SECRET: ci-only-not-a-real-secret
+      NEXTAUTH_URL: http://localhost:3000
+      CLOSECHECK_TEST_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Apply migrations
+        run: npm run db:migrate:deploy
+
+      - name: Seed templates
+        # The integration fixtures need an active template with items; they fail loudly rather than
+        # skipping if one is absent, so this is a hard prerequisite, not a convenience.
+        run: npm run db:seed
+
+      # These are the tenant-isolation checks. They run BEFORE the app is even built: if row-level
+      # security or the narrow role grants are wrong, nothing else about this run matters.
+      # docs/spec.md §8 calls isolation the one thing that cannot ship broken.
+      - name: Verify row-level security
+        run: npm run db:verify-rls
+      - name: Verify signup and portal role privileges
+        run: npm run db:verify-signup-portal-roles
+      - name: Verify API role privileges
+        run: npm run db:verify-api-role
+      - name: Verify template version pinning
+        run: npm run db:verify-template-versioning
+      - name: Verify billing credit ledger
+        run: npm run db:verify-billing-credits
+
+      - name: Install Chromium
+        # Needed by both the PDF pipeline and the browser journey. --with-deps pulls the system
+        # libraries a headless Chromium needs on a bare runner.
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      - name: Start the app
+        # The integration suite drives a real server over HTTP — the §5 launch gate for the API
+        # explicitly refuses to be satisfied by calling route handlers directly.
+        #
+        # Readiness is an unauthenticated request to the API returning 401. A plain 200 on / is a
+        # weaker signal: Next answers static routes before the database client is usable, so a
+        # 200 there can precede the app actually being able to serve a request.
+        run: |
+          npm start > app.log 2>&1 &
+          for i in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/engagements || true)
+            if [ "$code" = "401" ]; then
+              echo "App ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "App never became reachable; last status: ${code:-none}"
+          cat app.log
+          exit 1
+
+      - name: Integration suite
+        # The Stripe billing E2E skips itself when STRIPE_SECRET_KEY is absent, which it is here —
+        # those tests create real test-mode objects against a real account and have no business
+        # running on every push. Everything else runs.
+        run: npm run test:integration
+
+      - name: Server log
+        # A failing integration test shows the assertion but not what the server did to cause it.
+        if: failure()
+        run: tail -n 200 app.log || true
