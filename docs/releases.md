@@ -51,6 +51,37 @@ walking-deck/mock, per `roadmap.md` Phase 0), so there's nothing to version ther
   hardcoded keys. Retires one item and splits another, which matters to anyone with an audit in
   flight: they keep v3's predecessor until they start a new one.
 
+### Feature release: cross-engagement vendor memory — shipped 2026-09-22
+
+Not a template-version event, and the distinction matters for how it is announced. Template
+versions change what the checklist *asks* and are pinned per Audit; this changes what the product
+*remembers* between audits, and applies to every audit immediately. Nothing in flight is affected,
+so it needs no pinning and no migration of existing work.
+
+**What a customer sees:** on a Tier B/C item that names a vendor, the audit page shows what this
+firm recorded about that same vendor on a previous engagement, and flags where this deal's answer
+differs from last time.
+
+Two things to say explicitly in any customer-facing note, because both are decisions a user could
+otherwise mistake for limitations:
+
+- **It never prefills.** A prefilled value is indistinguishable — in the form, and then in the
+  generated report — from one read out of *this* deal's contract. The failure that invites is last
+  deal's termination penalty shipping to a buyer as a finding about their target, with the
+  consultant's name on it. Recall is shown alongside, never written into, a finding.
+- **It is per firm, and never leaves it.** These are one firm's readings of its own clients'
+  executed contracts. Isolation is enforced at the database layer like every other tenant table,
+  including on writes, and a reading is deleted along with the engagement it came from — so it
+  cannot outlive the §8 retention of the document it was derived from. Covered by
+  `tests/integration/vendor-memory-isolation.itest.ts`.
+
+**GTM note:** this is the first shipped feature that gets *better the more the customer uses it*,
+and `docs/roadmap.md`'s competitive-window analysis is the reason to treat that as the headline
+rather than a detail. A competitor shipping automated-checks-to-PDF can copy a checklist; it cannot
+copy a firm's own accumulated readings, because those exist only where the work has been done. That
+makes this the first thing here worth positioning against the 12–24 month window, not merely
+listing.
+
 ### Template-version event: v4 — shipped 2026-09-22 (severity thresholds)
 
 Large enough to need its own entry, because this is the first revision that changes what existing
