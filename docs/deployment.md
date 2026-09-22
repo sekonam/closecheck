@@ -121,6 +121,28 @@ query will succeed from any fresh process — which is what makes it cost an hou
 **Restart the dev server.** This affects local development only; production and CI both start from a
 fresh build.
 
+A `predev` script runs `prisma generate` before `next dev`, so a server *started* after a migration
+is always current. It cannot help a server that was *already running* when the migration landed —
+nothing can, short of restarting it — so the symptom above is still worth recognising. It showed up
+three times in one day across two people working the same tree, every time presenting as a bug in
+whatever code had just been written.
+
+A second trap in the same family, for anyone writing browser tests against a server action: reading
+an input's value straight after the action can return what you typed rather than what was stored.
+The action re-renders in place, and if the persisted value round-trips to something different (a
+price canonicalised from "$20.50" to "20.50", say), a read taken before that render shows your own
+input and looks exactly like a normalisation bug. `waitForLoadState("networkidle")` is not
+sufficient — it settles first. Re-navigate to the page before asserting persistence, since a fresh
+load can only show what came back from the database; and for an action you expect to be *refused*,
+wait for `waitForURL(/error=/)` rather than for the network, because the redirect lands after
+networkidle.
+
+Finally: `prisma migrate dev` may offer to reset the database, reporting drift. The hand-written
+partial unique index on `templates` is not representable in `schema.prisma`, so dev-mode's shadow
+comparison reads it as drift every time. `migrate status` and `migrate deploy` are both unaffected.
+Write the SQL for such migrations by hand rather than accepting the reset — accepting it destroys
+local data to fix a discrepancy that does not exist.
+
 ## Known gaps this runbook does not solve
 
 - **Object storage is still local disk on a persistent volume**, not real S3-compatible storage —
