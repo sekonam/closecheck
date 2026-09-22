@@ -29,7 +29,9 @@ the buyer."
    what ends up in the client's hands, it's secondary.
 2. **Repeatable over custom.** The value proposition against "ad hoc, no repeatable process" (per
    `idea.md`) is consistency across engagements. Templates and checklists are first-class, versioned
-   objects — not free-text notes.
+   objects — not free-text notes. The same applies to what a firm learns by running them: what it
+   recorded about a vendor on one deal is a first-class object too (§3's Vendor Term Profile),
+   available as reference on the next deal rather than living in one consultant's memory.
 3. **Tier boundaries are load-bearing, not cosmetic.** Tier A (no seller cooperation), Tier B
    (seller/broker documents), Tier C (live access) map to real friction and timing constraints in a
    live deal. The product must never blur them — a consultant needs to know exactly what they can run
@@ -50,8 +52,35 @@ the buyer."
 | **Template** | A versioned checklist definition for a business type (see §5). Defines which checklist items exist, which tier each belongs to, how each is scored, and what structured evidence each captures (§4). Templates are shared, product-owned content — a consultant selects one per Engagement, and may add engagement-specific custom items but cannot edit the shared template from inside an engagement. |
 | **Audit** | One run of a Template against one Engagement. Holds the state of every checklist item: not started / in progress / pass / fail / not applicable / blocked (seller cooperation not yet available), plus evidence (notes, uploaded documents, screenshots) per item. |
 | **Finding** | A checklist item's resolved state plus its evidence and severity. The unit that renders into the Report. |
+| **Vendor Term Profile** | What this firm recorded about a named vendor (Toast, Square, Mindbody), on a named checklist item, on a named Engagement. Derived from a Finding's structured capture (§4) and owned by the Consultant Org — unlike a Template, this is one firm's reading of its own clients' documents, not shared product content. Shown back as reference on a later Audit of the same vendor, never as a prefilled answer. See below. |
 | **Report** | Generated, versioned, exportable output of an Audit at a point in time. See §6. |
 | **Client Portal Link** | A scoped, revocable read-only view of a Report for the buyer. See §7. Phase 3+. |
+
+### Vendor Term Profiles are reference, never prefill
+
+A consultant running their tenth restaurant deal has read the Toast agreement before, and §2
+principle 2 sells exactly that continuity. So when an Audit reaches a checklist item about a vendor
+the firm has already recorded terms for, the item shows what was recorded, which Engagement it came
+from, and when.
+
+**It does not prefill the finding, and that is the decision rather than an implementation detail.** A
+prefilled value is indistinguishable — in the audit form, and then in the generated report — from one
+the consultant read out of *this* deal's contract. The failure that design invites is the previous
+deal's termination penalty shipping to this buyer as a finding about their target, with the
+consultant's name on it and a severity attached: the product manufacturing a false statement of fact
+about a business, which is the one thing a diligence deliverable cannot do. The recall surface is
+reference only and offers no control that writes into a Finding. What it keeps is the part that
+helps — knowing what to look for before reading the contract, and seeing where this contract differs
+from the last, which is itself worth stating in the report, since either the terms were negotiated
+differently or one of the two readings is wrong.
+
+Two structural consequences:
+
+- **A reading belongs to an Engagement, not to a vendor.** With one row per vendor, the deal being
+  audited overwrites the reading it should be compared against, so the recall disappears at the
+  moment the consultant records their own answer — exactly when the comparison matters.
+- **Readings cascade away with their Engagement,** so they cannot outlive the §8 retention of the
+  documents they were derived from.
 
 ## 4. The three tiers (detailed)
 
@@ -418,6 +447,13 @@ affected.
   implemented only the configurable half — the field existed and nothing ever wrote it unless the
   consultant filled in a form input that is blank by default and easy to miss, so "no indefinite
   default retention" was a promise the product did not actually keep.
+- **A firm's reading of a document is as confidential as the document.** A Vendor Term Profile (§3)
+  is the first tenant-owned object whose content is a firm's *interpretation* of a client's documents
+  rather than the documents themselves; the isolation rule above applies to it unchanged, because the
+  reputational risk this section is written against does not distinguish between leaking a seller's
+  contract and leaking one firm's reading of it. Retention follows the same logic: readings are
+  deleted with their Engagement, so a reading never outlives the retention of the contract it was
+  taken from.
 - **Outbound requests from consultant-supplied input:** Tier A checks fetch the Engagement's primary
   domain and write what comes back into the Finding — redirect chains and their `Location` headers,
   HSTS, the CMS generator tag, the TLS certificate's issuer and subject. That is a request-forgery
@@ -632,6 +668,13 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   typed input on a Finding is a §3 data-model change with §6 consequences, so it needs a real
   trigger — a consultant hitting it on a live engagement and the report reading wrong — rather than
   tidiness (`docs/research/audit-thresholds-2026-09.md` §7.7).
+- Whether a firm should be able to browse its own Vendor Term Profiles (§3) as a library in their own
+  right — a "what do we know about Toast" view — rather than only in the context of the audit item
+  that recalls them. Recorded as open, not planned: there is no evidence for it, since no design
+  partner has run an audit and the demand for a cross-engagement vendor view is assumed rather than
+  observed. It is also where the reference-only boundary is hardest to hold, because a library invites
+  reuse of readings detached from the Engagement and date that are the whole reason they are
+  trustworthy. Wait for a consultant to ask for it.
 - Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
   gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
   integration decision).
