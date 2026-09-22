@@ -3,6 +3,7 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { createEngagement } from "@/lib/actions/engagements";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
+import { getOnboardingStatus } from "@/lib/onboarding/status";
 
 const DEAL_STAGE_LABEL: Record<string, string> = {
   PRE_LOI: "Pre-LOI",
@@ -31,6 +32,7 @@ export default async function EngagementsPage({
       include: { audits: { select: { id: true } } },
     }),
   );
+  const onboarding = await withOrgScope(orgId, (tx) => getOnboardingStatus(tx, orgId));
 
   return (
     <div>
@@ -43,6 +45,59 @@ export default async function EngagementsPage({
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
+      )}
+
+      {!onboarding.complete && (
+        <div className="mt-6 rounded-lg border border-slate-900/10 bg-slate-900 p-4 text-white">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Get your first report out the door</h2>
+            <span className="text-xs text-slate-300">
+              {onboarding.completedCount}/{onboarding.totalCount} done
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+            <div
+              className="h-full rounded-full bg-emerald-400 transition-all"
+              style={{ width: `${(onboarding.completedCount / onboarding.totalCount) * 100}%` }}
+            />
+          </div>
+          <ol className="mt-3 space-y-1.5">
+            {(() => {
+              const firstTodo = onboarding.steps.findIndex((s) => !s.done);
+              return onboarding.steps.map((step, i) => {
+                const isNext = i === firstTodo;
+                return (
+                  <li
+                    key={step.key}
+                    className={`flex items-start gap-2 text-sm ${
+                      step.done ? "text-slate-400" : isNext ? "text-white" : "text-slate-400/70"
+                    }`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] ${
+                        step.done ? "bg-emerald-400 text-slate-900" : isNext ? "bg-white text-slate-900" : "bg-white/15"
+                      }`}
+                    >
+                      {step.done ? "✓" : i + 1}
+                    </span>
+                    <span>
+                      <span className={isNext ? "font-medium" : ""}>{step.title}</span>
+                      {isNext && <span className="block text-xs text-slate-300">{step.detail}</span>}
+                    </span>
+                  </li>
+                );
+              });
+            })()}
+          </ol>
+          {(!onboarding.steps[0].done || !onboarding.disclaimerAcknowledged) && (
+            <Link
+              href="/settings"
+              className="mt-3 inline-block rounded-md bg-white px-3 py-1.5 text-xs font-medium text-slate-900 hover:bg-slate-100"
+            >
+              Finish firm setup on Settings →
+            </Link>
+          )}
+        </div>
       )}
 
       <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
