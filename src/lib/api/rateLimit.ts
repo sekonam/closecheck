@@ -66,8 +66,21 @@ export type RateLimitResult = {
   retryAfterSeconds: number;
 };
 
-export function checkRateLimit(key: string, now: number = Date.now()): RateLimitResult {
-  const limit = limitPerWindow();
+/**
+ * `limitOverride` exists because sign-in needs a far smaller budget than the read-only API — ten
+ * password attempts a minute, not a hundred and twenty. One limiter with a per-call limit is better
+ * than two limiters: a second implementation would drift, and both surfaces want identical window,
+ * pruning and header semantics.
+ */
+export function checkRateLimit(
+  key: string,
+  now: number = Date.now(),
+  limitOverride?: number,
+): RateLimitResult {
+  const limit =
+    Number.isFinite(limitOverride) && (limitOverride as number) > 0
+      ? (limitOverride as number)
+      : limitPerWindow();
   prune(now);
 
   const existing = buckets.get(key);
@@ -83,6 +96,27 @@ export function checkRateLimit(key: string, now: number = Date.now()): RateLimit
     resetAt: bucket.resetAt,
     retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
   };
+}
+
+/**
+ * Reads a bucket without spending from it. Sign-in needs this because its budget counts FAILED
+ * attempts, not attempts: the decision to refuse has to be made before the password is checked,
+ * while the decision to charge for it can only be made afterwards.
+ */
+export function peekRateLimit(key: string, now: number = Date.now(), limitOverride?: number): boolean {
+  const limit =
+    Number.isFinite(limitOverride) && (limitOverride as number) > 0
+      ? (limitOverride as number)
+      : limitPerWindow();
+  const bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now) return true;
+  return bucket.count < limit;
+}
+
+/** Drops a key's budget entirely — used when a sign-in succeeds, so a legitimate user who mistyped
+ * their password a few times does not carry those failures forward. */
+export function clearRateLimit(key: string): void {
+  buckets.delete(key);
 }
 
 /** Test seam only — the module-level Map would otherwise carry state between test cases. */
