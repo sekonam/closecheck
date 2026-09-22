@@ -263,10 +263,15 @@ const PRINT_STYLES = `
 `;
 
 /**
- * Renders the Report to a self-contained HTML string — the same rendering used for the on-screen
- * preview and, via src/lib/reports/pdf.ts, the PDF export. Deliberately does not import Tailwind's
- * runtime (the PDF pipeline renders this in an isolated Chromium page with no build step attached);
- * inline styles only, per docs/spec.md §6.
+ * Renders the Report to a self-contained HTML string, which src/lib/reports/pdf.ts turns into the
+ * PDF export — today its only consumer (generateReport in src/lib/actions/reports.ts). There is no
+ * on-screen preview rendering this; an earlier version of this comment claimed there was. That
+ * matters for how this file is edited: nothing here is validated by looking at the app, so changes
+ * need a rendered PDF to be checked against.
+ *
+ * Deliberately does not import Tailwind's runtime (the PDF pipeline renders this in an isolated
+ * Chromium page with no build step attached); inline styles only, per docs/spec.md §6 — plus the
+ * single PRINT_STYLES block for the pagination rules that have no inline equivalent.
  *
  * Whitelabel (spec.md §6): the org's brand color drives the accent throughout — cover band, section
  * rules, table headers, and the running header/footer Chromium stamps on every page; CloseCheck's
