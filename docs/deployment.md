@@ -63,26 +63,30 @@ first "Apply Blueprint" click are yours.
    publish steps are new template versions (`docs/spec.md` §5 versioning rules; in-progress audits
    stay pinned to the version they started on).
 
-   **Run all three, in this order.** Each builds on the content the previous one published, and a
+   **Run all four, in this order.** Each builds on the content the previous one published, and a
    publish script refuses to run if no active version exists yet:
    ```
    NODE_ENV=production DATABASE_URL="<the rotated production DATABASE_URL>" DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config prisma/seed.ts
    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-tierA-expansion.ts
    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-evidence-depth.ts
+   DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-evidence-backed-thresholds.ts
    ```
-   All three are idempotent: each checks whether the active version already carries its change and
+   All four are idempotent: each checks whether the active version already carries its change and
    prints "Skipping" rather than publishing a duplicate, so re-running after a partial failure is
    safe.
 
-   **Then verify you actually landed on v3**, because stopping short fails in a way that looks like
+   **Then verify you actually landed on v4**, because stopping short fails in a way that looks like
    a broken feature rather than a missing step:
    ```
    DIRECT_DATABASE_URL="<external connection string>" psql "$DIRECT_DATABASE_URL" -c 'SELECT slug, version FROM templates WHERE "isActive";'
    ```
-   Every row must read version 3. An install that stops at v2 has the current application code but
-   templates whose items declare no structured-field schema, so every Tier B/C item silently falls
-   back to note-only capture — the consultant sees a product that appears to have lost its evidence
-   capture, with nothing in the logs to say why.
+   Every row must read version 4. Stopping short fails silently in two different ways: an install
+   that halts at v2 has templates whose items declare no structured-field schema, so every Tier B/C
+   item falls back to note-only capture and the product appears to have lost its evidence capture;
+   one that halts at v3 has the structured capture but the *superseded severity thresholds*, which
+   is worse, because nothing about it looks wrong — findings are simply graded against retired card-
+   network programmes and a fixed certificate-expiry rule that fires constantly on short-lived
+   certificates (`docs/releases.md` §3).
 
    `NODE_ENV=production` skips seeding the local dev login (`dev@closecheck.local`) — production
    accounts come from `/signup` instead.

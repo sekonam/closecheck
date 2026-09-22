@@ -41,11 +41,81 @@ walking-deck/mock, per `roadmap.md` Phase 0), so there's nothing to version ther
 - **Template changes** always ship as a new Template version (`spec.md` §5), never an in-place edit to
   a template version already in use — this is a release-process rule, not just a data-model rule,
   because it's the one kind of change that can silently invalidate in-flight paying customers' work.
-- **Pending template-version event (Phase 4, `spec.md` §13.1):** the three new Tier A automated
-  checks (SPF/DKIM/DMARC posture, MX/mail-provider fingerprint, HTTPS hygiene) are added to each
-  shipped template as a **new version of that template**, per the rule above — in-flight Audits stay
-  pinned to the version they started on and never gain the new items mid-engagement. One
-  customer-facing changelog entry covers the batch across all templates, not one entry per template.
+- **Template-version event: v2 (Phase 4, `spec.md` §13.1) — shipped.** The three new Tier A
+  automated checks (SPF/DKIM/DMARC posture, MX/mail-provider fingerprint, HTTPS hygiene) went to
+  each shipped template as a new version of that template. One customer-facing changelog entry
+  covers the batch across all templates, not one per template.
+
+- **Template-version event: v3 — shipped 2026-09-22.** Structured evidence capture on every Tier
+  B/C item, driven by a field schema declared on the template item itself rather than three
+  hardcoded keys. Retires one item and splits another, which matters to anyone with an audit in
+  flight: they keep v3's predecessor until they start a new one.
+
+### Template-version event: v4 — shipped 2026-09-22 (severity thresholds)
+
+Large enough to need its own entry, because this is the first revision that changes what existing
+checks *conclude* rather than adding new ones. A consultant with a v3 audit in flight should be able
+to tell whether their finding would read differently under v4, so this lists what changed, not just
+that something did.
+
+**Reshaped, not renumbered** — these were the wrong *shape*, so a new number would not have fixed
+them, and their replacements stop needing maintenance:
+
+| Check | Was | Now |
+|---|---|---|
+| TLS certificate expiry | Yellow inside a fixed 30 days | Proportional to the certificate's own lifetime (a third remaining), with automated renewal treated as the positive signal |
+| Trademark conflict | Rated on Nice class overlap | Rated on identification overlap; class demoted to a recorded fact |
+
+The certificate one is the clearest case of why shape beats number: with issuers now spanning
+six-day (Let's Encrypt) and 200-day (CA/Browser Forum Baseline Requirements, from 2026-03-15,
+dropping to 100 in 2027 and 47 in 2029) lifetimes, *any* fixed day count is wrong at one end. A rule
+in absolute days would have fired constantly on short-lived certificates and trained consultants to
+ignore the check — worse than not having it. v4 also states plainly that no standards body publishes
+a days-to-expiry threshold and that 30/14/7 is vendor convention, so a consultant asked "where does
+this come from" has an answer instead of an assertion.
+
+**Renumbered against a dated source** — the previous figures were wrong, not merely vague:
+
+- **Card-network chargeback monitoring.** Visa's VAMP replaced VDMP/VFMP on 2025-04-01 (enforcement
+  2025-10-01); merchant Excessive is 150 bps from 2026-04-01 above a 1,500-event floor. Mastercard
+  ECM is 100–299/150–299 bps and HECM 300/300, on the previous month's denominator. Anything still
+  quoting 0.9% or 100 disputes is citing a retired programme.
+- **Email authentication.** DMARC is RFC 9989 (Standards Track, obsoleting 7489) and `pct=` is
+  removed. The 5,000/day bulk-sender figure is attributed to Google and Microsoft only — Yahoo
+  publishes no numeric threshold, and attributing one to them was a real risk in a document a buyer
+  relies on.
+- **Data export.** Square's masking of customer contact details, and Toast's 60-days-post-closure /
+  48-month / 6-months-per-pull / no-single-export constraints, are captured fields rather than
+  prose. Toast in particular makes export a *pre-close* condition rather than a post-close task.
+
+**New Tier B items:**
+
+- **Terminated-merchant file exposure (MATCH/VMSS)** — the strongest Red in the set for this deal
+  band. MATCH Code 04 triggers at 1% of Mastercard sales *and* $5,000 with no minimum count, lasts
+  five years, attaches to the principal personally, survives account closure, and survives winning
+  the disputes.
+- **Processing continuity at close** — a merchant account does not transfer; the buyer
+  re-underwrites. Previously invisible in the checklist.
+
+**One threshold is genuinely date-sensitive and cannot be reshaped. Stated here so the maintenance
+commitment is visible rather than implied:** the ICANN 60-day transfer lock. The revision removing
+it was adopted 2026-06-07 (Res. 2026.06.07.04) with **no effective date announced**. "60 days" is
+correct today and will become wrong on a date nobody has published. v4's guidance says to re-verify
+at every audit — but a rule that depends on someone remembering to check is a liability, so this
+one needs an owner and a recurring review, not a note. Every other threshold in the set is either
+reshaped or tied to a dated, citable programme change.
+
+**What v4 deliberately refuses to state**, which belongs in the changelog because silence is the
+decision: VAMP fee amounts and grace periods (Visa does not publish them), registrar redemption
+fees, vendor-funded breach-cost figures, "letter of good standing" as an instrument, and typical
+reserve percentages. Where no authoritative source exists the guidance says so and gives the
+consultant the reasoning. The domain-expiry threshold is stated explicitly as *this firm's* basis,
+not an industry standard — the distinction a buyer's counsel would ask about.
+
+**Version pinning was exercised for real here**, not asserted: a salon audit created before the
+publish is still on v3, all 26 prior audits still resolve to the version they started on, and the
+v3 publish script now correctly refuses to re-run against a v4 template. This is the first time the
+versioning machinery has been tested by an actual content revision rather than by a test.
 
 ## 4. Go-to-market plan (tied to phases)
 
