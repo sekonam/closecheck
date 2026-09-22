@@ -20,7 +20,8 @@
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "metrics:report": "tsx -r dotenv/config scripts/metrics-report.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
