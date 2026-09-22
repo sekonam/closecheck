@@ -57,7 +57,7 @@ export default async function AuditPage({
 }) {
   const { id: engagementId, auditId } = await params;
   const { error } = await searchParams;
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const backPath = `/engagements/${engagementId}/audits/${auditId}`;
 
   async function runTierAAutomationAction(formData: FormData) {
@@ -176,9 +176,15 @@ export default async function AuditPage({
     portalLinksByReport.set(link.reportId, existing);
   }
 
-  const org = await withOrgScope(orgId, (tx) =>
-    tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { disclaimerAcknowledgedAt: true } }),
-  );
+  const { org, isOwner } = await withOrgScope(orgId, async (tx) => ({
+    org: await tx.consultantOrg.findUniqueOrThrow({
+      where: { id: orgId },
+      select: { disclaimerAcknowledgedAt: true },
+    }),
+    // Read here, not from the session token, for the reason requireOwner documents: a token is
+    // issued once and would not notice a demotion.
+    isOwner: (await tx.user.findUnique({ where: { id: userId }, select: { role: true } }))?.role === "OWNER",
+  }));
 
   const rollup = computeSeverityRollup(audit.findings);
   const byTier: Record<Tier, typeof audit.findings> = { A: [], B: [], C: [] };
@@ -305,13 +311,24 @@ export default async function AuditPage({
             Set a primary domain on the engagement to enable Tier A automation.
           </p>
         )}
+        {/* Two messages, because one sentence cannot be right for both readers. Accepting the
+            disclaimer is owner-only (src/lib/auth/requireOwner.ts), so a member needs to know who
+            to ask, and an owner needs to know it is them — "the account owner must accept" reads
+            to an owner as though they are waiting on somebody else. Same rule as the credit-limit
+            and branding messages: name who can resolve it rather than instructing the reader. */}
         {!org.disclaimerAcknowledgedAt && (
           <p className="self-center text-xs text-amber-600">
-            The account owner must accept the report disclaimer on the{" "}
-            <Link href="/settings" className="underline">
-              Branding
-            </Link>{" "}
-            page to enable report generation.
+            {isOwner ? (
+              <>
+                Accept the report disclaimer on the{" "}
+                <Link href="/settings" className="underline">
+                  Branding
+                </Link>{" "}
+                page to enable report generation.
+              </>
+            ) : (
+              "Report generation is disabled until your account owner accepts the report disclaimer."
+            )}
           </p>
         )}
       </div>
