@@ -243,9 +243,10 @@ below.
 resolution as the page (it previously base64-inlined the whole file into the served HTML, which
 mobile browsers increasingly refuse to render — broken on the one surface a buyer sees), carries the
 consultant's brand rather than CloseCheck's, and is `noindex`/`no-store` throughout (`spec.md` §7).
-The third deliverable below is **half done and worth stating precisely:** access is now *recorded*
-for portal views and for consultant-side exports (`spec.md` §8), but surfacing that history to the
-consultant as a feature — which is what this deliverable asks for — is not built.
+The third deliverable below is also built: access is recorded for portal views and for
+consultant-side exports, and surfaced to the consultant as a per-link trail (`spec.md` §8). Only the
+distribution-channel decision is still open, and it always was a call for evidence rather than for
+code.
 
 **Deliverables:**
 - Magic-link, no-account Client Portal Link (`spec.md` §7) — built only if Phase 1/2 design partners

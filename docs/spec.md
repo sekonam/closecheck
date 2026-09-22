@@ -335,10 +335,13 @@ affected.
   or a network-level egress control, neither of which exists.
 - **Audit logging:** who viewed/exported/shared a given Report and when, per Engagement — this is
   itself a feature consultants can point to when a buyer's advisory team asks "who's had access to
-  this." Recorded today for portal views (one row per human access, with hashed IPs) and for
-  consultant-side exports — the moment the document leaves the system, which was previously logged
-  nowhere at all. Surfacing that trail to the consultant in-product is Phase 3 work (`roadmap.md`)
-  and is not done.
+  this." Recorded for portal views (one row per human access) and for consultant-side exports — the
+  moment the document leaves the system, which was previously logged nowhere at all — and surfaced
+  to the consultant as a per-link trail. There is deliberately no "who" for an anonymous buyer (§7
+  collects no buyer data beyond what the log needs, and the log stores a hash of the client address,
+  not the address); views sharing an origin hash are grouped as "Viewer A/B" in first-seen order,
+  which answers the question a consultant is actually asked without inviting anyone to read the
+  grouping as an identity.
 - **Compliance posture:** no SOC 2 / compliance certification targeted for MVP; revisit once a design
   partner's own compliance requirements (or a firm's client contract) makes it a sales blocker, not
   before. Track this as a roadmap trigger, not a fixed date.
