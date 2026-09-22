@@ -47,7 +47,7 @@ the buyer."
 
 | Object | Definition |
 |---|---|
-| **Consultant Org** | The paying account — a solo consultant or firm. Has seats, a plan, and a brand kit (logo, color, report footer) for whitelabeled output. |
+| **Consultant Org** | The paying account — a solo consultant or firm. Has seats (each with a role, see below), a plan, and a brand kit (logo, color, report footer) for whitelabeled output. |
 | **Engagement** | One acquisition deal being diligenced. Belongs to a Consultant Org. Has a target business, a deal stage (pre-LOI / post-LOI / closing), and one Audit. |
 | **Template** | A versioned checklist definition for a business type (see §5). Defines which checklist items exist, which tier each belongs to, how each is scored, and what structured evidence each captures (§4). Templates are shared, product-owned content — a consultant selects one per Engagement, and may add engagement-specific custom items but cannot edit the shared template from inside an engagement. |
 | **Audit** | One run of a Template against one Engagement. Holds the state of every checklist item: not started / in progress / pass / fail / not applicable / blocked (seller cooperation not yet available), plus evidence (notes, uploaded documents, screenshots) per item. |
@@ -55,6 +55,66 @@ the buyer."
 | **Vendor Term Profile** | What this firm recorded about a named vendor (Toast, Square, Mindbody), on a named checklist item, on a named Engagement. Derived from a Finding's structured capture (§4) and owned by the Consultant Org — unlike a Template, this is one firm's reading of its own clients' documents, not shared product content. Shown back as reference on a later Audit of the same vendor, never as a prefilled answer. See below. |
 | **Report** | Generated, versioned, exportable output of an Audit at a point in time. See §6. |
 | **Client Portal Link** | A scoped, revocable read-only view of a Report for the buyer. See §7. Phase 3+. |
+
+### Seats carry a role, and the line is scope, not seniority
+
+Every seat in a Consultant Org has a role — Owner or Member — and the role decides exactly one thing:
+whether this person may change the *firm*. It does not decide who may do diligence.
+
+The division is scope, not seniority: does the action belong to an Engagement, or to the firm? A Team
+plan exists so a firm's consultants can share engagements (§9), so a seat that cannot take an Audit,
+attach evidence or issue a Report is a seat that cannot do the thing it is sold for — restricting the
+work would defeat the plan it is sold under. The customer is a solo consultant or a 2–10 person firm
+(§1), where a colleague correcting another colleague's Finding needs an audit trail, not a permission
+wall; a wall there makes a partner the bottleneck on every correction.
+
+**Firm-scoped — Owner only.** These change what the firm *is*, rather than what one deal says:
+
+- billing and plan
+- seats and team membership
+- API keys (§13.2)
+- webhook endpoints (§13.3)
+- the brand kit: firm name, accent colour, logo (§2 principle 4)
+- accepting the Report disclaimer on the firm's behalf (§6)
+
+**Engagement-scoped — any seat.** Creating Engagements and Audits, recording Findings, attaching and
+removing evidence, generating Reports, creating and revoking Client Portal Links, and emailing a link
+to a buyer.
+
+The boundary is written down here because the product asserted a role model in copy that no data path
+read: the settings page told users "Only the account owner can invite or remove teammates" and "Only
+the account owner can change the plan" — both true — while any Member could change the firm's name,
+colour and logo, which rewrites the branding on every Report the firm has ever issued and every
+portal link it has ever sent, including Engagements that Member never worked on. Role was consulted
+in four places (team, API keys, webhooks, billing) and nowhere else. A stated rule that only some
+call sites enforce is worse than no rule, because consultants price their own credibility on it.
+
+**Seat and role are deliberately separate axes.** A seat is a person the firm pays for; a role is
+what that person may change about the firm. The billing model does not answer the permission question
+and should not be asked to — conflating the two is how a product ends up billing full price for
+read-only accounts, or handing anyone who costs money the ability to cancel the plan. Stated
+explicitly so neither is later tidied into the other on the grounds that they look redundant.
+
+**The Report disclaimer is firm-scoped, but a different kind of firm-scoped item.** Every other entry
+on the list can be Owner-only without ever stopping a Member doing diligence. This one gates
+engagement work: Report generation is blocked until the firm has accepted the liability language
+(§6). It stays Owner-only — accepting language that appears on every deliverable the firm issues is a
+firm-identity decision, not a per-deal one — which makes the blocked-work message load-bearing. It
+must name who can clear the block, not instruct a reader who cannot act: "review the report
+disclaimer on the Branding page" is, to a Member, an instruction they cannot follow, and it presents
+a firm-level prerequisite as something they personally got wrong. The same shape turned up the same
+day in the credit-limit message, which told a Member to choose a plan — also Owner-only. Any
+prerequisite a Member cannot clear themselves is written this way.
+
+**Client Portal Links stay engagement-scoped, conditional on attribution.** Any seat may share a
+Report, because delivering the deliverable is the job. But it is the one engagement-scoped action
+with outward blast radius, and "any seat may do it" and "nobody can tell who did" must not both be
+true — so the link records the seat that created it (§8).
+
+**No read-only or observer role.** No evidence anyone wants one, no design partner has asked, and §12
+already carries enough unvalidated shape without a third role added for symmetry. A role that lets
+someone see a firm's engagements without touching them needs a real trigger — a firm naming the
+person they want to give a view and not a voice — before it earns a place in the model.
 
 ### Vendor Term Profiles are reference, never prefill
 
@@ -394,8 +454,10 @@ certificate rule stays readable against that rule rather than silently acquiring
 - **Liability language:** every report includes standard disclaimer language (audit reflects
   information available at the stated date; not a substitute for legal/financial diligence) —
   required review by the consultant, not optional boilerplate the product silently inserts without
-  them seeing it. Any change to this language is a legal-review item, not a routine content edit —
-  flag it rather than edit it directly (see the `spec-writing` skill).
+  them seeing it. Accepting it is firm-scoped: the Owner accepts on the firm's behalf (§3), and
+  Report generation stays blocked for every seat until they have. Any change to this language is a
+  legal-review item, not a routine content edit — flag it rather than edit it directly (see the
+  `spec-writing` skill).
 
 ## 7. Client-facing portal (Phase 3+, not MVP)
 
@@ -474,7 +536,14 @@ affected.
   collects no buyer data beyond what the log needs, and the log stores a hash of the client address,
   not the address); views sharing an origin hash are grouped as "Viewer A/B" in first-seen order,
   which answers the question a consultant is actually asked without inviting anyone to read the
-  grouping as an identity.
+  grouping as an identity. The trail also records **which of the firm's own seats created a Client
+  Portal Link** (§3): a firm could previously see that a Report had gone outside and who read it, but
+  not which of its people sent it, so the trail stopped at the firm boundary in the one place that
+  mattered — the only engagement-scoped action that reaches a party outside the firm. Attribution is
+  optional rather than backfilled, because links created before it was recorded have no answer and
+  assigning one would invent a fact about who shared a client's Report; and it outlives the person,
+  because erasing the access history of a Report already sitting with a buyer at the moment a firm
+  reorganises is exactly backwards.
 - **Compliance posture:** no SOC 2 / compliance certification targeted for MVP; revisit once a design
   partner's own compliance requirements (or a firm's client contract) makes it a sales blocker, not
   before. Track this as a roadmap trigger, not a fixed date.
@@ -675,6 +744,13 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   observed. It is also where the reference-only boundary is hardest to hold, because a library invites
   reuse of readings detached from the Engagement and date that are the whole reason they are
   trustworthy. Wait for a consultant to ask for it.
+- **Whether a Member should be able to revoke a Client Portal Link they did not create.** Revocation
+  is engagement-scoped today, per §3's line, and both readings are defensible with no evidence either
+  way: pulling a link back is a safety action that should not have to wait for a partner to be
+  reachable, and it also destroys a colleague's delivery to a client mid-engagement, possibly without
+  their knowing. Whichever way it resolves, the action is attributable now (§8), so the open part is
+  who may act, not who did. Wait for a firm to hit it on a live engagement rather than guessing which
+  failure is worse.
 - Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
   gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
   integration decision).
