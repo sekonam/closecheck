@@ -9,6 +9,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { sendEmail } from "@/lib/email/send";
 import { teamInvite } from "@/lib/email/templates";
+import { checkSeatAvailable, syncSeatQuantity } from "@/lib/billing/seats";
 
 const inviteMemberSchema = z.object({
   email: z.string().trim().toLowerCase().email("Enter a valid email address"),
@@ -53,6 +54,19 @@ export async function inviteMember(formData: FormData): Promise<void> {
       throw new Error("Only the account owner can invite teammates.");
     }
     const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
+
+    // Seat cap, checked INSIDE the transaction: checkSeatAvailable takes a per-org advisory lock,
+    // and outside the transaction two concurrent invites against the last seat would both pass —
+    // the same race the FOR UPDATE in removeMember below exists to close.
+    //
+    // A no-op while BILLING_ENFORCEMENT is off (the standing decision to ship billing dark until
+    // the prices are evidence-backed), so this refuses nothing today; it makes the seat accounting
+    // correct the moment that flag flips.
+    const account = await tx.billingAccount.findUnique({ where: { orgId } });
+    const seat = await checkSeatAvailable(tx, orgId, account?.plan ?? null);
+    if (!seat.allowed) {
+      throw new Error(seat.reason);
+    }
 
     try {
       await tx.user.create({
@@ -102,7 +116,18 @@ export async function inviteMember(formData: FormData): Promise<void> {
     // not whether the server can. No reason to also expose a temporary password to page JS.
     httpOnly: true,
     sameSite: "lax",
+    // Only the settings page ever reads this, so scope it there rather than sending a temporary
+    // password along with every request the browser makes for the next minute.
+    path: "/settings",
+    // Not unconditional: local development runs over plain HTTP, and a Secure cookie there would
+    // simply never be set, silently breaking the invite hand-off.
+    secure: process.env.NODE_ENV === "production",
   });
+
+  // Outside the transaction and deliberately not awaited: this makes a Stripe round trip, which
+  // must not hold row locks, and a Stripe failure must never roll back a teammate who was
+  // legitimately added. It records its own errors rather than throwing.
+  void syncSeatQuantity(orgId);
 
   revalidatePath("/settings");
 }
@@ -152,6 +177,9 @@ export async function removeMember(formData: FormData): Promise<void> {
 
     await tx.user.delete({ where: { id: targetUserId } });
   });
+
+  // See the note in inviteMember: outside the transaction, not awaited, never throws.
+  void syncSeatQuantity(orgId);
 
   revalidatePath("/settings");
 }
