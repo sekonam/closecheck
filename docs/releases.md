@@ -144,20 +144,41 @@ this manual motion; expect a first reply/meeting in 2–4 weeks, not immediately
 - [ ] Pricing tiers finalized from Phase 0/1 evidence (`spec.md` §9 numbers are placeholders until
   this gate — including the $99–149 per-audit overage band from §9's second revision note, which
   must be in the head-to-head test, not assumed).
-- [ ] **Billing exists and has taken a real (test-mode) payment end-to-end.** As of 2026-09-21 the
-  pricing page is display-only — no payment dependency or billing code exists anywhere in the app.
-  Public beta with signup but no payment path burns the one first-impression each prospect gives
-  us. The implementation must match `spec.md` §9 as revised: annual-credits plan as the lead offer,
-  monthly second, per-audit overage billed as a monthly rollup invoice (not one charge per audit,
-  per `docs/research/profitability.md`'s lever #4).
-- [ ] **Transactional email delivery exists** (team invites, portal-link delivery, receipts) — as of
-  2026-09-21 these are copy-paste URLs with no delivery mechanism, a hard self-serve conversion
-  blocker (`roadmap.md` Phase 2.5 deliverable).
-- [ ] **`spec.md` §11 success metrics are instrumented, not just defined.** Activation, the
-  second-audit retention proxy, and report-sent-to-buyer usage must be measurable in the product
-  before public beta — several gates in this section (and `roadmap.md`'s exit criteria) are
-  unfalsifiable without this, and as of 2026-09-21 no analytics or event tracking exists in the
-  codebase.
+- [x] **Billing exists and has taken a real (test-mode) payment end-to-end** (closed 2026-09-22).
+  *Evidence:* `tests/integration/stripe-billing-e2e.itest.ts` drives real Stripe test-mode objects —
+  customers carrying server-set `metadata.orgId`, subscriptions (including the two-line Team shape),
+  signed webhook events delivered to the real route with real signature verification, and a real
+  $129 PaymentIntent confirmed and then refunded to zero. Note what this does **not** close: the
+  Phase 2.5 exit criterion asks for a *live-mode* charge and refund, which needs credentials only the
+  founder can provision (`docs/BLOCKED.md` §1), and `BILLING_ENFORCEMENT` stays `false` until then.
+  The shape required by `spec.md` §9 as revised is implemented and covered: annual-credits plan as
+  the lead offer, monthly second, per-audit overage billed as a monthly rollup invoice rather than
+  one charge per audit (`docs/research/profitability.md`'s lever #4).
+
+  *Superseded note (2026-09-21), kept rather than deleted:* "the pricing page is display-only — no
+  payment dependency or billing code exists anywhere in the app. Public beta with signup but no
+  payment path burns the one first-impression each prospect gives us."
+
+- [~] **Transactional email delivery exists** (team invites, portal-link delivery, receipts) —
+  **code complete 2026-09-22, gate NOT closed.** Sending is implemented (Resend, with a LOGGED
+  fallback when unconfigured) and a real send-restricted API key is configured, so the copy-paste-URL
+  era is over. It stays open because Resend's sandbox restriction means mail currently delivers only
+  to the account owner's own address until a sending domain is verified — and this gate is about a
+  *stranger* receiving an invite, which is precisely what still cannot happen. See
+  `docs/BLOCKED.md` §2.
+
+  *Superseded note (2026-09-21), kept rather than deleted:* "as of 2026-09-21 these are copy-paste
+  URLs with no delivery mechanism, a hard self-serve conversion blocker."
+
+- [x] **`spec.md` §11 success metrics are instrumented, not just defined** (closed 2026-09-22).
+  Activation, the second-audit retention proxy, and report-usage signals are recorded to
+  `metric_events` (write-only for the app role — `SELECT` is revoked rather than relying on RLS),
+  with `error_events` alongside. The founder's read path is a DIRECT-role CLI, deliberately not a
+  web surface: a cross-org read endpoint in the app would be new tenant-isolation attack surface in
+  a product whose documented core risk (`spec.md` §8) is exactly that.
+
+  *Superseded note (2026-09-21), kept rather than deleted:* "as of 2026-09-21 no analytics or event
+  tracking exists in the codebase."
 
 **Before any GTM push toward a marketplace partnership (Phase 3):**
 - [ ] The distribution-channel decision (`spec.md` §12) has actually been made from evidence, not
@@ -170,14 +191,30 @@ evidence first" gate, per explicit user direction on 2026-09-21 — the same ove
 for the Phase 3 Client Portal (`spec.md` §7, `roadmap.md` Phase 3). Building ahead does not waive the
 gates below: they gate customer enablement/announcement, not code existing.*
 
-- [ ] API keys verified org-scoped at the RLS layer, not just application code — an API request with
-  a valid key for org A provably cannot read org B's rows (`spec.md` §8, §13.2), demonstrated by an
-  actual cross-org request test, not code inspection alone.
-- [ ] Webhook payloads confirmed to carry identifiers and status only — no findings content, no
-  document data (`spec.md` §13.3) — checked against the real serialized payload, not the intent.
+- [x] **API keys verified org-scoped at the RLS layer** (closed 2026-09-22), not just application
+  code — an API request with a valid key for org A provably cannot read org B's rows (`spec.md` §8,
+  §13.2), demonstrated by an actual cross-org request test, not code inspection alone.
+  *Evidence:* `tests/integration/api-tenant-isolation.itest.ts` — 17 assertions driving a running
+  server over HTTP with real bearer tokens for two real orgs. The proof is stronger than a passing
+  test usually is: the v1 route handlers query by primary key with **no `orgId` in the where
+  clause**, so a 404 for a foreign id can only have been produced by the RLS policy — there is no
+  application-level filter that could have produced it. A second block repeats the assertions
+  directly against the scoped connection with no route handler involved, so a later refactor that
+  reintroduces an application-level filter cannot make the suite pass for the wrong reason. Reads,
+  lists, counts, updates and deletes are covered in both directions, plus the 401 paths.
+- [x] **Webhook payloads confirmed to carry identifiers and status only** (closed 2026-09-22) — no
+  findings content, no document data (`spec.md` §13.3) — checked against the real serialized
+  payload, not the intent.
+  *Evidence:* `tests/integration/webhook-payload.itest.ts` — runs the real dispatcher against a real
+  endpoint row and intercepts the outbound request at `fetch`, asserting on the exact bytes that
+  would have gone over the wire. The fixture plants sentinel strings in the audit's finding note and
+  `structuredData` so a leak has something recognizable to be caught by. Payload keys are checked
+  against an **allowlist**, not a denylist, so a future event carrying an unforeseen field fails the
+  gate rather than shipping quietly.
 - [ ] At least one paying firm has asked for programmatic access or an integration, or the feature
   ships dark (built but unannounced) until one does — announcement effort follows evidence, per §4's
-  Phase 4 expansion motion.
+  Phase 4 expansion motion. **Open, and correctly so:** there is no paying firm, so the feature stays
+  dark. This is the gate working rather than a gap — see `docs/BLOCKED.md` §6.
 
 **Before v2.0 / any credential-handling feature:**
 - [ ] A specific design partner has stated, in a specific deal, that lack of Tier C automation cost
