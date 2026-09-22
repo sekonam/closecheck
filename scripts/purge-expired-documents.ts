@@ -15,16 +15,53 @@
  * due Engagement. Does NOT delete Reports/PDFs — those are the consultant's own generated
  * deliverable summarizing findings, not the raw seller-provided documents spec.md §8 is about.
  *
- * Run with: npm run db:purge-expired-documents
+ * SAFETY MODEL (rewritten 2026-09-22 after a review found the opposite failure):
+ *
+ * This script previously computed its own storage root as `join(process.cwd(), ".local-storage")`,
+ * ignoring STORAGE_ROOT_DIR — the variable that exists precisely so production can point at a
+ * mounted volume. Running it on any deployment that set that variable unlinked nothing (every path
+ * was wrong), treated the resulting ENOENT as "already purged", deleted every Evidence row anyway,
+ * and printed a success line. The documents survived on disk with the only pointers to them gone:
+ * a retention failure that reported itself as a clean run, which is worse than a loud crash.
+ *
+ * Three rules now make that shape impossible rather than merely fixed:
+ *   1. The storage root comes from the storage module itself (storageRoot()), never recomputed here.
+ *   2. Pre-flight aborts before touching a single row if that root does not exist — a misconfigured
+ *      path fails fast, at zero rows deleted, instead of deleting everything.
+ *   3. A file that is missing when its row says it should exist is an ANOMALY, not a success. The
+ *      row is kept (it is the only remaining pointer to a document that may well exist elsewhere),
+ *      the key is reported, and the run exits non-zero so a cron surfaces it. `--force-missing`
+ *      purges those rows for an operator who has checked the storage root and confirmed the files
+ *      are genuinely gone.
+ *
+ * Run with: npm run db:purge-expired-documents [-- --force-missing]
  */
 import { PrismaClient } from "@prisma/client";
-import { unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { stat } from "node:fs/promises";
+import { deleteObjectIfPresent, storageRoot } from "../src/lib/storage/local";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
-const STORAGE_ROOT = join(process.cwd(), ".local-storage");
+
+const forceMissing = process.argv.includes("--force-missing");
+
+type Totals = { purged: number; missing: number; failed: number };
+
+async function assertStorageRootUsable(root: string): Promise<void> {
+  const info = await stat(root).catch(() => null);
+  if (!info || !info.isDirectory()) {
+    throw new Error(
+      `Storage root ${root} does not exist or is not a directory. Refusing to purge: every unlink ` +
+        `would fail and the Evidence rows pointing at those documents would be the only thing ` +
+        `destroyed. Set STORAGE_ROOT_DIR to the volume the app actually writes to, then re-run.`,
+    );
+  }
+}
 
 async function main() {
+  const root = storageRoot();
+  await assertStorageRootUsable(root);
+  console.log(`Storage root: ${root}${forceMissing ? " (--force-missing)" : ""}`);
+
   const dueEngagements = await prisma.engagement.findMany({
     where: { documentPurgeAt: { lte: new Date() } },
     select: { id: true, businessName: true, orgId: true, documentPurgeAt: true },
@@ -34,6 +71,8 @@ async function main() {
     console.log("No engagements due for document purge.");
     return;
   }
+
+  const totals: Totals = { purged: 0, missing: 0, failed: 0 };
 
   for (const engagement of dueEngagements) {
     const evidence = await prisma.evidence.findMany({
@@ -47,28 +86,56 @@ async function main() {
     // rows for already-deleted earlier files pointing at files that no longer exist (they'd then
     // 404/500 on download instead of being gone). Per-file deletion means a failure on one file
     // only skips that file's row, not every file already handled before it.
-    let purgedCount = 0;
+    const perEngagement: Totals = { purged: 0, missing: 0, failed: 0 };
+
     for (const e of evidence) {
       if (e.storageKey) {
-        const removed = await unlink(join(STORAGE_ROOT, e.storageKey))
-          .then(() => true)
-          .catch((err) => {
-            // Already gone is fine (e.g. a re-run after a partial prior failure) — treat as purged.
-            // Anything else: leave the row in place for a future re-run rather than deleting a row
-            // whose file deletion we can't actually confirm.
-            if (err.code === "ENOENT") return true;
-            console.error(`Failed to unlink ${e.storageKey}, leaving its row for a future run:`, err);
-            return false;
-          });
-        if (!removed) continue;
+        let outcome: "deleted" | "missing";
+        try {
+          outcome = await deleteObjectIfPresent(e.storageKey);
+        } catch (err) {
+          console.error(`  FAILED to unlink ${e.storageKey}, keeping its row for a future run:`, err);
+          perEngagement.failed++;
+          continue;
+        }
+
+        if (outcome === "missing" && !forceMissing) {
+          console.error(
+            `  MISSING file for evidence ${e.id} (key ${e.storageKey}) — keeping the row. The row is ` +
+              `the only pointer to this document; verify the storage root, then re-run with ` +
+              `--force-missing if the file is genuinely gone.`,
+          );
+          perEngagement.missing++;
+          continue;
+        }
+        if (outcome === "missing") {
+          console.warn(`  Purging row for already-missing file ${e.storageKey} (--force-missing).`);
+        }
       }
       await prisma.evidence.delete({ where: { id: e.id } });
-      purgedCount++;
+      perEngagement.purged++;
     }
 
+    totals.purged += perEngagement.purged;
+    totals.missing += perEngagement.missing;
+    totals.failed += perEngagement.failed;
+
     console.log(
-      `Purged ${purgedCount} evidence document(s) for "${engagement.businessName}" (org ${engagement.orgId}, due ${engagement.documentPurgeAt?.toISOString()}).`,
+      `"${engagement.businessName}" (org ${engagement.orgId}, due ${engagement.documentPurgeAt?.toISOString()}): ` +
+        `${perEngagement.purged} purged, ${perEngagement.missing} missing, ${perEngagement.failed} failed.`,
     );
+  }
+
+  console.log(
+    `\nTotal: ${totals.purged} purged, ${totals.missing} missing, ${totals.failed} failed.`,
+  );
+
+  // Non-zero on anything unpurged so a scheduled run is a retention alarm, not a silent log line.
+  if (totals.missing > 0 || totals.failed > 0) {
+    console.error(
+      "Retention run incomplete — documents remain unaccounted for. This is a spec.md §8 issue, not a warning.",
+    );
+    process.exitCode = 1;
   }
 }
 

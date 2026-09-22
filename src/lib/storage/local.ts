@@ -33,6 +33,34 @@ export async function deleteObject(key: string): Promise<void> {
   });
 }
 
+/**
+ * The resolved storage root. Exported so other entry points (notably
+ * scripts/purge-expired-documents.ts, which runs outside the Next app) resolve the same directory
+ * this module writes to instead of recomputing it. They are not free to diverge: a purge script
+ * that computed its own cwd-relative root deleted Evidence rows while their files sat untouched
+ * under STORAGE_ROOT_DIR, and reported success — a spec.md §8 retention failure that looked like a
+ * clean run. One definition, one place.
+ */
+export function storageRoot(): string {
+  return STORAGE_ROOT;
+}
+
+/**
+ * Like deleteObject, but reports whether the file was actually there. Retention enforcement needs
+ * that distinction: deleteObject's ENOENT tolerance is right for a caller whose goal is "this key
+ * no longer points to a live file", and wrong for one that must not destroy the only pointer to a
+ * document it failed to find.
+ */
+export async function deleteObjectIfPresent(key: string): Promise<"deleted" | "missing"> {
+  try {
+    await unlink(join(STORAGE_ROOT, key));
+    return "deleted";
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return "missing";
+    throw err;
+  }
+}
+
 export function reportPdfKey(orgId: string, reportId: string): string {
   return `${orgId}/reports/${reportId}.pdf`;
 }

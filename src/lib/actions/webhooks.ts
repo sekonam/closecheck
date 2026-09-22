@@ -49,6 +49,13 @@ export async function addWebhookEndpoint(formData: FormData): Promise<void> {
     maxAge: 60,
     httpOnly: true,
     sameSite: "lax",
+    // These three flags matter because the value IS the secret, in cleartext, for 60 seconds:
+    // `secure` keeps it off any plaintext hop on a deployment that isn't strictly HTTPS-only
+    // (relaxed outside production so local http://localhost development still works), and the path
+    // scope stops it riding along on every unrelated request — the settings page is the only thing
+    // that ever reads it. httpOnly keeps it out of page JS, which has no reason to see it.
+    secure: process.env.NODE_ENV === "production",
+    path: "/settings",
   });
 
   revalidatePath("/settings");
