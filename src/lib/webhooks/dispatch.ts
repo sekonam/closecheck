@@ -1,5 +1,6 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { withOrgScope } from "@/lib/db/scoped";
+import { isPublicHostLiteral } from "@/lib/net/hostSafety";
 
 /**
  * Signed webhook delivery, docs/spec.md §13.3. Deliberately minimal by spec: best-effort with
@@ -24,9 +25,18 @@ const MAX_ATTEMPTS = 3;
 /**
  * Endpoint URLs are consultant-owner-supplied and fetched from the server, i.e. an SSRF surface.
  * The payload contains nothing sensitive by design, but refusing obviously-internal targets keeps a
- * hostile URL from using CloseCheck as a probe into wherever it happens to be deployed. Hostname
- * checks only — this is a guardrail, not a full egress policy (DNS-rebinding-grade defense would
- * need resolution pinning, out of scope per §13.3's deliberate minimalism).
+ * hostile URL from using CloseCheck as a probe into wherever it happens to be deployed.
+ *
+ * The host-safety half now lives in src/lib/net/hostSafety.ts, shared with the Tier A check runner,
+ * which has the same problem with a more hostile input. This function keeps only the rules that are
+ * genuinely webhook-specific — https, and no embedded credentials — because those belong to the
+ * transport, not to whether an address is public. The regex that used to live here missed every
+ * alternate spelling of a private address: IPv6 in most of its forms, IPv4-mapped IPv6, and decimal
+ * or hex integer literals (2852039166 and 0xA9FEA9FE both name link-local addresses and neither
+ * matched). The shared parser handles all of them.
+ *
+ * Still a guardrail rather than an egress policy: see that module's header on why a name-based
+ * check cannot stop DNS rebinding.
  */
 export function isDeliverableWebhookUrl(raw: string): boolean {
   let url: URL;
@@ -36,13 +46,10 @@ export function isDeliverableWebhookUrl(raw: string): boolean {
     return false;
   }
   if (url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase();
-  if (host === "localhost" || host === "0.0.0.0" || host.endsWith(".localhost") || host.endsWith(".internal")) {
-    return false;
-  }
-  if (/^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
-  if (host === "::1" || host.startsWith("[")) return false;
-  return true;
+  // Credentials in the URL would be sent on every delivery and shown back in the settings UI; a
+  // webhook endpoint has no use for them.
+  if (url.username || url.password) return false;
+  return isPublicHostLiteral(url.hostname).safe;
 }
 
 export function signWebhookPayload(secret: string, body: string): string {

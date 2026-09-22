@@ -27,6 +27,10 @@ export type MetricType =
   | "audit.created"
   | "audit.completed"
   | "report.generated"
+  // Recorded when a consultant downloads a generated report — distinct from report.generated
+  // because generating one and actually sending it to a buyer are different signals, and spec.md
+  // §11's report-usage metric is about the second.
+  | "report.exported"
   | "portal.viewed";
 
 export async function recordMetric(
