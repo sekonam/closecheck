@@ -10,6 +10,7 @@ import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSchema";
 import { StructuredFields } from "./StructuredFields";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
+import { PortalAccessHistory } from "./PortalAccessHistory";
 import { unavailableReason } from "@/lib/audit/blocking";
 import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
@@ -372,12 +373,12 @@ export default async function AuditPage({
                               </form>
                             )}
                           </div>
-                          <p className="mt-1 text-slate-400">
-                            Expires {link.expiresAt.toISOString().slice(0, 10)} ·{" "}
-                            {link.accessLog.length === 0
-                              ? "never viewed"
-                              : `viewed ${link.accessLog.length} time${link.accessLog.length === 1 ? "" : "s"}, last ${link.accessLog[0].viewedAt.toISOString().slice(0, 19).replace("T", " ")}`}
-                          </p>
+                          <PortalAccessHistory
+                            createdAt={link.createdAt}
+                            expiresAt={link.expiresAt}
+                            revokedAt={link.revokedAt}
+                            accessLog={link.accessLog}
+                          />
                           {isLive && (
                             <form action={emailPortalLinkAction} className="mt-1.5 flex items-center gap-2">
                               <input type="hidden" name="linkId" value={link.id} />
