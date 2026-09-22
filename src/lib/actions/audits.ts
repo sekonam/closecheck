@@ -15,6 +15,7 @@ import { getStripe } from "@/lib/billing/stripe";
 import { overagePriceId } from "@/lib/billing/config";
 import { recordMetric, recordError } from "@/lib/metrics/record";
 import { parseFieldSchema, readFieldValues } from "@/lib/templates/fieldSchema";
+import { isWorthRemembering, vendorKeyFor, vendorLabelFor } from "@/lib/audit/vendorMemory";
 
 /**
  * Creates an Audit pinned to the currently-active version of the given Template slug
@@ -247,7 +248,7 @@ export async function updateFinding(formData: FormData) {
     // clean message — found live via cross-tenant IDOR testing with a real foreign findingId.
     const existing = await tx.finding.findUnique({
       where: { id: parsed.findingId },
-      include: { templateItem: true },
+      include: { templateItem: true, audit: { include: { engagement: true } } },
     });
     if (!existing) {
       throw new Error("Finding not found.");
@@ -287,6 +288,38 @@ export async function updateFinding(formData: FormData) {
         );
       }
       structuredUpdate = { structuredData: values.values as Prisma.InputJsonValue };
+
+      // Remember what this firm recorded about this vendor, for the next deal (see
+      // src/lib/audit/vendorMemory.ts — reference only, never prefilled). Written in the same
+      // transaction as the finding so the memory can never claim something the audit does not say.
+      if (isWorthRemembering(schema, values.values)) {
+        const vendorLabel = vendorLabelFor(schema, values.values)!;
+        const profile = {
+          orgId,
+          itemTitle: existing.templateItem.title,
+          vendorKey: vendorKeyFor(vendorLabel),
+          vendorLabel,
+          values: values.values as Prisma.InputJsonValue,
+          engagementId: existing.audit.engagementId,
+          sourceBusinessName: existing.audit.engagement.businessName,
+        };
+        await tx.vendorTermProfile.upsert({
+          where: {
+            orgId_itemTitle_vendorKey_engagementId: {
+              orgId,
+              itemTitle: profile.itemTitle,
+              vendorKey: profile.vendorKey,
+              engagementId: profile.engagementId,
+            },
+          },
+          create: profile,
+          update: {
+            vendorLabel: profile.vendorLabel,
+            values: profile.values,
+            sourceBusinessName: profile.sourceBusinessName,
+          },
+        });
+      }
     }
 
     return tx.finding.update({

@@ -9,6 +9,9 @@ import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, citeEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSchema";
 import { citationsByField } from "@/lib/audit/sourceRef";
+import { recallFields, vendorKeyFor, vendorLabelFor } from "@/lib/audit/vendorMemory";
+import { formatFieldValue } from "@/lib/templates/fieldSchema";
+import { VendorRecall } from "./VendorRecall";
 import { StructuredFields } from "./StructuredFields";
 import { FieldSources } from "./FieldCitations";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
@@ -130,6 +133,27 @@ export default async function AuditPage({
   const reports = await withOrgScope(orgId, (tx) =>
     tx.report.findMany({ where: { auditId }, orderBy: { generatedAt: "desc" } }),
   );
+
+  // What this firm recorded about the same vendors on earlier engagements. Loaded in one query for
+  // the whole audit rather than per finding, and scoped to this audit's item titles so an org with
+  // a long history doesn't pull its entire library to render one page.
+  const auditItemTitles = [...new Set(audit.findings.map((f) => f.templateItem.title))];
+  // Excluding this engagement's own readings at the query, not after: "what we found last time"
+  // has to mean a different deal, and a reading from this one is the consultant's own current
+  // answer reflected back at them.
+  const vendorProfiles = await withOrgScope(orgId, (tx) =>
+    tx.vendorTermProfile.findMany({
+      where: { itemTitle: { in: auditItemTitles }, engagementId: { not: engagementId } },
+      orderBy: { updatedAt: "desc" },
+    }),
+  );
+  // Most recent other engagement wins: the list is already newest-first, so the first write for a
+  // key is the one to keep.
+  const vendorProfileByKey = new Map<string, (typeof vendorProfiles)[number]>();
+  for (const profile of vendorProfiles) {
+    const key = `${profile.itemTitle}::${profile.vendorKey}`;
+    if (!vendorProfileByKey.has(key)) vendorProfileByKey.set(key, profile);
+  }
 
   // Client Portal Links (spec.md §7) for these reports, with each link's access log (spec.md §8's
   // "who viewed/exported/shared a given Report and when," from the consultant's side — there's no
@@ -458,6 +482,31 @@ export default async function AuditPage({
               const citations = schema
                 ? citationsByField(finding.evidence, new Set(schema.fields.map((f) => f.key)))
                 : new Map();
+              // Only recall a vendor this finding actually names, and never the profile this
+              // finding itself wrote — showing a consultant their own current answer back as
+              // "you audited this before" would be noise at best and misleading at worst.
+              const vendorLabel = schema ? vendorLabelFor(schema, structured) : null;
+              const vendorProfile =
+                schema && vendorLabel
+                  ? vendorProfileByKey.get(`${finding.templateItem.title}::${vendorKeyFor(vendorLabel)}`)
+                  : undefined;
+              const recalled =
+                schema && vendorProfile
+                  ? recallFields(
+                      schema,
+                      {
+                        vendorLabel: vendorProfile.vendorLabel,
+                        sourceBusinessName: vendorProfile.sourceBusinessName,
+                        recordedAt: vendorProfile.updatedAt,
+                        values: (vendorProfile.values ?? {}) as Record<string, string>,
+                      },
+                      structured,
+                      (fieldKey, value) => {
+                        const field = schema.fields.find((f) => f.key === fieldKey);
+                        return field ? formatFieldValue(field, value) : value;
+                      },
+                    )
+                  : [];
               const citableDocuments = finding.evidence
                 .filter((e) => e.storageKey)
                 .map((e) => ({ id: e.id, name: e.label ?? e.text ?? "document" }));
@@ -548,6 +597,15 @@ export default async function AuditPage({
                     {schema && <StructuredFields schema={schema} values={structured} />}
 
                   </form>
+
+                  {vendorProfile && recalled.length > 0 && (
+                    <VendorRecall
+                      vendorLabel={vendorProfile.vendorLabel}
+                      sourceBusinessName={vendorProfile.sourceBusinessName}
+                      recordedAt={vendorProfile.updatedAt}
+                      fields={recalled}
+                    />
+                  )}
 
                   {schema && (
                     <FieldSources

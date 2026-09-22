@@ -51,6 +51,7 @@ model ConsultantOrg {
   evidence          Evidence[]
   reports           Report[]
   clientPortalLinks ClientPortalLink[]
+  vendorTermProfiles VendorTermProfile[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
   emailMessages     EmailMessage[]
@@ -110,6 +111,7 @@ model Engagement {
   documentPurgeAt DateTime?
 
   audits Audit[]
+  vendorTermProfiles VendorTermProfile[]
 
   @@index([orgId])
   @@map("engagements")
@@ -336,6 +338,55 @@ model Evidence {
   @@index([orgId])
   @@index([findingId])
   @@map("evidence")
+}
+
+// A record of what this firm found the last time it looked at a given vendor, on a given
+// checklist item. spec.md §2.2: "the value proposition against ad hoc, no repeatable process is
+// consistency across engagements."
+//
+// TENANT-OWNED, and the distinction matters more here than anywhere else in this schema. Template
+// content is product-owned and shared between every consultant; this is derived from one firm's
+// clients' executed contracts, and it is exactly the kind of data whose cross-tenant leak §8
+// describes as catastrophic. orgId plus an RLS policy, like every other tenant table.
+//
+// Deliberately REFERENCE ONLY — nothing reads this to prefill a finding. See
+// src/lib/audit/vendorMemory.ts for why: carrying one deal's recorded terms into another deal's
+// report is a worse failure than retyping them.
+model VendorTermProfile {
+  id        String        @id @default(cuid())
+  orgId     String
+  org       ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  /**
+   * The checklist item's title, as it stood on the template version the finding was rated against.
+   * Titles are the only stable-ish identity a TemplateItem has across versions, and a retitled
+   * item is arguably a different question — so fragmenting on a retitle is the honest behaviour,
+   * not a bug to work around.
+   */
+  itemTitle String
+  /** The vendor as the consultant typed it, normalised for matching (see vendorMemory.ts). */
+  vendorKey String
+  /** The vendor exactly as typed, for display — "Toast" and "toast pos" should not both show. */
+  vendorLabel String
+  /** The structured values recorded for that vendor on that item. */
+  values    Json
+  /**
+   * The engagement this reading came from. One row per engagement rather than one per vendor,
+   * deliberately: with a single row the deal currently being audited overwrites the very reading
+   * it should be compared against, so the recall vanishes at the moment the consultant records
+   * their own answer — which is exactly when the comparison becomes useful. Keeping a reading per
+   * engagement means "what we found last time" always means a different deal.
+   */
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id], onDelete: Cascade)
+  /** Denormalised so the recall panel can name the deal without a join or a second lookup. */
+  sourceBusinessName String
+  recordedAt DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([orgId, itemTitle, vendorKey, engagementId])
+  @@index([orgId])
+  @@index([engagementId])
+  @@map("vendor_term_profiles")
 }
 
 // ---------------------------------------------------------------------------
