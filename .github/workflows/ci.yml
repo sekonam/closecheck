@@ -138,6 +138,7 @@ jobs:
           npm run db:publish-evidence-depth
           npm run db:publish-evidence-backed-thresholds
           npm run db:publish-runner-aligned-thresholds
+          npm run db:publish-stated-limits-thresholds
 
       - name: Verify row-level security
         run: npm run db:verify-rls

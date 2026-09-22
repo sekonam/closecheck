@@ -82,6 +82,56 @@ copy a firm's own accumulated readings, because those exist only where the work 
 makes this the first thing here worth positioning against the 12–24 month window, not merely
 listing.
 
+### Template-version event: v6 — shipped 2026-09-22 (what the automated checks can actually conclude)
+
+**The headline is a corrected rating, not a wording change.** `runEmailAuthPosture` rated Green on
+the mere presence of SPF and DMARC — while its own note read *"DMARC policy is p=none
+(monitor-only — no enforcement)"*. A domain publishing exactly that delivers mail forged as the
+target precisely as it would with no DMARC at all; the rubric put it in Yellow explicitly. The
+product named the condition in the same sentence in which it declined to act on it. A record with
+no `p=` at all rated Green too, the same failure in the under-reporting direction. Any audit run
+against such a domain understated a real risk to the buyer.
+
+**The rest is v5's own scope being wrong**, which is the part worth learning from. v5 corrected the
+rubric/runner divergences that had been *noticed*. It did not sweep for them — v3 and v4 each
+carried a coverage assertion that fails when an item is neither revised nor explicitly passed over,
+and v5 shipped with only the inverse check. Three more divergences of the same shape were sitting in
+the same template, and they were worse than the two v5 fixed, because they ended in a confirmed PASS
+rather than a visible disagreement:
+
+- **DNS.** The rubric reserves Green for accounts the seller can demonstrate control of and that
+  appear on the asset schedule, and makes DNS held by a party outside the transaction a **Red**. The
+  runner identified nameservers and returned PASS/Green. A target whose DNS sits with an agency
+  outside the sale received the same confirmed Green as one where control was proved.
+- **Mail.** The same shape. A Google Workspace tenant owned personally by a departing founder
+  publishes the same MX records as one on the asset schedule. Both PASS/Green.
+- **HTTPS.** Green also requires no blockable mixed content and no legacy TLS; the runner checks
+  neither. Its rubric also contradicted itself — Green required HSTS while a later sentence said a
+  missing HSTS header "is not on its own a Yellow", leaving redirect-without-HSTS in no band.
+
+A fourth surfaced from the registry built to enforce the sweep: the email rubric graded DKIM key
+length and rotation, neither of which is measurable from DNS.
+
+**None of these gaps can be closed, and v6 does not pretend otherwise.** Whether a seller can
+demonstrate control of an account is not observable from public records, and inventing a signal for
+it would be worse than admitting the limit. So each automated pass now states what it covered, and
+the runners that cannot satisfy their rubric return **IN_PROGRESS rather than PASS** — counting as
+awaiting confirmation instead of as a finished rating. Severity is unchanged, because what was
+observed is genuinely unremarkable; downgrading it would invent a concern rather than state a gap.
+
+**The visible consequence: on a clean domain 6 of 7 Tier A items now read "awaiting confirmation"
+where 4 read "finished".** That is the correct number rather than a regression. Only the certificate
+check is self-contained, because everything its threshold turns on is inside the certificate; the
+rest is fingerprinting public records that a consultant must connect to the deal. Presenting that as
+finished was the overstatement, and the count is a burn-down that reaches zero as the consultant
+confirms each item — not a constant, so it keeps carrying information.
+
+`src/lib/audit/rubricAlignment.ts` is the durable half: every runner must record what it determines
+and what its rubric asks beyond that, an entry admitting a gap must quote wording actually present
+in the published rubric, and it may not claim a finished PASS. Writing it immediately caught two
+entries violating the rule stated in its own docstring — which is what happens to a rule that lives
+only in a docstring.
+
 ### Template-version event: v5 — shipped 2026-09-22 (rubrics vs. what the runner computes)
 
 A different kind of correction from v4's, and the distinction is the point. v4 changed what the

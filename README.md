@@ -18,9 +18,9 @@ Next.js (App Router) + TypeScript + Postgres. The full consultant loop is built:
 Engagement, run an Audit against a business-type Template tier by tier, and produce a whitelabeled
 PDF report for a buyer.
 
-- **Four Templates**, all at v5: restaurant/online-ordering, salon/booking, franchise-location,
-  general-ecommerce. Template versions are pinned per Audit — an audit started on v4 keeps reporting
-  v4 after v5 publishes (`docs/spec.md` §5), so a revision never changes a finding underneath an
+- **Four Templates**, all at v6: restaurant/online-ordering, salon/booking, franchise-location,
+  general-ecommerce. Template versions are pinned per Audit — an audit started on v5 keeps reporting
+  v5 after v6 publishes (`docs/spec.md` §5), so a revision never changes a finding underneath an
   engagement in flight.
 - **Tier A** automated checks against real data sources: RDAP domain lookup (with legacy WHOIS
   fallback), DNS, TLS, CMS fingerprint, SPF/DKIM/DMARC, MX, and HTTPS hygiene.
@@ -53,6 +53,7 @@ npm run db:publish-tiera-expansion   # template v2
 npm run db:publish-evidence-depth    # template v3 — without this, Tier B/C capture falls back to note-only
 npm run db:publish-evidence-backed-thresholds   # template v4 — sourced severity thresholds
 npm run db:publish-runner-aligned-thresholds    # template v5 — rubrics matched to the runner
+npm run db:publish-stated-limits-thresholds    # template v6 — states what each check can conclude
 npm run dev
 ```
 
