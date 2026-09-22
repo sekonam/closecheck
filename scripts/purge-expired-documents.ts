@@ -34,7 +34,7 @@
  *      purges those rows for an operator who has checked the storage root and confirmed the files
  *      are genuinely gone.
  *
- * Run with: npm run db:purge-expired-documents [-- --force-missing]
+ * Run with: npm run db:purge-expired-documents [-- --engagement=<id>] [-- --force-missing]
  */
 import { DealStage, PrismaClient } from "@prisma/client";
 import { stat } from "node:fs/promises";
@@ -43,6 +43,22 @@ import { deleteObjectIfPresent, storageRoot } from "../src/lib/storage/local";
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
 
 const forceMissing = process.argv.includes("--force-missing");
+
+/**
+ * Restricts the run to one engagement.
+ *
+ * Operationally this is the "a client has asked us to delete their documents now" path — a founder
+ * should be able to honour that for one deal without waiting for the scheduled sweep or purging
+ * every other due engagement at the same time.
+ *
+ * It also exists because the unscoped default is genuinely dangerous to run anywhere shared. This
+ * script deletes evidence for EVERY due engagement in the database, so running it against a
+ * development or test database destroys whatever else is in there — which is not hypothetical: the
+ * integration test for this script did exactly that to another session's fixtures before it was
+ * scoped. Anything automated that invokes this should name its engagement.
+ */
+const engagementArg = process.argv.find((arg) => arg.startsWith("--engagement="));
+const onlyEngagementId = engagementArg ? engagementArg.slice("--engagement=".length) : null;
 
 type Totals = { purged: number; missing: number; failed: number };
 
@@ -60,7 +76,10 @@ async function assertStorageRootUsable(root: string): Promise<void> {
 async function main() {
   const root = storageRoot();
   await assertStorageRootUsable(root);
-  console.log(`Storage root: ${root}${forceMissing ? " (--force-missing)" : ""}`);
+  console.log(
+    `Storage root: ${root}${forceMissing ? " (--force-missing)" : ""}` +
+      (onlyEngagementId ? ` (--engagement=${onlyEngagementId})` : " (all due engagements)"),
+  );
 
   // Both conditions, not just the date. A purge date is set when an engagement reaches a terminal
   // stage, but the date is a stored column and the stage can move on afterwards — a dead deal that
@@ -75,6 +94,9 @@ async function main() {
     where: {
       documentPurgeAt: { lte: new Date() },
       dealStage: { in: [DealStage.CLOSED, DealStage.DEAD] },
+      // Narrowing only — an explicitly named engagement still has to be genuinely due. The flag
+      // chooses WHICH due engagements to purge, never whether the retention rules apply.
+      ...(onlyEngagementId ? { id: onlyEngagementId } : {}),
     },
     select: { id: true, businessName: true, orgId: true, documentPurgeAt: true, dealStage: true },
   });

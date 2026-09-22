@@ -53,7 +53,20 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
     try {
       const { stdout } = await run(
         "npx",
-        ["tsx", "-r", "dotenv/config", "scripts/purge-expired-documents.ts", ...args],
+        [
+          "tsx",
+          "-r",
+          "dotenv/config",
+          "scripts/purge-expired-documents.ts",
+          // ALWAYS scoped to this fixture's own engagement. Unscoped, this script deletes evidence
+          // for every due engagement in the database — and this suite shares one with every other
+          // spec and with anyone else working against it. An earlier version of this file ran it
+          // unscoped and destroyed another session's fixture rows mid-probe. A test must not be
+          // capable of that, and scoping also removes the cross-spec contamination that made these
+          // assertions depend on what else happened to be due.
+          `--engagement=${org.engagementId}`,
+          ...args,
+        ],
         { env: { ...process.env, ...env }, cwd: process.cwd() },
       );
       return { code: 0, output: stdout };
@@ -146,8 +159,9 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
 
     const { output } = await purge({ STORAGE_ROOT_DIR: storageRoot });
 
-    // The engagement must not appear in the run at all — it is no longer eligible.
-    expect(output).not.toContain(org.orgId);
+    // Named explicitly and still not purged: the flag narrows which due engagements are processed,
+    // it never overrides the retention rules themselves.
+    expect(output).toMatch(/No engagements due for document purge/);
     expect(existsSync(join(storageRoot, storageKey))).toBe(true);
     expect(await directPrisma.evidence.findUnique({ where: { id: evidenceId } })).not.toBeNull();
   });

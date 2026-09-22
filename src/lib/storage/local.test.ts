@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { join } from "node:path";
 import { evidenceKey, reportPdfKey } from "./local";
 
-// putObject/getObject build paths via `join(STORAGE_ROOT, key)` — these tests check that the key
-// itself can never resolve outside STORAGE_ROOT once joined, which is the actual property that
-// matters (not just "the string looks sanitized").
+// These check that a GENERATED key can never resolve outside STORAGE_ROOT — the property that
+// matters, not just "the string looks sanitized". Note what they do not cover, and what the
+// operation-layer tests at the bottom of this file exist for: a key that never came from these
+// generators at all. A storageKey read back from the database is just a string, and before the
+// containment guard the filesystem operations would follow it wherever it pointed.
 const STORAGE_ROOT = "/fake/.local-storage";
 
 function resolvesInsideStorageRoot(key: string): boolean {
@@ -56,5 +58,79 @@ describe("evidenceKey", () => {
 describe("reportPdfKey", () => {
   it("builds a predictable, tenant-prefixed key", () => {
     expect(reportPdfKey("org1", "report1")).toBe("org1/reports/report1.pdf");
+  });
+});
+
+describe("the storage operations refuse a key that escapes the root", () => {
+  /**
+   * The generator tests above verify keys this module PRODUCES. This verifies what it does with a
+   * key it merely receives — which is the real exposure, because the consumer of these functions is
+   * a retention cron job that deletes, and its input is a `storageKey` column read back from the
+   * database rather than a freshly generated key.
+   *
+   * Demonstrated before it was fixed, not theorised: an Evidence row carrying a traversing key made
+   * the purge delete a file outside the storage root and report `1 purged, 0 missing, 0 failed`,
+   * and the authenticated download route returned that file's contents. Unreachable through the app
+   * today because `evidenceKey` sanitises and browsers strip paths — but `local.ts` is documented as
+   * a stand-in to be replaced with S3, so the writer will change while the deleting consumer stays.
+   */
+  async function withRoot<T>(fn: (mod: typeof import("./local")) => Promise<T>): Promise<T> {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const root = await mkdtemp(join(tmpdir(), "closecheck-storage-test-"));
+    const previous = process.env.STORAGE_ROOT_DIR;
+    process.env.STORAGE_ROOT_DIR = root;
+    vi.resetModules();
+    try {
+      return await fn(await import("./local"));
+    } finally {
+      process.env.STORAGE_ROOT_DIR = previous;
+      vi.resetModules();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  const ESCAPING_KEY = "../".repeat(12) + "tmp/closecheck-should-never-be-touched.txt";
+
+  it("refuses to read, write or delete through a traversing key", async () => {
+    await withRoot(async (mod) => {
+      await expect(mod.putObject(ESCAPING_KEY, Buffer.from("x"))).rejects.toThrow(/outside the storage root/);
+      await expect(mod.getObject(ESCAPING_KEY)).rejects.toThrow(/outside the storage root/);
+      await expect(mod.deleteObject(ESCAPING_KEY)).rejects.toThrow(/outside the storage root/);
+      await expect(mod.deleteObjectIfPresent(ESCAPING_KEY)).rejects.toThrow(/outside the storage root/);
+    });
+  });
+
+  it("refuses an absolute key, which join() would have silently honoured", async () => {
+    await withRoot(async (mod) => {
+      await expect(mod.getObject("/etc/hosts")).rejects.toThrow(/outside the storage root/);
+    });
+  });
+
+  it("refuses a sibling directory whose name merely starts with the root's", async () => {
+    // `/data/storage-old` against a root of `/data/storage` — a prefix check without the separator
+    // would let this through.
+    await withRoot(async (mod) => {
+      await expect(mod.getObject("../" + "closecheck-storage-test-sibling/x")).rejects.toThrow(
+        /outside the storage root/,
+      );
+    });
+  });
+
+  it("still allows ordinary contained keys, including nested ones", async () => {
+    await withRoot(async (mod) => {
+      const key = "orgA/evidence/finding1/doc.pdf";
+      await mod.putObject(key, Buffer.from("contained"));
+      expect((await mod.getObject(key)).toString()).toBe("contained");
+      expect(await mod.deleteObjectIfPresent(key)).toBe("deleted");
+    });
+  });
+
+  it("treats a dot-segment that stays inside the root as contained", async () => {
+    // `a/../b` resolves within the root and is not an escape; refusing it would be wrong.
+    await withRoot(async (mod) => {
+      await mod.putObject("orgA/nested/../doc.pdf", Buffer.from("ok"));
+      expect((await mod.getObject("orgA/doc.pdf")).toString()).toBe("ok");
+    });
   });
 });
