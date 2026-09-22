@@ -22,7 +22,15 @@ which line you are applying by hand and ask whether it could be a lint rule, a t
 in the suite — and when it can, converting it is worth more than any single finding it would have
 caught. A selector with false positives is worse than none, because the first one earns a disable
 comment and the rule stops being read; the `in` rule works because requiring a non-literal left
-operand has none in this codebase. Report domain findings the same way (`ReportFindings`, when in a review
+operand has none in this codebase.
+
+**And a check only finds instances of the shape it can express** — a person still has to ask what
+else is wrong for the same reason. That selector flagged the membership tests and had no opinion
+about `ENRICHMENTS[title]`, a bare index on the same object with the same defect; fixing only what
+was flagged would have left the bug with its guard removed rather than the bug fixed. So read a
+lint hit as "here is one instance of a class" rather than "here is the defect", and go looking for
+the rest of the class by hand. Both halves of this matter: without the first, a rule nobody points
+at catches nothing; without the second, a rule that fires becomes the boundary of the search. Report domain findings the same way (`ReportFindings`, when in a review
 flow) — don't fold them into general findings if a review flow is already using structured output;
 otherwise report directly to the user as plain findings with file/line and concrete failure scenario.
 
