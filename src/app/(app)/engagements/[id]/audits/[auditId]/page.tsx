@@ -164,6 +164,7 @@ export default async function AuditPage({
       include: {
         accessLog: { orderBy: { viewedAt: "desc" } },
         createdBy: { select: { name: true, email: true } },
+        revokedBy: { select: { name: true, email: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -418,6 +419,7 @@ export default async function AuditPage({
                             createdAt={link.createdAt}
                             expiresAt={link.expiresAt}
                             revokedAt={link.revokedAt}
+                            revokedBy={attributionFor(link.revokedBy)}
                             accessLog={link.accessLog}
                           />
                           {isLive && (

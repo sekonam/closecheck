@@ -30,6 +30,13 @@ type Props = {
   createdAt: Date;
   expiresAt: Date;
   revokedAt: Date | null;
+  /**
+   * Which seat withdrew the link. Null for a link revoked before this was recorded, and for one
+   * still live. Deliberately distinct from createdBy: spec.md §12's open question is entirely about
+   * the case where they differ, and showing the creator beside "Revoked" would name the wrong
+   * person for the one action a firm would be trying to understand.
+   */
+  revokedBy: string | null;
   accessLog: AccessEntry[];
 };
 
@@ -42,6 +49,7 @@ export function PortalAccessHistory({
   createdAt,
   expiresAt,
   revokedAt,
+  revokedBy,
   accessLog: rawLog,
 }: Props) {
   // Every request is logged; the page's own embedded viewer is collapsed here rather than being
@@ -92,7 +100,10 @@ export function PortalAccessHistory({
 
         {revokedAt && (
           <li className="text-slate-500">
-            <span className="font-medium text-slate-600">Revoked</span> · {formatTimestamp(revokedAt)}
+            <span className="font-medium text-slate-600">
+              {revokedBy ? `Revoked by ${revokedBy}` : "Revoked"}
+            </span>{" "}
+            · {formatTimestamp(revokedAt)}
           </li>
         )}
 

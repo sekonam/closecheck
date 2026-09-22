@@ -7,6 +7,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { sendEmail } from "@/lib/email/send";
 import { portalLink as portalLinkTemplate } from "@/lib/email/templates";
+import { revokePortalLink as revoke } from "@/lib/portal/revoke";
 
 // 30 days, hardcoded — no UI for a custom expiry yet (v1 scope cut per spec.md §7's "time-boxed"
 // requirement; the number itself isn't spec-mandated).
@@ -136,26 +137,19 @@ const revokePortalLinkSchema = z.object({
 });
 
 export async function revokePortalLink(formData: FormData): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const result = revokePortalLinkSchema.safeParse({ linkId: formData.get("linkId") });
   if (!result.success) {
     throw new Error(result.error.issues[0]?.message ?? "Invalid link id.");
   }
   const { linkId } = result.data;
 
-  const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
-    const link = await tx.clientPortalLink.findUnique({
-      where: { id: linkId },
-      include: { report: { include: { audit: true } } },
-    });
-    if (!link) {
-      throw new Error("Link not found.");
-    }
-
-    await tx.clientPortalLink.update({ where: { id: linkId }, data: { revokedAt: new Date() } });
-
-    return { engagementId: link.report.audit.engagementId, auditId: link.report.auditId };
-  });
+  // The revocation itself lives in src/lib/portal/revoke.ts — attribution and the
+  // first-revocation-wins rule are properties of the data, testable against real rows under RLS,
+  // and were not testable while they sat inside a server action behind requireOrgSession.
+  const { engagementId, auditId } = await withOrgScope(orgId, (tx) =>
+    revoke(tx, linkId, userId),
+  );
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }

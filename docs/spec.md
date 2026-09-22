@@ -748,9 +748,19 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   is engagement-scoped today, per §3's line, and both readings are defensible with no evidence either
   way: pulling a link back is a safety action that should not have to wait for a partner to be
   reachable, and it also destroys a colleague's delivery to a client mid-engagement, possibly without
-  their knowing. Whichever way it resolves, the action is attributable now (§8), so the open part is
-  who may act, not who did. Wait for a firm to hit it on a live engagement rather than guessing which
-  failure is worse.
+  their knowing. Whichever way it resolves, the action is attributable — both the seat that shared
+  the report and the seat that withdrew it are recorded (§8) — so the open part is who may act, not
+  who did. Wait for a firm to hit it on a live engagement rather than guessing which failure is
+  worse.
+
+  This entry previously claimed that attribution already held, when only creation was recorded and
+  revocation wrote a bare timestamp. That mattered more than a stale sentence usually does, because
+  it was load-bearing for the deferral: the harm described above is a colleague's delivery destroyed
+  "possibly without their knowing", and a firm looking at an access trail that reads
+  `Revoked · <timestamp>` has nothing to escalate with. The evidence this question waits on could
+  not have arrived. Recorded here rather than quietly corrected, because the failure worth
+  remembering is not the missing column — it is that deferring a decision to evidence puts a
+  standing obligation on the evidence actually being collectable, and nothing re-checked that.
 - Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
   gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
   integration decision).

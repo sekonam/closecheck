@@ -163,6 +163,10 @@ address pinning or a network-level control, and neither exists yet.
   visits from one origin can be told from separate viewers; nobody is identified, and the interface
   says so rather than letting the number be over-read.
 - **Report exports** by the consultant are recorded.
+- **Sharing and withdrawal are attributed to a seat.** A portal link records which of the firm's
+  people sent the report outside, and which withdrew it — the two engagement-scoped actions with
+  effects outside the firm. Re-withdrawing an already-dead link changes nothing: the first
+  revocation is the event.
 - Operational metrics and errors are recorded for the operator with no org-scoped read path.
 
 **Not yet true:** there is no general administrative audit log of consultant actions within an

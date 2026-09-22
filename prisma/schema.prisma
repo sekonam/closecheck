@@ -77,7 +77,8 @@ model User {
   createdAt    DateTime      @default(now())
 
   uploadedEvidence   Evidence[]
-  createdPortalLinks ClientPortalLink[]
+  createdPortalLinks ClientPortalLink[] @relation("PortalLinkCreator")
+  revokedPortalLinks ClientPortalLink[] @relation("PortalLinkRevoker")
 
   @@index([orgId])
   @@map("users")
@@ -338,6 +339,14 @@ model Evidence {
 
   @@index([orgId])
   @@index([findingId])
+  /**
+   * Declared here, not only in SQL. The FK is ON DELETE SET NULL, so removing a user scans this
+   * table for their rows; the index was created by the migration that added the column but never
+   * mirrored into this file, which left the schema and the migration history disagreeing about
+   * whether it exists. `prisma migrate diff` resolves that disagreement by dropping it — silently,
+   * inside whatever unrelated migration is generated next.
+   */
+  @@index([uploadedById])
   @@map("evidence")
 }
 
@@ -384,7 +393,7 @@ model VendorTermProfile {
   recordedAt DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
-  @@unique([orgId, itemTitle, vendorKey, engagementId])
+  @@unique([orgId, itemTitle, vendorKey, engagementId], map: "vendor_term_profiles_org_item_vendor_engagement_key")
   @@index([orgId])
   @@index([engagementId])
   @@map("vendor_term_profiles")
@@ -461,12 +470,31 @@ model ClientPortalLink {
    * cascade would erase the access history of a report that had already been shared.
    */
   createdById String?
-  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?       @relation("PortalLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  /**
+   * Which seat pulled this report back.
+   *
+   * `revokedAt` alone recorded that a link was withdrawn and not by whom, while `createdById`
+   * recorded who sent it — so the trail could name the seat that took a deliverable outside the
+   * firm and not the one that took it away from a client mid-engagement. spec.md §12 carries an
+   * open question on whether a Member may revoke a link they did not create, and defers it until a
+   * firm hits it on a live engagement. That gate cannot be reached without this column: the harm it
+   * describes is a colleague's delivery being destroyed "possibly without their knowing", and a
+   * firm looking at "Revoked · <timestamp>" has nothing to report back. Recording the actor does
+   * not resolve who may act; it makes the evidence collectable.
+   *
+   * SET NULL on user delete, like createdById: the trail must outlive the person.
+   */
+  revokedById String?
+  revokedBy   User?       @relation("PortalLinkRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
   createdAt DateTime      @default(now())
 
   accessLog PortalAccessLogEntry[]
 
   @@index([orgId])
+  /** Both FKs are ON DELETE SET NULL — see the note on Evidence's uploadedById index. */
+  @@index([createdById])
+  @@index([revokedById])
   @@map("client_portal_links")
 }
 
