@@ -92,6 +92,21 @@ into an implementable structure. Each checklist item in a Template declares:
   makes one consultant's Yellow another's Red, which is the opposite of the repeatability being
   sold.
 
+**Thresholds name their source, and say so when there is none (decision, template v4).** In a
+document a consultant bills for, a threshold written from domain knowledge is indistinguishable from
+one traced to a published rule — and several written from domain knowledge turned out to be wrong,
+not merely unsourced (§5). Every threshold therefore names the publication it comes from and the date
+it was read, and where the underlying rule is revised periodically — the card-network monitoring
+programs, the ICANN Transfer Policy, the CA/Browser Forum validity schedule — the item tells the
+consultant to re-verify at the audit date and to state which version was applied. The harder half of
+the same rule, and the one that makes this content defensible: **where no authoritative source
+exists, the item says so and gives the consultant the reasoning and the retrieval method instead of a
+number.** The domain-expiry threshold is stated as *this firm's* basis, with the derivation shown and
+explicitly not presented as an industry standard, because no industry standard exists; reserve
+percentages, the "letter of good standing" a seller may offer, certificate-expiry day counts and
+registrar restore fees are all handled the same way. An uncited threshold is worse than no threshold,
+because it invites a challenge from the buyer's advisory team that it cannot answer.
+
 ### Tier A — external, no seller cooperation needed
 
 Runnable pre-LOI, even pre-offer, from public information only.
@@ -108,12 +123,27 @@ Runnable pre-LOI, even pre-offer, from public information only.
 | Google Business Profile ownership and claim status | manual (no reliable public API for claim status) |
 | Social account ownership (which accounts exist, who administers them per public info) | manual |
 | Trademark conflict scan on business name / domain | manual, consultant-triggered (search, not filed automatically) |
+| Authentication verdicts on a real message from the business's sending system | manual (added 2026-09-22, template v4) |
 
 DKIM note (methodology constraint, not an implementation detail): DKIM records live under
 per-provider selector names that cannot be enumerated from public DNS, so the check probes common
 selectors (`google`, `selector1/2`, `k1`, …) best-effort. A found record is evidence; a not-found
 result is **not** evidence of absence and must never lower a severity on its own — the finding note
 says what was probed and defers to SPF/DMARC (which are deterministically checkable) for scoring.
+
+That constraint is what the table's last row exists to answer: the only thing that can grade DKIM is
+a real message from the business's own sending system, read for the selector and signing domain in
+its `DKIM-Signature` header and for the receiving system's own `Authentication-Results` verdicts.
+**Decision: that item declares its evidence expectation as `document`, not `attestation`, though the
+bullet above frames a document expectation as the Tier B proxy.** An attestation is satisfied by any
+non-empty structured capture, and a Tier A item has structured capture of its own — here the verdicts
+the consultant transcribes, on the automated items the runner's own check output. An `attestation`
+expectation would therefore have been satisfied by the item recording its own answer: the finding
+would present as evidenced while the one artifact the item exists to obtain — a received message
+carrying its `Authentication-Results` header — was never attached, and §6's evidence coverage would
+have no way to say so. `document` is the expectation that makes a missing message countable, and
+that countability is the entire reason this is a checklist item rather than a sentence in the
+automated item's finding note.
 
 Tier A is the automation surface. It's also the free/first-touch surface: a consultant can run Tier A
 on a prospective deal before they've even been engaged, which is a plausible top-of-funnel hook (see
@@ -129,6 +159,8 @@ started (post-LOI in most deals, sometimes earlier if broker is cooperative).
 | POS system contract terms, term length, early-termination penalty | manual, document upload + structured fields |
 | Customer-facing platform contract and transferability clause (online-ordering, booking, storefront, or franchisor-contracted equivalent) | manual, document upload + structured fields |
 | Payment processor account standing (chargebacks, holds, reserve) | manual, document/statement upload |
+| Terminated-merchant file (MATCH / VMSS) exposure | manual, acquirer inquiry + purchase-agreement representation (added 2026-09-22, template v4) |
+| Processing continuity at close | manual, document upload + structured fields (added 2026-09-22, template v4) |
 | Recurring SaaS inventory: what tools, what each costs, transfers vs. must-rebuild | manual, structured table the consultant fills from seller-provided list |
 
 The transferability row is **universal** — every Template instantiates it in its own vertical's
@@ -137,6 +169,22 @@ v1/v2 expressed it only as the restaurant Template's online-ordering contract an
 Template's booking contract, which left the franchise and e-commerce Templates with no
 transferability item at all. A base item that lives in one Template's list is silently missing from
 every other one.
+
+**Decision: the payment rows are a three-way split of what was one item, where the evidence behind
+them recommended four.** `docs/research/audit-thresholds-2026-09.md` §7.4 argued for separating
+network monitoring-program standing, reserve/hold status, terminated-merchant-file listing, and
+processing continuity at close. Reserves stay on the account-standing row: they are read off the same
+processor statements and the same processing agreement as the chargeback and monitoring-program
+picture, by the same person in the same sitting, and an item whose evidence is indistinguishable from
+its neighbour's adds a row to the report without adding a finding. The other two split because their
+evidence is not the statements at all — a terminated-merchant listing is not searchable by the
+merchant and is answered by the seller's acquirer plus a representation in the purchase agreement,
+and continuity is answered by the agreement's assignment clause and the buyer's own underwriting
+timetable, which makes it a closing dependency and a working-capital item rather than a risk
+measurement. Severity is the harder half of the reason: §6 rolls a tier up to its worst item, so a
+listing that runs five years, attaches to the principal personally, survives closing the account and
+survives later winning the disputes cannot be expressed at all while it shares one severity with a
+reserve line.
 
 Tier B items are inherently document-heavy. The product's job is to turn "here's a PDF contract" into
 a structured, comparable finding (transferable: yes/no/unclear, penalty: $X or Y% of ARR) rather than
@@ -193,7 +241,7 @@ type-specific items:
 | Template | Distinguishing items beyond the base checklist |
 |---|---|
 | Restaurant with online ordering | POS-to-ordering-platform integration health, third-party delivery platform (DoorDash/UberEats) account ownership and menu sync |
-| Salon/service business with booking | Booking software client-data export format, recurring membership/package liability transfer, live verification of the client-record count and of the export the platform actually produces (Tier C) |
+| Salon/service business with booking | Whether the booking platform will release the client list and appointment history in usable form at all — appointment-history export fails outright on three of the four major platforms, one of which documents no ownership-transfer path and licenses the business's reviews to itself — recurring membership/package liability transfer, live verification of the client-record count and of the export the platform actually produces (Tier C) |
 | Franchise location (any vertical) | Franchisor-mandated tech stack compliance (can the buyer even choose a different vendor), franchise-system SSO/account transfer process, who holds the customer-facing platform contract — location or franchisor |
 | General e-commerce | Platform (Shopify/WooCommerce/etc.) ownership transfer mechanics, app/plugin inventory and licensing, payment gateway PCI scope, storefront contract terms including who owns the customer data |
 
@@ -201,7 +249,7 @@ type-specific items:
 vertical in the source research) fully built, and the base tier structure factored so the remaining
 three are additive, not rewrites. See `roadmap.md` Phase 2 for sequencing.
 
-**Status:** all four Templates now exist, published at **v3**, ahead of the design-partner deal-flow
+**Status:** all four Templates now exist, published at **v4**, ahead of the design-partner deal-flow
 evidence the MVP-scope decision above called for (`roadmap.md` Phase 2's matching note). That
 decision's reasoning is kept rather than deleted, per this project's convention: it was the right
 call on the evidence available, and the risk it was managing — templates built without observed deal
@@ -214,21 +262,55 @@ and the salon Template gained a Tier C item, having had none at all — for a bu
 value is a client list living inside a booking platform, and whose Tier B item recorded only what
 that platform is *contractually obliged* to export, with nothing verifying that it does.
 
+**v4 is the first revision whose severity thresholds carry sources**
+(`docs/research/audit-thresholds-2026-09.md`, retrieved 2026-09-22). v3 gave every manual item a
+verification procedure and a severity rubric; v4 is about where the numbers in those rubrics came
+from, per §4's sourcing rule. Two of them were wrong rather than vague, and both are recorded here as
+superseded rather than quietly replaced — a consultant carrying a v3 audit in flight is holding
+findings rated against them and needs to know what moved underneath:
+
+- **The fixed 30-day certificate-expiry rule is superseded.** It was the wrong *shape*, not merely
+  the wrong number: maximum certificate lifetime is now 200 days and drops further on a published
+  schedule, the CA ecosystem's renewal norm is proportional (renew at one third of lifetime
+  remaining), and Let's Encrypt issues six-day certificates on which two days remaining is healthy.
+  A fixed day count fires constantly on correctly-operating automated renewal, which trains a
+  consultant to ignore it. v4 rates the proportion of lifetime remaining and whether renewal is
+  automated, not the days on the clock.
+- **Visa's VDMP and VFMP are superseded** — retired 2025-04-01 and replaced by VAMP, so any rubric
+  still carrying their numbers is rating against a program that no longer exists. VAMP's merchant
+  threshold sits above a monthly event floor no business in this deal band reaches, which makes Visa
+  an acquirer-relationship risk here rather than an enforcement one; v4 puts the enforcement weight on
+  Mastercard's ECM, which has a count floor a small business does reach and a previous-month
+  denominator that mechanically inflates the ratio for a seasonal or declining business.
+
+The rest of v4 is re-sourcing rather than correction: trademark rating moves off the Nice class onto
+the identification wording, email authentication is re-stated against the current DMARC RFC and the
+published mailbox-provider mandates (and gains §4's real-message item), domain posture is re-stated
+against the ICANN Transfer Policy actually in force, and the Tier C data-export item gains
+contactable-versus-row count, history depth and the post-close access window as captured fields.
+Items the research does not touch are recorded as deliberately unchanged with the reason it does not
+move them, so that "the evidence did not revise this" is distinguishable from "nobody re-read it" —
+the failure mode v4 exists to correct is precisely that stale guidance and reviewed guidance look
+identical. None of this is validation: no design partner has yet run an audit against any version of
+this content. v4 makes the content more defensible, not more proven.
+
 Templates are versioned (`v1`, `v2`, ...). An in-progress Audit stays pinned to the Template version
 it started on; only new Audits pick up a new Template version. This matters because mid-engagement
 checklist changes would silently invalidate a consultant's already-recorded findings. v3 is the
 first revision to exercise that rule rather than merely state it: v1/v2 content is frozen
 **including its defects** — the bundled live-login item, the missing transferability items — and the
 improvements are applied as a new version rather than edited in, because an Audit already rated
-against v2 was rated against v2's questions.
+against v2 was rated against v2's questions. v4 layers on v3 identically, and for the sharper reason:
+its corrections change what a given set of facts *rates as*, so an audit scored under v3's 30-day
+certificate rule stays readable against that rule rather than silently acquiring a different verdict.
 
 ## 6. Report generation
 
 - **Structure:** cover page (business name, engagement date and deal stage, consultant/firm
   branding) → executive summary (one traffic-light row per tier, an overall rating, and the Red
   findings named individually) → tiered findings detail (grouped by tier, each finding showing
-  status, severity, note, its structured fields, and evidence) → appendix (raw uploaded documents, if
-  the consultant opts to include them). The executive summary names what drove the rating because an
+  status, severity, note, its structured fields, and evidence) → appendix (a listing of the documents
+  relied on — see the decision below). The executive summary names what drove the rating because an
   overall Red a reader cannot trace to specific findings is an assertion rather than evidence — and
   tracing it is exactly what a buyer's attorney or accountant does first. Every page after the cover
   carries a running header and a numbered footer, so a page detached from a printed diligence pack
@@ -260,6 +342,21 @@ against v2 was rated against v2's questions.
   refused to record that would be worse than one that shows the gap. It lives here rather than in
   §4's severity model because it qualifies a rating that already exists: §4 declares what each item
   expects, §6 reports what the Audit actually got.
+- **The appendix lists the documents relied on; it does not reproduce them (decision).** This
+  section previously specified "raw uploaded documents, if the consultant opts to include them"; that
+  wording is superseded, and the reasoning is kept because the alternative keeps looking attractive.
+  Embedding a seller's executed contracts and merchant statements into a PDF the buyer can forward
+  anywhere is a confidentiality decision nobody makes deliberately — it just happens the first time
+  someone attaches everything — and it multiplies the size of the deliverable for documents that are
+  already retained and access-controlled under the firm's own retention policy (§8). The appendix
+  instead states that the firm can provide any listed document on request, which is how every other
+  diligence work product handles it. What makes a listing defensible rather than decorative is its
+  provenance: each entry carries the consultant's own label for the document with the real filename
+  beneath it, what the document is, how large it is, which finding it backs, its tier, and which named
+  professional provided it and when. A bare filename gives a buyer's advisor nothing to check against,
+  which is the bar §2 principle 1 sets for anything reaching the client; "who provided this, and when"
+  is the half that makes the entry verifiable rather than a list of names of files. Entries attached
+  before provenance was recorded degrade to what is actually known rather than printing unknowns.
 - **Export formats:** PDF (v1, primary — this is what gets emailed/handed over in a deal), shareable
   link (Phase 3, see §7).
 - **Whitelabeling:** consultant's logo, name, and color accent on the cover and footer of every page.
@@ -513,6 +610,28 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   obligations may cut against it in either direction — ask in Phase 0 discovery, since a firm with a
   seven-year record-keeping obligation and a firm that wants documents gone at close will both be
   in the target population.
+- **Who re-verifies the dated thresholds, and how often.** Several of template v4's thresholds are
+  correct as of a date rather than indefinitely, and the sharpest case is the ICANN Transfer Policy:
+  the revision adopted 2026-06-07 removes the 60-day transfer lock, but it has no effective date, no
+  published implementation text, and registrars have asked for an 18-month buffer after implementation
+  concludes — so the 60-day lock is correct today and will stop being correct without warning. The
+  item tells the consultant to re-verify at the audit date, which is honest but puts the maintenance
+  burden on the person running the audit, the opposite of what §2 principle 2 sells. A threshold that
+  is right now and wrong in six months is a standing maintenance commitment, and the spec does not yet
+  say who holds it, on what cadence the dated items get re-read, or whether the product should carry a
+  dated policy-status note on the item and surface it at audit time
+  (`docs/research/audit-thresholds-2026-09.md` §7.3 proposes the latter). Decide before a second dated
+  threshold moves underneath an audit in flight.
+- **Whether "the seller will not represent X" should be a first-class input to §6's roll-up.** The
+  pattern recurs across unrelated items — terminated-merchant status, DNS control, retrieval of a
+  domain's AuthInfo code, booking-platform transferability — and the refusal is consistently a
+  stronger signal than whatever the underlying data shows, because it is the party who knows declining
+  to stand behind it. Today it is encoded per item, inside individual severity rubrics that rate the
+  refusal Red. That works item by item but is invisible to the roll-up as a category: the report cannot
+  say "three of these Reds are a seller who would not represent, not something we found". Making it a
+  typed input on a Finding is a §3 data-model change with §6 consequences, so it needs a real
+  trigger — a consultant hitting it on a live engagement and the report reading wrong — rather than
+  tidiness (`docs/research/audit-thresholds-2026-09.md` §7.7).
 - Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
   gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
   integration decision).
