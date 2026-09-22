@@ -12,6 +12,7 @@ import {
 } from "@/lib/templates/fieldSchema";
 import { computeSeverityRollup, type Coverage, type FindingForRollup } from "./rollup";
 import { formatCitation, type ResolvedCitation } from "@/lib/audit/sourceRef";
+import { appendixRetentionSentence } from "@/lib/retention/policy";
 
 import { REPORT_DISCLAIMER_TEXT } from "./disclaimer";
 
@@ -88,6 +89,11 @@ export interface ReportData {
   // (see the decision recorded there, and appendixSection below for the reasoning). Omitted
   // or empty means no appendix section is rendered at all.
   appendixDocuments?: AppendixDocument[];
+  /**
+   * When this engagement's documents are scheduled for deletion, so the appendix can say so rather
+   * than promising availability with no end. Null means no purge is scheduled — a live deal.
+   */
+  documentPurgeAt?: Date | null;
 }
 
 const SEVERITY_LABEL: Record<Severity, string> = {
@@ -618,7 +624,7 @@ ${pdfFooterTemplate(data, accent)}
 ${coverPage(data, accent, accentText, logo, rollup.overall, rollup.overallCoverage)}
 ${executiveSummary(data, accent, accentText, rollup, counts, overrideBlock)}
 ${tierSections}
-${appendixSection(data.appendixDocuments, accent, accentText)}
+${appendixSection(data.appendixDocuments, accent, accentText, appendixRetentionSentence(data.documentPurgeAt ?? null))}
 ${closingBlock(data, accent, logo)}
 </body>
 </html>`;
@@ -1513,6 +1519,7 @@ function appendixSection(
   documents: AppendixDocument[] | undefined,
   accent: string,
   accentText: string,
+  retentionSentence: string,
 ): string {
   if (!documents || documents.length === 0) return "";
 
@@ -1545,7 +1552,7 @@ function appendixSection(
   return `
   <section style="margin-top:26px">
     <h3 style="font-size:16px;margin:0 0 10px 0;padding-left:10px;border-left:4px solid ${accent}">Appendix — Documents relied on</h3>
-    <p style="font-size:12px;color:${NEUTRAL_TEXT};margin:0 0 10px 0">Documents provided as evidence during this audit, listed for reference. They are retained and access-controlled under the firm's document retention policy and are not reproduced here; the firm can provide any of them on request.</p>
+    <p style="font-size:12px;color:${NEUTRAL_TEXT};margin:0 0 10px 0">${escapeHtml(retentionSentence)}</p>
     <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
       <thead>
         <tr style="background:${accent};color:${accentText}">

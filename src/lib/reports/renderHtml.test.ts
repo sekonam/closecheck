@@ -592,10 +592,25 @@ describe("appendix", () => {
 
   it("does not reproduce the documents themselves", () => {
     // Embedding a seller's executed contracts into a PDF the buyer can forward anywhere is a
-    // confidentiality decision nobody made. The appendix says the firm can provide them.
+    // confidentiality decision nobody made.
     const html = renderReportHtml(report({ appendixDocuments: [document] }));
     expect(html).toContain("not reproduced here");
-    expect(html).toContain("on request");
+  });
+
+  it("states when the listed documents will be deleted, rather than promising them indefinitely", () => {
+    // It used to say the firm "can provide any of them on request", with no end. A retention run
+    // then made that false — in a document the buyer still holds and the firm cannot amend.
+    const html = renderReportHtml(
+      report({ appendixDocuments: [document], documentPurgeAt: new Date("2026-12-21T00:00:00Z") }),
+    );
+    expect(html).toContain("2026-12-21");
+    expect(html).not.toMatch(/on request/);
+  });
+
+  it("promises nothing time-bound on a live deal with no purge scheduled", () => {
+    const html = renderReportHtml(report({ appendixDocuments: [document], documentPurgeAt: null }));
+    expect(html).toContain("Ask the firm");
+    expect(html).not.toContain("scheduled for deletion");
   });
 
   it("degrades for rows attached before provenance was recorded", () => {

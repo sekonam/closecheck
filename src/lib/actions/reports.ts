@@ -207,6 +207,10 @@ export async function generateReport(formData: FormData): Promise<void> {
         overallRatingOverride: audit.overallRatingOverride,
         overallRatingOverrideNote: audit.overallRatingOverrideNote,
         appendixDocuments,
+        // So the appendix can state when these documents are scheduled for deletion instead of
+        // promising availability with no end — a promise that became false the moment a retention
+        // run executed, in a document the buyer still holds.
+        documentPurgeAt: audit.engagement.documentPurgeAt,
       },
     };
   });
@@ -248,6 +252,7 @@ export async function generateReport(formData: FormData): Promise<void> {
       overallRatingOverride: reportData.overallRatingOverride,
       overallRatingOverrideNote: reportData.overallRatingOverrideNote,
       appendixDocuments: reportData.appendixDocuments,
+      documentPurgeAt: reportData.documentPurgeAt,
     });
 
     const pdf = await renderHtmlToPdf(html);

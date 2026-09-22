@@ -67,3 +67,74 @@ export function resolvePurgeDate(params: {
   if (!TERMINAL_DEAL_STAGES.includes(params.targetStage)) return null;
   return params.submitted ?? params.existing ?? defaultPurgeDateFor(params.targetStage, params.now);
 }
+
+/**
+ * What a retention run covers, beyond the uploaded documents themselves.
+ *
+ * THE PROBLEM THIS ANSWERS
+ * ------------------------
+ * A generated report is the densest concentration of derived confidential content in the system:
+ * findings taken from the seller's documents, structured values read out of their contracts, and —
+ * since citations — clauses quoted verbatim from them. Purging the documents while keeping the
+ * report retains the substance of what was purged, which is the same failure as a cache outliving
+ * the record it caches.
+ *
+ * It also produced a false statement in a document the buyer still holds. The report's appendix
+ * said the firm "can provide any of them on request"; after the engagement's documents were purged
+ * that was no longer true, and nothing updated the document that said it.
+ *
+ * THE DECISION
+ * ------------
+ * On a retention run, an engagement's report PDFs are deleted and its live portal links revoked,
+ * alongside its evidence. The Report ROW survives, with its severity and coverage snapshot.
+ *
+ * That split is the point. The consultant keeps a durable record that they issued a report with a
+ * given rating on a given date — which is what their own liability position actually needs — while
+ * the seller's derived content does not outlive the seller's documents. Keeping the row also means
+ * the audit trail of what was issued, to whom, and when remains intact after the content is gone.
+ *
+ * Portal links are revoked rather than left to expire because a live link serving a report whose
+ * source documents have been purged is worse than either outcome on its own: it is the product
+ * continuing to distribute derived content it has just promised to stop holding.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO
+ * ----------------------------------
+ * Nothing recalls the copy the buyer already downloaded. Retention governs what this product
+ * holds, not what has been handed over — and a policy that implied otherwise would be the same
+ * class of false assurance as the appendix line it replaces.
+ */
+export type RetentionScope = {
+  /** Uploaded Tier B/C documents. */
+  evidence: true;
+  /** Generated report PDFs — the derived content. The Report rows themselves are kept. */
+  reportPdfs: true;
+  /** Live Client Portal Links, revoked so nothing keeps serving what was just purged. */
+  portalLinks: true;
+};
+
+export const RETENTION_SCOPE: RetentionScope = {
+  evidence: true,
+  reportPdfs: true,
+  portalLinks: true,
+};
+
+/**
+ * The sentence the report's appendix uses to describe how long the listed documents are available.
+ *
+ * Lives here rather than in the renderer because it is a statement about the retention policy, and
+ * the two drifting apart is precisely what went wrong: the renderer promised availability "on
+ * request" with no end, while the policy deleted the documents on a schedule the renderer knew
+ * nothing about.
+ */
+export function appendixRetentionSentence(purgeAt: Date | null): string {
+  const base =
+    "Documents provided as evidence during this audit, listed for reference. They are held and " +
+    "access-controlled under the firm's document retention policy and are not reproduced here.";
+  if (!purgeAt) {
+    return `${base} Ask the firm if you need a copy of any of them.`;
+  }
+  return (
+    `${base} They are scheduled for deletion on ${purgeAt.toISOString().slice(0, 10)}; ` +
+    "request any copies you need before then."
+  );
+}

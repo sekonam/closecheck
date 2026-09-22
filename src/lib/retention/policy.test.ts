@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_POST_CLOSE_RETENTION_DAYS,
   TERMINAL_DEAL_STAGES,
+  appendixRetentionSentence,
   defaultPurgeDateFor,
   resolvePurgeDate,
 } from "./policy";
@@ -107,5 +108,30 @@ describe("resolvePurgeDate", () => {
     expect(
       resolvePurgeDate({ targetStage: DealStage.DEAD, submitted: null, existing: null, now: NOW })?.toISOString(),
     ).toBe(NINETY_DAYS_ON);
+  });
+});
+
+describe("appendixRetentionSentence", () => {
+  it("names the deletion date when one is scheduled", () => {
+    // The wording it replaces said the firm "can provide any of them on request", with no end —
+    // which a retention run then made false, in a document the buyer still holds.
+    const sentence = appendixRetentionSentence(new Date("2026-12-21T12:00:00.000Z"));
+    expect(sentence).toContain("2026-12-21");
+    expect(sentence).toContain("before then");
+    expect(sentence).not.toMatch(/on request\b/);
+  });
+
+  it("promises nothing time-bound when no purge is scheduled", () => {
+    // A live deal has no date to state, and inventing one would be worse than saying nothing.
+    const sentence = appendixRetentionSentence(null);
+    expect(sentence).toContain("Ask the firm");
+    expect(sentence).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+    expect(sentence).not.toContain("scheduled for deletion");
+  });
+
+  it("says the documents are not reproduced, in both cases", () => {
+    for (const purgeAt of [null, new Date("2027-01-01T00:00:00Z")]) {
+      expect(appendixRetentionSentence(purgeAt)).toContain("not reproduced here");
+    }
   });
 });
