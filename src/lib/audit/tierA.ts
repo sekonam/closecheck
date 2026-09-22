@@ -747,4 +747,8 @@ export const __domainStatusInternals = {
   CERT_RENEWAL_FRACTION,
   CERT_OVERDUE_FRACTION,
   CERT_FRACTION_TOLERANCE,
+  // Exposed so the policy watch can assert its consultant-facing notice still states the same
+  // number this runner actually applies (src/lib/templates/policyWatch.test.ts). The notice and
+  // this constant describe one fact from two places, and the fact is expected to change.
+  TRANSFER_LOCK_DAYS,
 };

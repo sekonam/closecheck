@@ -7,6 +7,7 @@ import {
   overdueWatches,
   scheduledValueAt,
 } from "./policyWatch";
+import { __domainStatusInternals } from "@/lib/audit/tierA";
 import { TEMPLATE_DEFINITIONS } from "./content";
 import { buildEvidenceBackedItems } from "./evidenceBackedThresholds";
 
@@ -137,6 +138,20 @@ describe("what reaches the consultant", () => {
     for (const watch of POLICY_WATCHES) {
       const hasNotice = typeof watch.consultantNotice === "string";
       expect(hasNotice, watch.key).toBe(watch.kind === "ADOPTED_UNDATED");
+    }
+  });
+
+  it("states the same lock window the Tier A runner actually applies", () => {
+    // The notice and src/lib/audit/tierA.ts's TRANSFER_LOCK_DAYS are one fact held in two places,
+    // and it is a fact expected to change — ICANN's adopted revision replaces the 60-day lock with
+    // 30. Whoever makes that change will be looking at the runner, and this is what stops the
+    // consultant-facing notice quietly continuing to name the old number in the same breath as
+    // telling them the policy is in flux. That would be worse than no notice.
+    const days = __domainStatusInternals.TRANSFER_LOCK_DAYS;
+    for (const notice of consultantNoticesFor("Domain and registrar ownership, expiration")) {
+      expect(notice, `notice must name the ${days}-day window the runner applies`).toContain(
+        `${days}-day`,
+      );
     }
   });
 
