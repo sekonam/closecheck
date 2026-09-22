@@ -91,7 +91,13 @@ credentials (see `.env.example`). Then run the five-minute exercise in `deployme
 document to an audit, download it back, set that engagement to a terminal stage with a past purge
 date, and run `npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and
 delete, which is the whole surface — and it is what lets the "not yet exercised against a real
-endpoint" caveat come out of `s3.ts`, `.env.example` and the runbook.
+endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and `docs/security-posture.md`
+§4**.
+
+That last one is the one to not forget. The other three are internal; the posture document is what
+gets sent to a firm's security reviewer. A caveat left standing there after it stopped being true
+understates the product to the one audience reading it for accuracy — and an inaccuracy found in
+that document costs credibility for every other claim in it, including the ones doing real work.
 
 **Why it matters before a design partner, not after.** Local-on-a-mounted-volume is a supported
 production configuration and the app says so at boot — but it gives no encryption at rest beyond
