@@ -142,8 +142,12 @@ One audit with its findings, in template order.
     "overallRatingOverrideNote": null,
     "computedOverallSeverity": "RED",
     "computedPerTierSeverity": { "A": "RED", "B": "YELLOW", "C": "GREEN" },
-    "coverage": { "rated": 18, "total": 23 },
-    "perTierCoverage": { "A": { "rated": 7, "total": 7 }, "B": { "rated": 8, "total": 11 }, "C": { "rated": 3, "total": 5 } },
+    "coverage": { "rated": 18, "total": 23, "provisional": 5 },
+    "perTierCoverage": {
+      "A": { "rated": 7, "total": 7, "provisional": 5 },
+      "B": { "rated": 8, "total": 11, "provisional": 0 },
+      "C": { "rated": 3, "total": 5, "provisional": 0 }
+    },
     "createdAt": "2026-09-22T09:20:41.004Z",
     "updatedAt": "2026-09-22T10:02:18.771Z",
     "template": { "slug": "restaurant-online-ordering", "version": 3, "name": "Restaurant with online ordering" },
@@ -176,6 +180,19 @@ yet rolls up to `GREEN` — the worst of an empty set — so `{"rated": 0, "tota
 the difference between "checked and clean" and "not checked". Items marked `NOT_APPLICABLE` are
 excluded from both the rating and the denominator, since a check that does not apply is a
 resolution rather than outstanding work.
+
+`provisional` counts ratings **produced by the automated Tier A checks and not yet confirmed by the
+consultant** — findings still in `IN_PROGRESS`. It exists because those checks write a severity as
+well as a status, so an audit can present a set of ratings none of which a person has looked at.
+Treat it as the machine-versus-human split of `rated`, not as a defect count: most of Tier A is a
+fingerprint rather than an assertion, and the checks' own notes say so.
+
+It does **not** discount the rating, deliberately. A provisional Red is still Red — a domain found
+expired is a real risk whether or not anyone has ticked a box, and qualifying it downward would
+hide risk rather than annotate it. So `computedOverallSeverity` is unaffected by this number; it is
+a confidence signal for the reader, and an integration that wants "only what a consultant has
+personally confirmed" should filter findings by `status` rather than expecting the roll-up to do
+it.
 
 ### `GET /api/v1/reports/{id}`
 
