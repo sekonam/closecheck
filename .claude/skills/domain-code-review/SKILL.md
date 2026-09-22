@@ -11,7 +11,18 @@ specific checklist for the failure modes that matter most for this product, per 
 that the core risk here is reputational (one leaked seller's data), not just availability.
 
 Use both: run `/code-review` for general correctness, and walk this checklist for anything the diff
-touches from the list below. Report domain findings the same way (`ReportFindings`, when in a review
+touches from the list below.
+
+**If a checklist item can be expressed as a check, the checklist version is a placeholder for it.**
+Written correctly and specifically, in this file, the `in`-operator rule below still bound only the
+code somebody thought to point it at: nine violations existed across two sessions' work, two were
+found by accident, and seven would not have been found by anyone. One ESLint selector
+(`eslint.config.mjs`) reduced that to a rule that cannot be forgotten. So when reviewing, notice
+which line you are applying by hand and ask whether it could be a lint rule, a type, or an assertion
+in the suite — and when it can, converting it is worth more than any single finding it would have
+caught. A selector with false positives is worse than none, because the first one earns a disable
+comment and the rule stops being read; the `in` rule works because requiring a non-literal left
+operand has none in this codebase. Report domain findings the same way (`ReportFindings`, when in a review
 flow) — don't fold them into general findings if a review flow is already using structured output;
 otherwise report directly to the user as plain findings with file/line and concrete failure scenario.
 
@@ -204,6 +215,16 @@ controls):
   is unconfirmed". Harder to spot than a vacuous test, because a vacuous test asserts nothing while
   this one asserts something real and wrong, and still looks like it is doing work. When a field
   gains meaning, re-read what the fixtures have been saying about it.
+
+- **Does the stand-in still do what the real path does?** A fixture or helper that diverges from
+  production *toward safety* is invisible: everything passes, and the divergence surfaces only when
+  somebody compares the stand-in to the real path — which nobody does, because the stand-in exists
+  so they need not. `fieldSchema.test.ts`'s helper read submitted fields from a plain object while
+  `updateFinding` materialises them into a `Map`, so a field named `constructor` resolved through
+  `Object.prototype` in the test and not in the app: the test was simulating something the product
+  does not do. Sibling to the fixture-default rule above and the opposite direction — that one is an
+  arbitrary default becoming a silent assertion, this is a stand-in drifting from what it stands
+  for. Both end with the test lying.
 
 **Anything a consultant reads next to something the product computed**:
 - **Do the rubric and the runner state the same rule?** For an item rated automatically, the
