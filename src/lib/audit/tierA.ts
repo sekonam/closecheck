@@ -44,9 +44,13 @@ function daysUntil(dateString: string | null): number | null {
 const BLOCKING_DOMAIN_STATUSES: Record<string, string> = {
   pendingdelete: "the registration is being deleted",
   redemptionperiod: "the registration has expired and is in the redemption grace period",
+  pendingrestore: "the registration went through redemption and is mid-recovery",
+  autorenewperiod: "the registration lapsed and is inside the auto-renew grace period",
   pendingtransfer: "a transfer to another registrar is already in progress",
+  serverrenewprohibited: "the registry is blocking renewal",
   serverhold: "the registry has removed the domain from the zone — it will not resolve",
   clienthold: "the registrar has removed the domain from the zone — it will not resolve",
+  inactive: "no nameservers are delegated — the domain does not resolve",
 };
 
 /**
@@ -100,11 +104,15 @@ function domainTransferNotes(result: Awaited<ReturnType<typeof lookupWhois>>): s
   const notes: string[] = [];
 
   const sinceTransfer = daysSince(result.lastTransferDate);
+  // Clamped at zero: registries report in their own timezone and clocks skew, so a transfer date
+  // a few hours in the future is routine — and "changed hands -5 day(s) ago" is not a sentence to
+  // put in front of a buyer.
   if (sinceTransfer !== null && sinceTransfer < TRANSFER_LOCK_DAYS) {
+    const elapsed = Math.max(0, sinceTransfer);
     notes.push(
-      `Registration last changed hands ${sinceTransfer} day(s) ago (${result.lastTransferDate}); ` +
+      `Registration last changed hands ${elapsed} day(s) ago (${result.lastTransferDate}); ` +
         `ICANN's Transfer Policy locks it against transfer for ${TRANSFER_LOCK_DAYS} days, so it ` +
-        `cannot move again for roughly ${TRANSFER_LOCK_DAYS - sinceTransfer} more day(s). ` +
+        `cannot move again for roughly ${TRANSFER_LOCK_DAYS - elapsed} more day(s). ` +
         "Check this against the expected closing date.",
     );
   }
@@ -157,6 +165,15 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
 
   // 30/90 days is this firm's stated basis, derived from a domain needing to survive the close
   // plus a reasonable transition window — not an industry standard, because none is published.
+  if (expiryDays < 0) {
+    // "Domain expires in -41 day(s)" is not a sentence anyone should read in a deliverable.
+    return {
+      status: FindingStatus.FAIL,
+      severity: Severity.RED,
+      note: `The registration expired on ${result.expiryDate}, ${Math.abs(expiryDays)} day(s) ago. Registrar: ${result.registrar ?? "unknown"}. Establish whether it can still be recovered before the close.${suffix}`,
+      structuredData,
+    };
+  }
   if (expiryDays < 30) {
     return {
       status: FindingStatus.FAIL,
@@ -205,43 +222,170 @@ async function runDnsFingerprint(domain: string): Promise<TierAResult> {
   };
 }
 
+/**
+ * Does this TLS error describe the certificate, rather than our ability to reach the host?
+ *
+ * Node surfaces both through the same channel with the same null certificate fields. The strings
+ * here are OpenSSL/Node validation reasons; anything else (ENOTFOUND, ECONNREFUSED, ETIMEDOUT, a
+ * refusal from the host guard) is a transport problem and not a finding about the business.
+ */
+function isCertificateVerdict(error: string | null): boolean {
+  if (!error) return false;
+  return /certificate|cert_|self[- ]signed|unable to verify|hostname\/ip does not match|wrong version number|handshake failure|alert/i.test(
+    error,
+  );
+}
+
+/**
+ * Proportion of a certificate's own lifetime still remaining, or null when the dates don't allow
+ * it to be computed.
+ *
+ * Template v4's rubric for this item says, verbatim: "Let's Encrypt also issues six-day
+ * certificates, on which two days remaining is healthy and normal. Rate on the proportion of
+ * lifetime remaining, not on a day count. The 30/14/7 convention is vendor folklore." The runner
+ * was still using a fixed 14/30 and therefore contradicted its own published rubric in both
+ * directions — verified by driving it: a six-day certificate with two days left rated Red (and
+ * under spec.md §6's worst-item rule turned the whole audit Red for a target whose renewal is
+ * correctly automated), while a 200-day certificate 60 days from expiry — past the one-third line
+ * the rubric's own worked example calls Yellow — rated Green.
+ */
+export function certificateLifetimeRemaining(
+  validFrom: string | null,
+  validTo: string | null,
+): { fraction: number; lifetimeDays: number } | null {
+  if (!validFrom || !validTo) return null;
+  const from = Date.parse(validFrom);
+  const to = Date.parse(validTo);
+  if (Number.isNaN(from) || Number.isNaN(to) || to <= from) return null;
+
+  const lifetimeMs = to - from;
+  const remainingMs = to - Date.now();
+  return {
+    fraction: remainingMs / lifetimeMs,
+    lifetimeDays: Math.round(lifetimeMs / 86_400_000),
+  };
+}
+
+/**
+ * One third of lifetime remaining, the renewal line Let's Encrypt and Certbot 4.0.0 both adopted.
+ * Below it a certificate is past when a healthy automated setup would have renewed; at or above
+ * it, it is fine however few days that happens to be.
+ */
+const CERT_RENEWAL_FRACTION = 1 / 3;
+/** Half of the renewal window gone by, i.e. one sixth of lifetime left — renewal is now overdue. */
+const CERT_OVERDUE_FRACTION = 1 / 6;
+/**
+ * Tolerance around those lines, so a certificate sitting exactly on one is not rated by a rounding
+ * error.
+ *
+ * This is not cosmetic. The rubric's own worked example — two days left on a six-day certificate —
+ * is EXACTLY one third, and without a tolerance the elapsed milliseconds between issue-time
+ * arithmetic and `Date.now()` put it a hair below the line and rated it Yellow. A renewal running
+ * precisely on schedule is the healthiest state there is, and it must not be the one that trips a
+ * threshold. Found by a boundary test, not by reading.
+ */
+const CERT_FRACTION_TOLERANCE = 0.001;
+
 async function runSslCheck(domain: string): Promise<TierAResult> {
   const result = await fingerprintSsl(domain);
   const structuredData = { ...result };
 
-  if (!result.valid) {
-    return {
-      status: FindingStatus.FAIL,
-      severity: Severity.RED,
-      note: `Certificate check failed for ${domain}: ${result.error ?? "not trusted"}.`,
-      structuredData,
-    };
-  }
-
-  if (result.daysUntilExpiry !== null && result.daysUntilExpiry < 14) {
-    return {
-      status: FindingStatus.FAIL,
-      severity: Severity.RED,
-      note: `Certificate expires in ${result.daysUntilExpiry} day(s) (${result.validTo}). Issuer: ${result.issuer ?? "unknown"}.`,
-      structuredData,
-    };
-  }
-  if (result.daysUntilExpiry !== null && result.daysUntilExpiry < 30) {
+  // A host we declined to reach, or could not reach, is not a certificate verdict. Every other
+  // runner degrades a transport failure to IN_PROGRESS/YELLOW; this one escalated it to a Red
+  // FINDING, so a mistyped domain on the engagement turned the entire audit Red — and the note
+  // "Certificate check failed" reads to a buyer as a statement about the certificate rather than
+  // about our ability to connect.
+  //
+  // But a handshake that fails BECAUSE of the certificate is a verdict, and a Red one. Node
+  // reports those through the same error channel as a DNS failure, and the certificate fields come
+  // back null either way — so the two are told apart by the reason, not by the absence of data.
+  // Getting this wrong in the safe-looking direction would silently downgrade a genuinely expired
+  // certificate to "we couldn't check", which is worse than the over-escalation it replaced.
+  const unreachable = result.validTo === null && result.issuer === null && !isCertificateVerdict(result.error);
+  if (unreachable) {
     return {
       status: FindingStatus.IN_PROGRESS,
       severity: Severity.YELLOW,
-      note: `Certificate expires in ${result.daysUntilExpiry} day(s) (${result.validTo}). Issuer: ${result.issuer ?? "unknown"}.`,
+      note: result.error
+        ? `Could not complete a TLS check for ${domain} (${result.error}). Verify the certificate manually.`
+        : `Could not complete a TLS check for ${domain}. Verify the certificate manually.`,
       structuredData,
     };
   }
 
+  // A certificate that was presented and is not trusted IS a verdict, and a Red one.
+  if (!result.valid) {
+    if (result.validTo === null) {
+      // The handshake failed on the certificate before it could be read — the reason is all we
+      // have, and it is enough to rate on.
+      return {
+        status: FindingStatus.FAIL,
+        severity: Severity.RED,
+        note: `The certificate served by ${domain} failed validation: ${result.error}. Nothing further could be read from it.`,
+        structuredData,
+      };
+    }
+    const expired =
+      result.daysUntilExpiry !== null && result.daysUntilExpiry < 0
+        ? ` It expired on ${result.validTo}.`
+        : "";
+    return {
+      status: FindingStatus.FAIL,
+      severity: Severity.RED,
+      note: `The certificate served by ${domain} is not trusted: ${result.error ?? "it failed validation"}.${expired}`,
+      structuredData,
+    };
+  }
+
+  if (result.daysUntilExpiry !== null && result.daysUntilExpiry < 0) {
+    return {
+      status: FindingStatus.FAIL,
+      severity: Severity.RED,
+      note: `The certificate expired on ${result.validTo}. Issuer: ${result.issuer ?? "unknown"}.`,
+      structuredData,
+    };
+  }
+
+  const remaining = certificateLifetimeRemaining(result.validFrom, result.validTo);
+  const daysNote =
+    result.daysUntilExpiry !== null ? `${result.daysUntilExpiry} day(s) left` : "expiry unknown";
+
+  if (remaining) {
+    const lifetime = `on a ${remaining.lifetimeDays}-day certificate`;
+    if (remaining.fraction < CERT_OVERDUE_FRACTION - CERT_FRACTION_TOLERANCE) {
+      return {
+        status: FindingStatus.FAIL,
+        severity: Severity.RED,
+        note: `Renewal is overdue: ${daysNote} ${lifetime} (${result.validTo}), well past the point an automated renewal would have run. Issuer: ${result.issuer ?? "unknown"}. Ask who is responsible for renewing it.`,
+        structuredData,
+      };
+    }
+    if (remaining.fraction < CERT_RENEWAL_FRACTION - CERT_FRACTION_TOLERANCE) {
+      return {
+        status: FindingStatus.IN_PROGRESS,
+        severity: Severity.YELLOW,
+        note: `${daysNote} ${lifetime} (${result.validTo}) — past the one-third-of-lifetime point where an automated renewal normally runs. Issuer: ${result.issuer ?? "unknown"}. Confirm renewal is automated and who owns it.`,
+        structuredData,
+      };
+    }
+    return {
+      status: FindingStatus.PASS,
+      severity: Severity.GREEN,
+      note: `Valid certificate from ${result.issuer ?? "unknown issuer"} — ${daysNote} ${lifetime}, expiring ${result.validTo}.`,
+      structuredData,
+    };
+  }
+
+  // No usable issue date, so lifetime is unknowable. Report what was observed rather than falling
+  // back to a day count the rubric rejects.
   return {
     status: FindingStatus.PASS,
     severity: Severity.GREEN,
-    note: `Valid certificate from ${result.issuer ?? "unknown issuer"}, expires ${result.validTo}.`,
+    note: `Valid certificate from ${result.issuer ?? "unknown issuer"}, expiring ${result.validTo} (${daysNote}). Certificate lifetime could not be determined, so renewal timing was not assessed.`,
     structuredData,
   };
 }
+
 
 async function runCmsFingerprint(domain: string): Promise<TierAResult> {
   const result = await fingerprintCms(`https://${domain}`);
@@ -279,6 +423,19 @@ async function runCmsFingerprint(domain: string): Promise<TierAResult> {
 async function runEmailAuthPosture(domain: string): Promise<TierAResult> {
   const result = await checkEmailAuth(domain);
   const structuredData = { ...result };
+  // A domain that does not resolve at all cannot be said to have made any choice about email.
+  // Reporting NXDOMAIN as "this domain does not receive email" states a confident fact about a
+  // name that is not registered — and a mistyped engagement domain produced three such statements
+  // across three findings.
+  if (result.domainNotFound) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${domain} does not resolve — the name is not registered, or not delegated. Confirm the business's actual domain before treating anything here as a finding.`,
+      structuredData,
+    };
+  }
+
 
   if (result.error) {
     return {
@@ -342,6 +499,19 @@ async function runEmailAuthPosture(domain: string): Promise<TierAResult> {
 async function runMailProviderFingerprint(domain: string): Promise<TierAResult> {
   const result = await fingerprintMailProvider(domain);
   const structuredData = { ...result };
+  // A domain that does not resolve at all cannot be said to have made any choice about email.
+  // Reporting NXDOMAIN as "this domain does not receive email" states a confident fact about a
+  // name that is not registered — and a mistyped engagement domain produced three such statements
+  // across three findings.
+  if (result.domainNotFound) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${domain} does not resolve — the name is not registered, or not delegated. Confirm the business's actual domain before treating anything here as a finding.`,
+      structuredData,
+    };
+  }
+
 
   if (result.error) {
     return {
@@ -375,6 +545,18 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
   const result = await checkHttpsHygiene(domain);
   const structuredData = { ...result };
 
+  // The check reports a refused host in `error` and this runner never read it, so "we declined to
+  // fetch this" printed as "neither http:// nor https:// responded" — the exact confusion the
+  // check's own module comment says must never happen.
+  if (result.error?.startsWith("Not checked:")) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${result.error}. Check redirect behaviour and HSTS manually.`,
+      structuredData,
+    };
+  }
+
   if (!result.httpReachable && !result.httpsReachable) {
     return {
       status: FindingStatus.IN_PROGRESS,
@@ -384,9 +566,24 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
     };
   }
 
-  const hstsNote = result.hstsHeader
-    ? `HSTS header present (${result.hstsHeader}).`
-    : "No HSTS header observed.";
+  // Only state what was actually obtained. With no HTTPS response there is no header to have
+  // observed, and "No HSTS header observed" asserted an observation that never happened.
+  const hstsNote = !result.httpsReachable
+    ? "HSTS could not be checked — the HTTPS endpoint did not respond."
+    : result.hstsHeader
+      ? `HSTS header present (${result.hstsHeader}).`
+      : "No HSTS header observed.";
+
+  // A redirect INTO an endpoint that does not answer is not working HTTPS. Rating this Green put
+  // "Green — HTTP redirects to HTTPS" beside a Red expired-certificate finding for the same host.
+  if (result.httpRedirectsToHttps && !result.httpsReachable) {
+    return {
+      status: FindingStatus.FAIL,
+      severity: Severity.RED,
+      note: `http://${domain} redirects to HTTPS (${result.httpRedirectChain.join(" → ")}), but the HTTPS endpoint did not respond — visitors following that redirect reach nothing. ${hstsNote}`,
+      structuredData,
+    };
+  }
 
   if (result.httpRedirectsToHttps) {
     return {
@@ -409,12 +606,11 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
   return {
     status: FindingStatus.IN_PROGRESS,
     severity: Severity.YELLOW,
-    note: `http://${domain} responds without reaching HTTPS${
-      result.httpRedirectChain.length > 0 ? ` (redirect chain: ${result.httpRedirectChain.join(" → ")})` : ""
-    } — visitors can land on an unencrypted page. ${hstsNote}`,
+    note: `http://${domain} responded without redirecting to HTTPS. ${hstsNote}`,
     structuredData,
   };
 }
+
 
 const RUNNERS: Record<string, (domain: string) => Promise<TierAResult>> = {
   domain_whois: runDomainWhois,
@@ -447,4 +643,8 @@ export const __domainStatusInternals = {
   normalizeStatus,
   BLOCKING_DOMAIN_STATUSES,
   TRANSFER_FRICTION_STATUSES,
+  isCertificateVerdict,
+  CERT_RENEWAL_FRACTION,
+  CERT_OVERDUE_FRACTION,
+  CERT_FRACTION_TOLERANCE,
 };

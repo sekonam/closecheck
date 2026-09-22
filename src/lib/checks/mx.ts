@@ -8,6 +8,8 @@ export interface MailProviderFingerprint {
   /** Best-effort guess at the email host from MX hostnames, same caveat as DnsFingerprint's
    * likelyProvider (src/lib/checks/dns.ts): a human reviews this, it is not asserted as certain. */
   likelyProvider: string | null;
+  /** True when the domain itself does not resolve at all — distinct from resolving with no MX. */
+  domainNotFound: boolean;
   error: string | null;
 }
 
@@ -25,16 +27,30 @@ const KNOWN_MX_PROVIDERS: Array<{ pattern: RegExp; name: string }> = [
   { pattern: /pphosted\.com/i, name: "Proofpoint (gateway)" },
 ];
 
-function isAbsence(err: unknown): boolean {
+/**
+ * ENOTFOUND and ENODATA both mean "no records came back", and both must be tolerated rather than
+ * thrown — but they mean very different things and conflating them produced a confidently wrong
+ * finding: a mistyped engagement domain (NXDOMAIN) was reported as "this domain does not receive
+ * email", which states as fact something about a domain that does not exist.
+ *
+ * ENOTFOUND is NXDOMAIN — the name itself is not registered or not delegated.
+ * ENODATA is "the name exists, it just has no record of this type", which is the real finding.
+ */
+function absenceKind(err: unknown): "nxdomain" | "no-record" | null {
   const code = (err as NodeJS.ErrnoException)?.code;
-  return code === "ENOTFOUND" || code === "ENODATA";
+  if (code === "ENOTFOUND") return "nxdomain";
+  if (code === "ENODATA") return "no-record";
+  return null;
 }
 
 export async function fingerprintMailProvider(domain: string): Promise<MailProviderFingerprint> {
   try {
+    let domainNotFound = false;
     const records = await dns.resolveMx(domain).catch((err) => {
-      if (isAbsence(err)) return [];
-      throw err;
+      const kind = absenceKind(err);
+      if (kind === null) throw err;
+      domainNotFound = kind === "nxdomain";
+      return [];
     });
     // A null MX ("0 ." per RFC 7505) is an explicit "this domain does not receive email" — report
     // it as such rather than as a mail host named ".".
@@ -46,12 +62,19 @@ export async function fingerprintMailProvider(domain: string): Promise<MailProvi
     const likelyProvider =
       KNOWN_MX_PROVIDERS.find((p) => mxHosts.some((host) => p.pattern.test(host)))?.name ?? null;
 
-    return { mxHosts, nullMx: records.length > 0 && realRecords.length === 0, likelyProvider, error: null };
+    return {
+      mxHosts,
+      nullMx: records.length > 0 && realRecords.length === 0,
+      likelyProvider,
+      domainNotFound,
+      error: null,
+    };
   } catch (err) {
     return {
       mxHosts: [],
       nullMx: false,
       likelyProvider: null,
+      domainNotFound: false,
       error: err instanceof Error ? err.message : "MX lookup failed",
     };
   }

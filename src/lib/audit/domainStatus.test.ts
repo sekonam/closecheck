@@ -43,3 +43,24 @@ describe("EPP status normalisation", () => {
     }
   });
 });
+
+describe("statuses the published rubric rates Red", () => {
+  // Template v4's severityGuidance for this item names these explicitly as Red. An adversarial run
+  // drove each through the runner and found them rating PASS/GREEN with a note reading as a clean
+  // bill of health — a lapsed or mid-recovery registration reported as healthy.
+  it("recognises a lapsed or recovering registration", () => {
+    for (const status of ["pendingRestore", "autoRenewPeriod", "redemptionPeriod", "pendingDelete"]) {
+      expect(BLOCKING_DOMAIN_STATUSES[normalizeStatus(status)], status).toBeDefined();
+    }
+  });
+
+  it("recognises a registry block on renewal", () => {
+    expect(BLOCKING_DOMAIN_STATUSES[normalizeStatus("serverRenewProhibited")]).toBeDefined();
+  });
+
+  it("recognises a domain with no nameservers delegated", () => {
+    // `inactive` means the domain does not resolve at all — practically identical to serverHold,
+    // and it was rating Green.
+    expect(BLOCKING_DOMAIN_STATUSES[normalizeStatus("inactive")]).toBeDefined();
+  });
+});

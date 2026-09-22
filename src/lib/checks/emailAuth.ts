@@ -13,14 +13,27 @@ export interface EmailAuthPosture {
    * selectors are provider-chosen and cannot be enumerated from public DNS, so an empty array is
    * NOT evidence DKIM is absent (docs/spec.md §4's DKIM note) — it must never drive severity. */
   dkimSelectorsFound: string[];
+  /** True when the domain itself does not resolve at all — distinct from resolving with no records. */
+  domainNotFound: boolean;
   error: string | null;
 }
 
 const COMMON_DKIM_SELECTORS = ["google", "selector1", "selector2", "k1", "default", "mail"];
 
-function isAbsence(err: unknown): boolean {
+/**
+ * ENOTFOUND and ENODATA both mean "no records came back", and both must be tolerated rather than
+ * thrown — but they mean very different things and conflating them produced a confidently wrong
+ * finding: a mistyped engagement domain (NXDOMAIN) was reported as "this domain does not receive
+ * email", which states as fact something about a domain that does not exist.
+ *
+ * ENOTFOUND is NXDOMAIN — the name itself is not registered or not delegated.
+ * ENODATA is "the name exists, it just has no record of this type", which is the real finding.
+ */
+function absenceKind(err: unknown): "nxdomain" | "no-record" | null {
   const code = (err as NodeJS.ErrnoException)?.code;
-  return code === "ENOTFOUND" || code === "ENODATA";
+  if (code === "ENOTFOUND") return "nxdomain";
+  if (code === "ENODATA") return "no-record";
+  return null;
 }
 
 /** Resolves TXT records at a name, joined per-record; [] when the name/record doesn't exist,
@@ -30,17 +43,20 @@ async function resolveTxtJoined(name: string): Promise<string[]> {
     const records = await dns.resolveTxt(name);
     return records.map((chunks) => chunks.join(""));
   } catch (err) {
-    if (isAbsence(err)) return [];
+    if (absenceKind(err) !== null) return [];
     throw err;
   }
 }
 
 export async function checkEmailAuth(domain: string): Promise<EmailAuthPosture> {
   try {
+    let domainNotFound = false;
     const [mxRecords, rootTxt, dmarcTxt] = await Promise.all([
       dns.resolveMx(domain).catch((err) => {
-        if (isAbsence(err)) return [];
-        throw err;
+        const kind = absenceKind(err);
+        if (kind === null) throw err;
+        domainNotFound = kind === "nxdomain";
+        return [];
       }),
       resolveTxtJoined(domain),
       resolveTxtJoined(`_dmarc.${domain}`),
@@ -75,6 +91,7 @@ export async function checkEmailAuth(domain: string): Promise<EmailAuthPosture> 
       dmarcRecord,
       dmarcPolicy,
       dkimSelectorsFound,
+      domainNotFound,
       error: null,
     };
   } catch (err) {
@@ -85,6 +102,7 @@ export async function checkEmailAuth(domain: string): Promise<EmailAuthPosture> 
       dmarcRecord: null,
       dmarcPolicy: null,
       dkimSelectorsFound: [],
+      domainNotFound: false,
       error: err instanceof Error ? err.message : "DNS lookup failed",
     };
   }

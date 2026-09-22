@@ -1,5 +1,7 @@
 import { connect } from "node:tls";
 
+import { assertPublicHost } from "@/lib/net/hostSafety";
+
 export interface SslFingerprint {
   valid: boolean;
   issuer: string | null;
@@ -10,7 +12,28 @@ export interface SslFingerprint {
   error: string | null;
 }
 
+const UNREACHABLE: SslFingerprint = {
+  valid: false,
+  issuer: null,
+  subject: null,
+  validFrom: null,
+  validTo: null,
+  daysUntilExpiry: null,
+  error: null,
+};
+
 export async function fingerprintSsl(hostname: string, timeoutMs = 8000): Promise<SslFingerprint> {
+  // The host guard the other Tier A checks go through, which this one did not. `tls.connect` is
+  // not `fetch`, so it never passed through safeFetch — and an adversarial run confirmed the gap
+  // empirically: pointed at a host resolving to 127.0.0.1, every other check correctly refused
+  // while this one dialled 127.0.0.1:443 and reported what answered. A TLS handshake against an
+  // internal service is a port scanner with a certificate reader attached, and the issuer and
+  // subject it reads come straight back into the finding.
+  const verdict = await assertPublicHost(hostname);
+  if (!verdict.safe) {
+    return { ...UNREACHABLE, error: `Not checked: ${verdict.reason}` };
+  }
+
   return new Promise((resolve) => {
     const socket = connect(
       {
