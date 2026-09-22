@@ -11,6 +11,20 @@ import { generateApiToken } from "@/lib/api/auth";
  * make both the setup and the assertion wrong in the same direction and the test would still pass.
  * Setup bypasses RLS on purpose; every assertion goes through a scoped path.
  */
+/**
+ * Raised here rather than in loadEnv.ts so the requirement belongs to the specs that actually have
+ * it. A spec in this directory whose only external dependency is a browser should not be forced to
+ * provision Postgres to run.
+ */
+for (const key of ["DATABASE_URL", "DIRECT_DATABASE_URL"] as const) {
+  if (!process.env[key]) {
+    throw new Error(
+      `${key} is not set, and this spec builds database fixtures. The integration suite needs a ` +
+        `live Postgres for these — see docs/deployment.md for the local recipe.`,
+    );
+  }
+}
+
 const directPrisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
 
 export type OrgFixture = {

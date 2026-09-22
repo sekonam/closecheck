@@ -1,13 +1,13 @@
 import { config } from "dotenv";
 
-// The app reads DATABASE_URL / DIRECT_DATABASE_URL / API_DATABASE_URL from the environment; the
-// unit suite never touches a database so it does not load .env. Integration specs do.
+/**
+ * Loads .env for the integration suite. The unit suite deliberately runs with nothing configured,
+ * so it never loads this.
+ *
+ * Note what this does NOT do: assert that a database is configured. It used to, which made every
+ * spec in this directory require Postgres whether or not it touched one — and that is wrong for a
+ * spec whose only external dependency is a browser. The requirement belongs to the thing that
+ * actually needs it, so `fixtures.ts` raises it on first use instead. A browser-only spec in this
+ * lane now needs a browser and nothing else.
+ */
 config();
-
-for (const key of ["DATABASE_URL", "DIRECT_DATABASE_URL"]) {
-  if (!process.env[key]) {
-    throw new Error(
-      `${key} is not set. The integration suite needs a live Postgres — see docs/deployment.md for the local recipe.`,
-    );
-  }
-}
