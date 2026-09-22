@@ -11,9 +11,22 @@
  * `unscoped()` in src/lib/db/scoped.ts) — this is the standalone, separately-run, separately-audited
  * exception that comment points to, not a route the running app ever calls.
  *
- * Deletes: Evidence rows and their underlying files for every Finding under every Audit under a
- * due Engagement. Does NOT delete Reports/PDFs — those are the consultant's own generated
- * deliverable summarizing findings, not the raw seller-provided documents spec.md §8 is about.
+ * Covers what src/lib/retention/policy.ts's RETENTION_SCOPE declares: uploaded Evidence and its
+ * files, generated report PDFs, and live Client Portal Links.
+ *
+ * Report PDFs were deliberately excluded until 2026-09-22, on the reasoning that a generated report
+ * is the consultant's own deliverable rather than raw seller material. What changed is that the
+ * report's appendix LISTS those documents and says they can be obtained from the firm — so a report
+ * PDF outliving the documents behind it is not stale data, it is a false statement the product
+ * keeps serving. The appendix sentence is now time-bounded by the purge date, and this deletes the
+ * rendered PDF on that date so the two cannot disagree.
+ *
+ * Report ROWS are kept: the severity roll-up, coverage snapshot and brand snapshot are the
+ * consultant's own record of what they concluded and contain no seller documents. Only the rendered
+ * file goes. Portal links are revoked in the same pass, because a live link whose PDF has just been
+ * deleted would otherwise serve a broken page to a buyer with no explanation.
+ *
+ * Nothing recalls a copy the buyer already downloaded. Retention governs what this product holds.
  *
  * SAFETY MODEL (rewritten 2026-09-22 after a review found the opposite failure):
  *
@@ -39,6 +52,7 @@
 import { DealStage, PrismaClient } from "@prisma/client";
 import { stat } from "node:fs/promises";
 import { deleteObjectIfPresent, storageRoot } from "../src/lib/storage/local";
+import { RETENTION_SCOPE } from "../src/lib/retention/policy";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
 
@@ -60,7 +74,7 @@ const forceMissing = process.argv.includes("--force-missing");
 const engagementArg = process.argv.find((arg) => arg.startsWith("--engagement="));
 const onlyEngagementId = engagementArg ? engagementArg.slice("--engagement=".length) : null;
 
-type Totals = { purged: number; missing: number; failed: number };
+type Totals = { purged: number; missing: number; failed: number; purgedReports: number; revokedLinks: number };
 
 async function assertStorageRootUsable(root: string): Promise<void> {
   const info = await stat(root).catch(() => null);
@@ -106,7 +120,7 @@ async function main() {
     return;
   }
 
-  const totals: Totals = { purged: 0, missing: 0, failed: 0 };
+  const totals: Totals = { purged: 0, missing: 0, failed: 0, purgedReports: 0, revokedLinks: 0 };
 
   for (const engagement of dueEngagements) {
     const evidence = await prisma.evidence.findMany({
@@ -120,7 +134,7 @@ async function main() {
     // rows for already-deleted earlier files pointing at files that no longer exist (they'd then
     // 404/500 on download instead of being gone). Per-file deletion means a failure on one file
     // only skips that file's row, not every file already handled before it.
-    const perEngagement: Totals = { purged: 0, missing: 0, failed: 0 };
+    const perEngagement: Totals = { purged: 0, missing: 0, failed: 0, purgedReports: 0, revokedLinks: 0 };
 
     for (const e of evidence) {
       if (e.storageKey) {
@@ -150,18 +164,67 @@ async function main() {
       perEngagement.purged++;
     }
 
+    if (RETENTION_SCOPE.reportPdfs) {
+      const reports = await prisma.report.findMany({
+        where: { audit: { engagementId: engagement.id }, pdfStorageKey: { not: null } },
+        select: { id: true, pdfStorageKey: true },
+      });
+
+      for (const report of reports) {
+        if (!report.pdfStorageKey) continue;
+        let outcome: "deleted" | "missing";
+        try {
+          outcome = await deleteObjectIfPresent(report.pdfStorageKey);
+        } catch (err) {
+          console.error(`  FAILED to unlink report PDF ${report.pdfStorageKey}:`, err);
+          perEngagement.failed++;
+          continue;
+        }
+
+        if (outcome === "missing" && !forceMissing) {
+          // Same rule as evidence, for the same reason: the column is the only pointer to the file.
+          console.error(
+            `  MISSING report PDF for report ${report.id} (key ${report.pdfStorageKey}) — keeping ` +
+              `the reference. Verify the storage root, then re-run with --force-missing if it is ` +
+              `genuinely gone.`,
+          );
+          perEngagement.missing++;
+          continue;
+        }
+
+        // The Report row survives; only the rendered file and its pointer go.
+        await prisma.report.update({ where: { id: report.id }, data: { pdfStorageKey: null } });
+        perEngagement.purgedReports++;
+      }
+    }
+
+    if (RETENTION_SCOPE.portalLinks) {
+      // Revoked rather than deleted: the access trail (spec.md §8) hangs off the link, and a
+      // consultant asked "who saw this report" after a purge should still get an answer. Revoking
+      // stops it serving; deleting would erase the evidence of who already had it.
+      const revoked = await prisma.clientPortalLink.updateMany({
+        where: { report: { audit: { engagementId: engagement.id } }, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      perEngagement.revokedLinks += revoked.count;
+    }
+
+    totals.purgedReports += perEngagement.purgedReports;
+    totals.revokedLinks += perEngagement.revokedLinks;
     totals.purged += perEngagement.purged;
     totals.missing += perEngagement.missing;
     totals.failed += perEngagement.failed;
 
     console.log(
       `"${engagement.businessName}" (org ${engagement.orgId}, ${engagement.dealStage}, due ${engagement.documentPurgeAt?.toISOString()}): ` +
-        `${perEngagement.purged} purged, ${perEngagement.missing} missing, ${perEngagement.failed} failed.`,
+        `${perEngagement.purged} purged, ${perEngagement.missing} missing, ${perEngagement.failed} failed, ` +
+        `${perEngagement.purgedReports} report PDF(s) deleted, ${perEngagement.revokedLinks} portal link(s) revoked.`,
     );
   }
 
   console.log(
-    `\nTotal: ${totals.purged} purged, ${totals.missing} missing, ${totals.failed} failed.`,
+    `\nTotal: ${totals.purged} purged, ${totals.missing} missing, ${totals.failed} failed, ` +
+      `${totals.purgedReports} report PDF(s) deleted, ${totals.revokedLinks} portal link(s) revoked.`,
   );
 
   // Non-zero on anything unpurged so a scheduled run is a retention alarm, not a silent log line.

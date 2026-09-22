@@ -33,6 +33,8 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
   let storageRoot: string;
   let evidenceId: string;
   let storageKey: string;
+  let reportPdfKey: string;
+  let portalLink: { id: string };
 
   /**
    * Runs the real script. Note what callers must NOT assert on: the process exit code, except where
@@ -90,6 +92,24 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
       data: { orgId: org.orgId, findingId: finding.id, kind: "DOCUMENT", storageKey, text: "contract.pdf" },
     });
     evidenceId = evidence.id;
+
+    // A rendered report PDF and a live portal link, which retention now also covers.
+    reportPdfKey = `${org.orgId}/reports/${org.reportId}.pdf`;
+    const reportPath = join(storageRoot, reportPdfKey);
+    await mkdir(dirname(reportPath), { recursive: true });
+    await writeFile(reportPath, "%PDF-1.4 generated report");
+    await directPrisma.report.update({
+      where: { id: org.reportId },
+      data: { pdfStorageKey: reportPdfKey },
+    });
+    portalLink = await directPrisma.clientPortalLink.create({
+      data: {
+        orgId: org.orgId,
+        reportId: org.reportId,
+        token: `purge-itest-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        expiresAt: new Date(Date.now() + 7 * 86_400_000),
+      },
+    });
 
     // Due for purge: a terminal deal stage AND a date in the past. Both are required.
     await directPrisma.engagement.update({
@@ -175,5 +195,47 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
     } finally {
       await rm(empty, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * Report PDFs were deliberately excluded from retention until 2026-09-22, on the reasoning that a
+   * generated report is the consultant's own deliverable rather than raw seller material. What
+   * changed is that the appendix LISTS the documents and tells the buyer they can be obtained from
+   * the firm — so a report outliving the documents behind it is not stale data, it is a false
+   * statement the product keeps serving, in a file the buyer still holds.
+   */
+  it("deletes the rendered report PDF but keeps the Report row", async () => {
+    const { output } = await purge({ STORAGE_ROOT_DIR: storageRoot });
+    expect(output, output).toMatch(/1 report PDF\(s\) deleted/);
+    expect(existsSync(join(storageRoot, reportPdfKey))).toBe(false);
+
+    const report = await directPrisma.report.findUnique({ where: { id: org.reportId } });
+    // The row is the consultant's own record of what they concluded — severity, coverage, brand
+    // snapshot — and contains no seller documents. Only the rendered file should go.
+    expect(report, "the Report row was deleted; only its file should have been").not.toBeNull();
+    expect(report?.pdfStorageKey, "the pointer must be cleared with the file").toBeNull();
+    expect(report?.computedOverallSeverity, "the conclusion must survive").toBeTruthy();
+  });
+
+  it("revokes live portal links rather than deleting them", async () => {
+    await purge({ STORAGE_ROOT_DIR: storageRoot });
+
+    const link = await directPrisma.clientPortalLink.findUnique({ where: { id: portalLink.id } });
+    // Deleting would erase who had already been given access — the §8 access trail hangs off this
+    // row, and "who saw this report" must still have an answer after a purge.
+    expect(link, "the link row was deleted; it should have been revoked").not.toBeNull();
+    expect(link?.revokedAt, "a live link serving a deleted PDF is a broken page for the buyer").not.toBeNull();
+  });
+
+  it("leaves the report alone when the engagement is not in a terminal stage", async () => {
+    await directPrisma.engagement.update({
+      where: { id: org.engagementId },
+      data: { dealStage: "POST_LOI" },
+    });
+    await purge({ STORAGE_ROOT_DIR: storageRoot });
+
+    expect(existsSync(join(storageRoot, reportPdfKey))).toBe(true);
+    const link = await directPrisma.clientPortalLink.findUnique({ where: { id: portalLink.id } });
+    expect(link?.revokedAt).toBeNull();
   });
 });
