@@ -53,6 +53,9 @@ model ConsultantOrg {
   clientPortalLinks ClientPortalLink[]
   apiKeys           ApiKey[]
   webhookEndpoints  WebhookEndpoint[]
+  emailMessages     EmailMessage[]
+  billingAccount    BillingAccount?
+  creditLedger      AuditCreditEntry[]
 
   @@map("consultant_orgs")
 }
@@ -355,6 +358,122 @@ model WebhookEndpoint {
 
   @@index([orgId])
   @@map("webhook_endpoints")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.5 — revenue readiness (docs/roadmap.md Phase 2.5, spec.md §9 revised 2026-09-21)
+// ---------------------------------------------------------------------------
+
+enum EmailStatus {
+  SENT // accepted by the provider
+  FAILED // provider rejected / errored
+  LOGGED // no provider configured (dev / pre-Resend-key) — recorded here instead of delivered
+}
+
+// Transactional-email outbox/log (docs/roadmap.md Phase 2.5): every system email (team invite,
+// portal link delivery, billing receipt) is recorded here regardless of whether a provider is
+// configured — LOGGED rows double as the dev-mode "what would have been sent" view on /settings.
+// Tenant data (recipient addresses belong to the org's people/deals): normal org RLS.
+model EmailMessage {
+  id         String        @id @default(cuid())
+  orgId      String
+  org        ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  to         String
+  subject    String
+  template   String // e.g. "team-invite", "portal-link", "receipt"
+  status     EmailStatus
+  providerId String? // Resend message id when SENT
+  error      String?
+  createdAt  DateTime      @default(now())
+
+  @@index([orgId])
+  @@map("email_messages")
+}
+
+enum BillingPlan {
+  SOLO_MONTHLY
+  SOLO_ANNUAL
+  TEAM_MONTHLY
+  TEAM_ANNUAL
+}
+
+enum BillingStatus {
+  NONE // org exists, never checked out
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+// One row per org, created lazily at first checkout. The Stripe linkage: webhooks resolve the org
+// from server-set metadata on the Stripe objects (signature-verified), then run through
+// withOrgScope — no cross-org DB role needed for billing, unlike auth/api/portal lookups.
+model BillingAccount {
+  id                   String        @id @default(cuid())
+  orgId                String        @unique
+  org                  ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stripeCustomerId     String        @unique
+  stripeSubscriptionId String?
+  plan                 BillingPlan?
+  status               BillingStatus @default(NONE)
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@map("billing_accounts")
+}
+
+enum CreditReason {
+  PLAN_GRANT // included audits granted on subscription create/renewal
+  AUDIT_CONSUMED // one full (Tier B/C-bearing) Audit created — spec.md §9: Tier A alone is never metered
+  OVERAGE // audit created with no credit balance — billed as a Stripe invoice item on the next
+  // monthly rollup invoice (docs/roadmap.md Phase 2.5: batched, never charged per audit)
+  ADJUSTMENT // manual founder correction
+}
+
+// Append-only credit ledger; balance = sum(delta). A ledger, not a counter column, so every grant
+// and consumption stays auditable — the same "show your work" posture the Report's coverage
+// snapshot takes (spec.md §6).
+model AuditCreditEntry {
+  id        String        @id @default(cuid())
+  orgId     String
+  org       ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  delta     Int
+  reason    CreditReason
+  auditId   String?
+  note      String?
+  createdAt DateTime      @default(now())
+
+  @@index([orgId])
+  @@map("audit_credit_ledger")
+}
+
+// Product telemetry (docs/roadmap.md Phase 2.5: spec.md §11's success metrics + error tracking),
+// deliberately NOT tenant data and NOT org-readable: the app role gets INSERT-only on these two
+// tables (see the migration), so no application code path — bug or not — can read another org's
+// events back out. The founder reads them via scripts/metrics-report.ts (DIRECT role), the same
+// trust boundary migrations and seeds already use. Rows carry ids and event names, never business
+// content (no notes, no document data, no email bodies).
+model MetricEvent {
+  id        String   @id @default(cuid())
+  orgId     String? // nullable: signup events fire before an org session exists
+  type      String // e.g. "org.signed_up", "audit.created", "audit.completed", "report.generated", "portal.viewed"
+  data      Json?
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@map("metric_events")
+}
+
+model ErrorEvent {
+  id        String   @id @default(cuid())
+  orgId     String?
+  source    String // e.g. "server-action", "api", "webhook-dispatch"
+  message   String
+  stack     String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("error_events")
 }
 
 // spec.md §8 — audit logging of report access, needed once the portal ships.
