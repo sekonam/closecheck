@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CheckMethod, Severity, Tier } from "@prisma/client";
 import {
   EIGHT_COLUMNS,
@@ -9,8 +7,6 @@ import {
   SIX_COLUMNS,
   poisonedReport,
   registerReport,
-  registerRows,
-  type Col,
 } from "../../../tests/fixtures/reportRegisters";
 import {
   accentWash,

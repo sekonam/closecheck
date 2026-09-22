@@ -1,18 +1,16 @@
 import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CheckMethod, Severity, Tier } from "@prisma/client";
+import { Severity } from "@prisma/client";
 
 import { renderReportHtml } from "@/lib/reports/renderHtml";
 
 import {
-  EIGHT_COLUMNS,
   FOUR_COLUMNS,
   REGISTER_SHAPES,
   finding,
   poisonedReport,
   registerReport,
   report,
-  type Col,
 } from "../fixtures/reportRegisters";
 import { launchBrowser } from "./helpers/browser";
 
