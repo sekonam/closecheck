@@ -70,6 +70,15 @@ jobs:
       AUTH_SECRET: ci-only-not-a-real-secret
       NEXTAUTH_URL: http://localhost:3000
       CLOSECHECK_TEST_BASE_URL: http://localhost:3000
+      # Nothing sits in front of the app here, so X-Forwarded-For is meaningless and every
+      # unauthenticated caller resolves to the single shared "unknown" bucket — the readiness probe,
+      # serverIsReachable(), and every deliberately-tokenless request the isolation suite makes.
+      # At the production default of 120/minute those collectively exhaust one budget and the suite
+      # starts seeing 429 where it asserts 401, failing the tenant-isolation gate for a reason that
+      # has nothing to do with tenant isolation. The limiter's own behaviour is covered by unit
+      # tests; here it must not become a source of false failures.
+      TRUSTED_PROXY_HOPS: "0"
+      API_RATE_LIMIT_PER_MINUTE: "100000"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
