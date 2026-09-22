@@ -22,7 +22,15 @@ function mapStatus(stripeStatus: Stripe.Subscription.Status): BillingStatus {
     case "trialing":
       return BillingStatus.ACTIVE;
     case "past_due":
+    case "unpaid":
+    case "paused":
+    // `incomplete` = a subscription whose first payment hasn't succeeded yet: it still EXISTS on the
+    // customer, so it must NOT map to CANCELED — that would reopen the two-subscription hole
+    // (startCheckout only refuses non-CANCELED). Treating it as PAST_DUE routes the org to the
+    // billing portal to finish paying rather than letting it open a second subscription.
+    case "incomplete":
       return BillingStatus.PAST_DUE;
+    // `incomplete_expired` and `canceled` are genuinely gone — a fresh checkout is correct.
     default:
       return BillingStatus.CANCELED;
   }

@@ -131,6 +131,17 @@ Phase 2's exit criterion (self-serve → paid conversion) is impossible to meet,
 without this work; sourced from the 2026-09-21 implementation-gap audit and
 `docs/research/profitability.md`.
 
+**Status (2026-09-22):** all five deliverables are **built** — Stripe billing (checkout, portal,
+signature-verified webhook, audit-credit ledger with batched overage), transactional email (Resend
+with a LOGGED dev fallback), success-metric + error instrumentation with a founder report script,
+the RDAP-first WHOIS migration, and a guided first-audit onboarding flow. Verified against a fresh
+local Postgres (full RLS/role/versioning verify suite passing on a deliberately non-UTC cluster) and
+a live browser end-to-end run. The **exit criterion remains unmet**: billing enforcement ships dark
+(`BILLING_ENFORCEMENT=false`) and no real Stripe/Resend account is wired yet, so no production charge
+or refund has been processed — that needs the account credentials only the founder can provision
+(blocked on that, not on code). Per explicit user direction (2026-09-22) to build the roadmap out
+ahead of its evidence gates, same override recorded for Phases 3 and 4.
+
 **Deliverables:**
 - **Stripe billing implementing `spec.md` §9 as revised 2026-09-21.** Annual-credits plan as the
   lead offer (~17% discount, bundled audit credits) with monthly second — annual-default is the

@@ -7,6 +7,7 @@ import { withOrgScope, type ScopedTx } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getStripe } from "@/lib/billing/stripe";
 import { isBillingConfigured, priceIdForPlan } from "@/lib/billing/config";
+import { recordError } from "@/lib/metrics/record";
 
 /** Owner-only, same reasoning as API keys/webhooks: plan changes bind the org to charges. */
 async function requireOwner(tx: ScopedTx, userId: string): Promise<void> {
@@ -52,7 +53,15 @@ async function ensureBillingAccount(orgId: string, orgName: string, email: strin
     // customer is now an orphan carrying metadata.orgId that a future webhook could resolve against.
     // Delete it and use the winner's customer id, so exactly one customer exists per org.
     if (err && typeof err === "object" && "code" in err && err.code === "P2002") {
-      await stripe.customers.del(customer.id).catch(() => {});
+      // A failed delete would strand a metadata.orgId-bearing customer a future webhook could resolve
+      // against — record it so it's traceable/cleanable rather than silently orphaned.
+      await stripe.customers
+        .del(customer.id)
+        .catch((delErr) =>
+          recordError("billing-orphan-customer", delErr instanceof Error ? delErr : new Error(String(delErr)), {
+            orgId,
+          }),
+        );
       const winner = await withOrgScope(orgId, (tx) => tx.billingAccount.findUniqueOrThrow({ where: { orgId } }));
       return winner.stripeCustomerId;
     }

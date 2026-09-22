@@ -28,9 +28,12 @@ export async function grantPlanCreditsIfDue(tx: ScopedTx, orgId: string, plan: B
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credits:${orgId}`}))`;
 
   const cutoff = new Date(Date.now() - 350 * 86_400_000);
-  // Plan-aware idempotency: the guard matches a prior grant FOR THE SAME PLAN, so a mid-cycle
-  // Solo→Team change tops up the difference immediately instead of being suppressed until the old
-  // grant ages out. The note carries the plan so this query can find it.
+  // Plan-aware idempotency: the guard matches a prior grant FOR THE SAME PLAN, so repeated webhooks
+  // for one plan never double-grant, but a mid-cycle Solo→Team change is NOT suppressed — it grants
+  // the new plan's full bundle on top of the old (Solo 3 + Team 6 = 9 for the year, not a prorated
+  // difference). That over-grant is deliberate: upgrades are rare, customer-favorable, and fully
+  // visible in the ledger; prorating credits would be more surprising than generous. The note
+  // carries the plan so this query can find same-plan grants.
   const planNote = `${plan} yearly included audits`;
   const recentGrant = await tx.auditCreditEntry.findFirst({
     where: { orgId, reason: CreditReason.PLAN_GRANT, note: planNote, createdAt: { gt: cutoff } },
