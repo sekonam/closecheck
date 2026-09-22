@@ -202,6 +202,21 @@ or says explicitly what the automated rating could not see.** The second is a le
 the close-date gap is stated rather than closed, because closing it would mean inventing a date the
 consultant never gave us — but silence is not.
 
+**The report's disclaimer names what an automated check cannot establish (legal-content change,
+2026-09-22).** The paragraph previously singled out Tier C as "consultant-attested observations, not
+automated verifications", which invited a buyer's counsel to take everything else as verified — and
+after v6 that was the last place in the document still implying it, since the per-finding status and
+the rating summary already say otherwise. It now adds that a finding shown as in progress carries a
+rating the consultant has not confirmed, and that automated checks read public records and cannot
+establish who controls an account.
+
+Recorded as a decision because changing this text is not a content edit: it invalidates every
+organisation's prior acknowledgement by design, since `ConsultantOrg.disclaimerAcknowledgedAt` means
+only "this owner reviewed the text as it read on that date". Migration
+`20260922214500_disclaimer_scope_of_automated_checks` clears the column. Made now precisely because
+one development organisation had acknowledged the old text and no real firm had — the same edit
+after the first paying customer is a re-acknowledgement cycle for every one of them.
+
 **An automated pass says what it checked (decision, template v6).** v5 made the rule and then broke
 it by omission: its scope was set by the two divergences that had been noticed, and three more sat
 unexamined in the same template. Those three were worse, because they ended in a *confirmed* pass

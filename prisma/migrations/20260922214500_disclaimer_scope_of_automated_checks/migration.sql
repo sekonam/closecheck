@@ -1,0 +1,16 @@
+-- Clears every disclaimer acknowledgement, because the disclaimer text changed.
+--
+-- ConsultantOrg.disclaimerAcknowledgedAt means "this org's owner reviewed the disclaimer as it read
+-- on that date" and nothing else. Leaving it set after a wording change would record an
+-- acknowledgement of language nobody read — which is worse than no acknowledgement, because the
+-- whole point of the column is to be able to say a named person saw the text that ships.
+--
+-- What changed: the disclaimer previously singled out Tier C as "consultant-attested observations,
+-- not automated verifications", which invited a reader to take everything else as verified.
+-- Template v6 established that most Tier A checks cannot reach the verdict their own rubric
+-- describes — they read public records and cannot establish who controls an account. The sentence
+-- was drawing the line in the wrong place, in the one paragraph a buyer's counsel actually reads.
+--
+-- Cost of doing this now: one row, on a development organisation. The same change after the first
+-- paying firm is a re-acknowledgement cycle for every one of them, which is why it happens here.
+UPDATE "consultant_orgs" SET "disclaimerAcknowledgedAt" = NULL;
