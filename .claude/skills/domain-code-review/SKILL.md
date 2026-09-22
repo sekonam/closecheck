@@ -154,6 +154,19 @@ controls):
   `0xA9FEA9FE`), IPv4-mapped and NAT64 IPv6 (`::ffff:169.254.169.254`, `64:ff9b::a9fe:a9fe`) — and
   a guard that disagrees with the resolver about which address a string names is worse than none.
 
+**Any test added in response to a defect**:
+- **Has it been shown to FAIL against the bug?** Not reasoned about — run. Reintroduce the defect,
+  confirm the new case goes red, restore. A test written against a fix is worth nothing until it
+  has done that, and this project has now produced two that passed against the very code they were
+  written to catch: a cache-eviction flood test that completed before the prune threshold it was
+  probing, and a browser assertion gated on an environment variable that was unset everywhere it
+  mattered. Both were written deliberately, by someone who had just been thinking about this exact
+  failure.
+- When the defect is reintroduced, do the OTHER cases in the file still pass? If they all fail, the
+  test is measuring that the code runs at all rather than the property it claims.
+- A suite that skips when its dependency is absent reports success having asserted nothing. Fail
+  loudly instead: an unavailable browser, server or database is a result, not a non-event.
+
 ## Output
 
 Findings from this checklist should name the specific `spec.md`/`releases.md` section the code
