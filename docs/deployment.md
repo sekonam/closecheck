@@ -83,8 +83,10 @@ the new role.
   fine for a small number of design partners, but `src/lib/storage/local.ts`'s docstring is explicit
   that this needs to change before real seller/buyer documents pile up at any scale, and before
   running more than one web service replica (a second replica would not see the first's files).
-- **Payment processing is not implemented** (`docs/spec.md` §9's pricing is a placeholder) — the
-  pricing page and signup flow do not charge anything.
+- **Billing is implemented but ships dark** (Phase 2.5) — Stripe checkout, the audit-credit ledger,
+  and overage invoicing all exist, but `BILLING_ENFORCEMENT` defaults to `false`, so nothing is
+  charged or blocked until you provision Stripe keys and flip it (see the Stripe section below).
+  Until then the pricing numbers remain the untested placeholders from `docs/spec.md` §9.
 - **The report disclaimer text is unreviewed by counsel** — flagged in-app on the settings page,
   unchanged by this runbook.
 
@@ -101,3 +103,31 @@ guaranteed path. To actually deliver email:
 3. Set `EMAIL_FROM` to a verified-domain sender, e.g. `CloseCheck <notifications@yourdomain.com>`.
 4. Redeploy. Delivery status per message is visible in the `email_messages` table (`SENT` with the
    provider id, or `FAILED` with the provider error).
+
+## Billing (Stripe — Phase 2.5)
+
+Without configuration the app runs in grace mode: no checkout surface appears on Settings, no
+audit-credit enforcement happens, and audits are created freely (consumption is still recorded for
+later measurement). To turn billing on:
+
+1. Create a Stripe account and, in **test mode** first, create five Prices under one or more Products:
+   four recurring subscription prices (Solo monthly, Solo annual, Team monthly, Team annual) and one
+   one-off price used for batched audit-overage invoice items. Suggested test amounts per `spec.md`
+   §9 as revised (all still awaiting the Phase 0 head-to-head test, so keep them changeable): Solo
+   ~$35/mo or ~$348/yr, Team +$25/seat, overage in the $99–149 band.
+2. Set on the web service: `STRIPE_SECRET_KEY`, and the five price ids —
+   `STRIPE_PRICE_SOLO_MONTHLY`, `STRIPE_PRICE_SOLO_ANNUAL`, `STRIPE_PRICE_TEAM_MONTHLY`,
+   `STRIPE_PRICE_TEAM_ANNUAL`, `STRIPE_PRICE_AUDIT_OVERAGE`. Optionally override the included-audit
+   counts with `BILLING_INCLUDED_AUDITS_MONTHLY` / `BILLING_INCLUDED_AUDITS_ANNUAL` (defaults 3 / 6).
+3. In the Stripe dashboard, add a webhook endpoint pointing at
+   `https://<your-domain>/api/stripe/webhook`, subscribed to `checkout.session.completed`,
+   `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.paid`. Copy its
+   signing secret into `STRIPE_WEBHOOK_SECRET`. The endpoint verifies this signature and resolves the
+   org from server-set customer/subscription metadata — it trusts nothing else.
+4. Redeploy. `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` both present makes checkout appear on
+   Settings for account owners. Enforcement (blocking full audits when out of credits, and creating
+   billable overage invoice items) stays **off** until you set `BILLING_ENFORCEMENT=true` — do that
+   only after a real test charge and a real refund have each round-tripped end-to-end
+   (`docs/releases.md` §5 launch gate). Ledger and subscription state are visible per-org on Settings.
+5. Switch to Stripe **live mode** and repeat steps 1–3 with live keys/prices when going to real
+   billing; keep `BILLING_ENFORCEMENT=false` through the first live smoke test, then flip it.

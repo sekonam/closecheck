@@ -38,6 +38,33 @@ services:
       # Set once Render assigns the service's *.onrender.com URL (or a custom domain is attached).
       - key: NEXTAUTH_URL
         sync: false
+      # --- Phase 2.5 revenue readiness (docs/roadmap.md Phase 2.5). All optional at deploy time:
+      # with the Stripe/Resend keys unset the app runs in graceful fallback (no checkout surface,
+      # emails recorded as LOGGED). Fill them in from the Stripe/Resend dashboards to go live; see
+      # docs/deployment.md's billing/email sections. Kept as declared-but-unsynced so the service
+      # knows the keys exist without them living in the blueprint.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_SOLO_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_SOLO_ANNUAL
+        sync: false
+      - key: STRIPE_PRICE_TEAM_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_TEAM_ANNUAL
+        sync: false
+      - key: STRIPE_PRICE_AUDIT_OVERAGE
+        sync: false
+      # Enforcement ships dark (docs/releases.md §5 launch gate) — leave "false" until a real charge
+      # and refund have round-tripped; setting it "true" starts blocking/ billing audit overages.
+      - key: BILLING_ENFORCEMENT
+        value: "false"
 
 databases:
   - name: closecheck-db
