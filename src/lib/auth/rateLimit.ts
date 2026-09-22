@@ -134,6 +134,20 @@ export function addressAttemptAllowed(address: string): boolean {
  * attempt takes the same time as a wrong one.
  */
 export function focusedGuessingAllowed(email: string, address: string): boolean {
+  // Same exemption as the address budget, and for a reason I got wrong the first time. This budget
+  // is keyed on (email, address) precisely so an attacker's failures spend the attacker's budget
+  // rather than the victim's. When the address is unknown it is unknown for EVERYONE, so the key
+  // collapses to per-email — and a per-email budget that blocks is the victim-lockout weapon this
+  // whole design exists to remove. Exempting only the address budget fixed the denial of service
+  // and silently reinstated the lockout; verified by driving it, not by reading it.
+  //
+  // So with no trustworthy client identity there is no sign-in rate limiting at all. That is the
+  // honest position rather than a gap: any blocking keyed on an identity every caller shares is
+  // collective punishment, and the choice is between locking out real users and not limiting. Do
+  // not run TRUSTED_PROXY_HOPS=0 in production — docs/deployment.md says so at the step that sets
+  // it. Failures are still recorded, so the founder can see grinding even where it cannot be
+  // blocked.
+  if (address === "unknown") return true;
   return peekRateLimit(failureKey(email, address), failureOptions());
 }
 

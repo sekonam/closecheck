@@ -272,3 +272,33 @@ describe("the failure key is injective", () => {
     expect(focusedGuessingAllowed("c@d.test", "5.6.7.8")).toBe(true);
   });
 });
+
+describe("with no trustworthy address, nothing blocks — including the focused budget", () => {
+  /**
+   * A regression I introduced and then caught by driving it rather than reading it.
+   *
+   * Exempting only the ADDRESS budget from the unknown-address case fixed a platform-wide denial of
+   * service and silently reinstated the victim-lockout weapon: the focused budget is keyed on
+   * (email, address) specifically so an attacker's failures spend the attacker's budget, and when
+   * every caller resolves to "unknown" that key collapses to per-email. A per-email budget that
+   * blocks is exactly what the two-key design exists to prevent.
+   *
+   * The honest position at TRUSTED_PROXY_HOPS=0 is no sign-in rate limiting at all — blocking on an
+   * identity every caller shares is collective punishment — which is why the runbook says not to
+   * run that configuration in production.
+   */
+  it("does not let one caller burn another's budget when nobody has an address", () => {
+    process.env.AUTH_MAX_FAILED_SIGNINS = "3";
+    for (let i = 0; i < 20; i++) recordFailedSignIn("victim@firm.test", "unknown");
+    expect(focusedGuessingAllowed("victim@firm.test", "unknown")).toBe(true);
+  });
+
+  it("still cuts off a real address, and still leaves the victim alone", () => {
+    process.env.AUTH_MAX_FAILED_SIGNINS = "3";
+    const attacker = "203.0.113.9";
+    const victim = "198.51.100.4";
+    for (let i = 0; i < 5; i++) recordFailedSignIn("victim@firm.test", attacker);
+    expect(focusedGuessingAllowed("victim@firm.test", attacker)).toBe(false);
+    expect(focusedGuessingAllowed("victim@firm.test", victim)).toBe(true);
+  });
+});

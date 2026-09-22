@@ -80,6 +80,15 @@ first "Apply Blueprint" click are yours.
 
    "It degrades safely" was true of one limiter and catastrophic for the other. Set the number.
 
+   **`0` means no sign-in rate limiting whatsoever — do not run it in production.** Both sign-in
+   budgets are exempt when the address is unknown, and that is deliberate rather than an oversight:
+   the focused budget is keyed on (email, address) specifically so an attacker's failed guesses
+   spend the attacker's budget instead of the victim's, and when every caller resolves to the same
+   unknown address that key collapses to per-email — at which point blocking on it locks the victim
+   out of their own account. With no trustworthy client identity the choice is between locking out
+   real users and not limiting, and not limiting is the lesser harm. Failures are still recorded, so
+   grinding remains visible in `npm run ops:errors` even where it cannot be blocked.
+
 8. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
    domain, once attached).
 9. **Redeploy.** The app should now serve real traffic.
