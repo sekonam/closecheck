@@ -6,7 +6,50 @@
  * possible to change it without a test noticing.
  */
 
-export type AccessEntry = { id: string; viewedAt: Date; ipHash: string | null };
+export type AccessEntry = {
+  id: string;
+  viewedAt: Date;
+  ipHash: string | null;
+  /** PAGE when the buyer opened the portal, DOCUMENT when the report bytes were fetched. */
+  kind?: "PAGE" | "DOCUMENT";
+};
+
+/**
+ * How close a document fetch has to be to a page view to be that page's own embedded viewer.
+ *
+ * The viewer fetches the report as a subresource of the page it sits in, so the two arrive within
+ * one round trip of each other. This used to be decided by a request header the client controlled,
+ * which meant a client could erase itself from the trail entirely by claiming to be that viewer.
+ * Deciding it here costs a display artefact when it is wrong — a real separate download moments
+ * after a page view reads as one access — rather than costing the evidence.
+ */
+const EMBEDDED_VIEWER_WINDOW_MS = 5_000;
+
+/**
+ * Collapse each page view and its own viewer's document fetch into one access.
+ *
+ * Only ONE document fetch is absorbed per page view. A viewer fetches the report once; a second
+ * fetch in the same window is somebody downloading it, and must survive into the trail.
+ */
+export function collapseEmbeddedFetches(entries: AccessEntry[]): AccessEntry[] {
+  const chronological = [...entries].sort((a, b) => a.viewedAt.getTime() - b.viewedAt.getTime());
+  const absorbed = new Set<string>();
+
+  for (const entry of chronological) {
+    if (entry.kind !== "PAGE") continue;
+    const companion = chronological.find(
+      (candidate) =>
+        candidate.kind === "DOCUMENT" &&
+        !absorbed.has(candidate.id) &&
+        candidate.ipHash === entry.ipHash &&
+        candidate.viewedAt.getTime() >= entry.viewedAt.getTime() &&
+        candidate.viewedAt.getTime() - entry.viewedAt.getTime() <= EMBEDDED_VIEWER_WINDOW_MS,
+    );
+    if (companion) absorbed.add(companion.id);
+  }
+
+  return entries.filter((entry) => !absorbed.has(entry.id));
+}
 
 /**
  * Label each distinct origin positionally, in first-seen order.

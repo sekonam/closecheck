@@ -42,11 +42,12 @@ function safeAccent(hex: string | null | undefined): string {
 
 export default async function ClientPortalPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  // Also what keeps this route dynamic. Without a headers() call Next may treat the page as
+  // statically cacheable, and a buyer-facing magic-link page served from a shared cache would be
+  // a far larger problem than the logging this reads.
+  const requestHeaders = await headers();
 
-  const access = await resolvePortalAccess(token, {
-    log: true,
-    forwardedFor: (await headers()).get("x-forwarded-for"),
-  });
+  const access = await resolvePortalAccess(token, { log: true, kind: "PAGE", headers: requestHeaders });
 
   if (!access) notFound();
 

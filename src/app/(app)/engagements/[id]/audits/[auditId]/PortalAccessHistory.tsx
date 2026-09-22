@@ -17,6 +17,7 @@
  */
 
 import {
+  collapseEmbeddedFetches,
   describeAccessSummary,
   labelOrigins,
   summarizeAccess,
@@ -34,7 +35,11 @@ function formatTimestamp(value: Date): string {
   return value.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
-export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog }: Props) {
+export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog: rawLog }: Props) {
+  // Every request is logged; the page's own embedded viewer is collapsed here rather than being
+  // skipped at write time, because at write time the only way to recognise it was a header the
+  // client could forge to erase itself.
+  const accessLog = collapseEmbeddedFetches(rawLog);
   const originLabels = labelOrigins(accessLog);
   const summary = summarizeAccess(accessLog);
   // Oldest first. This is a trail: "created" then what happened, in the order it happened, ending
@@ -62,7 +67,10 @@ export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog
 
         {chronologicalViews.map((entry) => (
           <li key={entry.id} className="text-slate-500">
-            <span className="font-medium text-slate-600">Viewed</span> · {formatTimestamp(entry.viewedAt)}
+            <span className="font-medium text-slate-600">
+              {entry.kind === "DOCUMENT" ? "Report downloaded" : "Viewed"}
+            </span>{" "}
+            · {formatTimestamp(entry.viewedAt)}
             {entry.ipHash ? (
               <span className="text-slate-400"> · {originLabels.get(entry.ipHash)}</span>
             ) : (

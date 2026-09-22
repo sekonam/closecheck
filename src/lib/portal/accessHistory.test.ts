@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  collapseEmbeddedFetches,
   describeAccessSummary,
   labelOrigins,
   summarizeAccess,
@@ -106,5 +107,71 @@ describe("summary line", () => {
 
   it("says never viewed for an empty log", () => {
     expect(describeAccessSummary(summarizeAccess([]))).toBe("never viewed");
+  });
+});
+
+describe("collapsing the page's own embedded viewer", () => {
+  function at(id: string, secondsFromStart: number, kind: "PAGE" | "DOCUMENT", ipHash: string | null = "a") {
+    return { id, viewedAt: new Date(Date.UTC(2026, 8, 22, 12, 0, secondsFromStart)), ipHash, kind };
+  }
+
+  it("counts a page view and its own viewer's fetch as one access", () => {
+    const collapsed = collapseEmbeddedFetches([at("page", 0, "PAGE"), at("embed", 1, "DOCUMENT")]);
+    expect(collapsed.map((e) => e.id)).toEqual(["page"]);
+  });
+
+  it("keeps a download that is not a page's own viewer", () => {
+    // The forgeable-header version treated this as the embedded viewer and wrote no row at all:
+    // ten complete downloads left the trail reading "never viewed".
+    const collapsed = collapseEmbeddedFetches([at("direct", 0, "DOCUMENT")]);
+    expect(collapsed.map((e) => e.id)).toEqual(["direct"]);
+  });
+
+  it("absorbs only ONE fetch per page view", () => {
+    // A viewer fetches the report once. A second fetch in the same window is somebody downloading
+    // it, and must survive into the trail.
+    const collapsed = collapseEmbeddedFetches([
+      at("page", 0, "PAGE"),
+      at("embed", 1, "DOCUMENT"),
+      at("download", 2, "DOCUMENT"),
+    ]);
+    expect(collapsed.map((e) => e.id)).toEqual(["page", "download"]);
+  });
+
+  it("does not absorb a fetch from a different origin", () => {
+    // A forwarded link opened elsewhere at the same moment is a separate viewer, not this page's.
+    const collapsed = collapseEmbeddedFetches([
+      at("page", 0, "PAGE", "a"),
+      at("elsewhere", 1, "DOCUMENT", "b"),
+    ]);
+    expect(collapsed.map((e) => e.id)).toEqual(["page", "elsewhere"]);
+  });
+
+  it("does not absorb a fetch well after the page view", () => {
+    const collapsed = collapseEmbeddedFetches([at("page", 0, "PAGE"), at("later", 30, "DOCUMENT")]);
+    expect(collapsed.map((e) => e.id)).toEqual(["page", "later"]);
+  });
+
+  it("does not absorb a fetch that preceded the page view", () => {
+    const collapsed = collapseEmbeddedFetches([at("before", 0, "DOCUMENT"), at("page", 1, "PAGE")]);
+    expect(collapsed.map((e) => e.id)).toEqual(["before", "page"]);
+  });
+
+  it("pairs each page view with its own fetch when several visits arrive together", () => {
+    const collapsed = collapseEmbeddedFetches([
+      at("page1", 0, "PAGE"),
+      at("embed1", 1, "DOCUMENT"),
+      at("page2", 2, "PAGE"),
+      at("embed2", 3, "DOCUMENT"),
+    ]);
+    expect(collapsed.map((e) => e.id)).toEqual(["page1", "page2"]);
+  });
+
+  it("leaves entries with no kind alone", () => {
+    // Rows written before the discriminator existed default to PAGE and must not be absorbed.
+    const collapsed = collapseEmbeddedFetches([
+      { id: "legacy", viewedAt: new Date("2026-05-01T00:00:00Z"), ipHash: "a" },
+    ]);
+    expect(collapsed.map((e) => e.id)).toEqual(["legacy"]);
   });
 });

@@ -621,11 +621,27 @@ model ErrorEvent {
 }
 
 // spec.md §8 — audit logging of report access, needed once the portal ships.
+enum PortalAccessKind {
+  PAGE // the buyer opened the portal page
+  DOCUMENT // the report bytes were fetched — the viewer embedded in the page, or a direct download
+}
+
 model PortalAccessLogEntry {
   id       String           @id @default(cuid())
   linkId   String
   link     ClientPortalLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
   viewedAt DateTime         @default(now())
+  /**
+   * What was accessed. Recorded rather than used to decide whether to record at all.
+   *
+   * The PDF route previously skipped logging when `Sec-Fetch-Dest: iframe` was present, to avoid
+   * double-counting the viewer's own fetch of the page it sits in. That header is forbidden to
+   * browser scripts and entirely free for anything else, so sending it suppressed the row: ten
+   * complete downloads left the consultant's access trail reading "never viewed". Nothing a client
+   * controls may decide whether an access is recorded — the discriminator lives here instead, and
+   * the summary collapses a page view and its own document fetch for display.
+   */
+  kind     PortalAccessKind @default(PAGE)
   ipHash   String?
 
   @@index([linkId])

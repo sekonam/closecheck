@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { PortalAccessKind } from "@prisma/client";
+import { clientAddressFrom } from "@/lib/api/rateLimit";
 import { withPortalScope } from "@/lib/portal/db";
 import type { ReportBrandSnapshot } from "./branding";
 
@@ -26,14 +28,19 @@ export interface PortalAccess {
 }
 
 /**
- * spec.md §8: "who viewed/exported/shared a given Report and when." An access row is written for
- * every human access, which includes a direct hit on the PDF URL (someone forwarded the link, or
- * saved the file) — see the note on `skipLog` for why the embedded viewer's own fetch is the one
- * request that does not produce a second row.
+ * spec.md §8: "who viewed/exported/shared a given Report and when."
+ *
+ * A row is written for EVERY access. Nothing the caller controls decides whether one exists — an
+ * earlier version let the PDF route suppress logging when it saw `Sec-Fetch-Dest: iframe`, to
+ * avoid double-counting the embedded viewer's own fetch. That header is forbidden to browser
+ * scripts and entirely free for anything else, so sending it erased the trail: ten complete
+ * downloads, and the consultant's audit page read "never viewed". The page-and-its-own-viewer pair
+ * is now collapsed when the trail is SUMMARISED, where getting it wrong costs a display artefact
+ * rather than the evidence.
  */
 export async function resolvePortalAccess(
   token: string,
-  options: { log: boolean; forwardedFor?: string | null } = { log: true },
+  options: { log: boolean; kind?: PortalAccessKind; headers?: Headers } = { log: true },
 ): Promise<PortalAccess | null> {
   if (!token) return null;
 
@@ -49,12 +56,25 @@ export async function resolvePortalAccess(
       // portal_access_log (see src/lib/portal/db.ts's docstring and
       // scripts/verify-signup-portal-roles.ts), and Postgres requires SELECT to honor the RETURNING
       // clause create() always uses.
-      const ipHash = options.forwardedFor
-        ? createHash("sha256").update(options.forwardedFor.split(",")[0].trim()).digest("hex")
-        : null;
+      // Through the shared address parser, not the raw header. Reading `x-forwarded-for` and
+      // taking its first element meant the value was whatever the client sent — most proxies
+      // APPEND, so the leftmost hop is the caller's own. Forty requests from one machine rendered
+      // to the consultant as "viewed 40 times — 40 origins", and `X-Forwarded-For:
+      // not-an-ip-at-all` was hashed and stored verbatim. `clientAddressFrom` counts hops from the
+      // right against TRUSTED_PROXY_HOPS and refuses to guess when fewer are present than
+      // configured.
+      const address = options.headers
+        ? clientAddressFrom({ headers: options.headers } as Request)
+        : "unknown";
+      // "unknown" is a real answer and must not masquerade as an address: it is what every caller
+      // resolves to when the deployment has no trusted proxy, and hashing it would make them all
+      // look like one identified viewer.
+      const ipHash =
+        address === "unknown" ? null : createHash("sha256").update(address).digest("hex");
+      const kind: PortalAccessKind = options.kind ?? "PAGE";
       await tx.$executeRaw`
-        INSERT INTO "portal_access_log" (id, "linkId", "viewedAt", "ipHash")
-        VALUES (${randomUUID()}, ${link.id}, (now() AT TIME ZONE 'utc'), ${ipHash})
+        INSERT INTO "portal_access_log" (id, "linkId", "viewedAt", "kind", "ipHash")
+        VALUES (${randomUUID()}, ${link.id}, (now() AT TIME ZONE 'utc'), ${kind}::"PortalAccessKind", ${ipHash})
       `;
     }
 

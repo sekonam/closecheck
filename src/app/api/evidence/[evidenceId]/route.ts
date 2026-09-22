@@ -28,7 +28,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ evi
   // `evidence.text` but not in a raw Content-Disposition header value — stripping quotes alone
   // isn't enough. `filename` is a plain-ASCII fallback for older clients; `filename*` (RFC 5987)
   // carries the real name for everything else.
-  const rawFilename = evidence.text ?? "evidence";
+  // Trimmed, and with the same fallback the ASCII form uses: a file uploaded as ".." stores an
+  // empty name, which produced `filename*=UTF-8''` — a parameter with no value, which is malformed
+  // rather than merely unhelpful.
+  const rawFilename = evidence.text?.trim() || "evidence";
   // Backslash is stripped along with the quote: it is the escape character inside a quoted-string,
   // so a file named `a\` produces `filename="a\"; filename*=...` and a compliant parser swallows
   // the filename* parameter as part of the quoted value — losing the real name entirely.

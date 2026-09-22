@@ -13,7 +13,14 @@ function upload(type: string, size = 1024, name = "file") {
 
 const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+/** A bare zip header — shared by every archive, and by every OOXML/ODF package. */
 const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00]);
+/** A zip that identifies itself as an OOXML package, which a plain archive cannot. */
+const OOXML = new Uint8Array([
+  0x50, 0x4b, 0x03, 0x04,
+  ...new Array(26).fill(0),
+  ...[..."[Content_Types].xml"].map((c) => c.charCodeAt(0)),
+]);
 
 describe("declared-type check", () => {
   it("accepts the formats diligence documents actually arrive as", () => {
@@ -87,9 +94,16 @@ describe("content check", () => {
     expect(
       checkEvidenceContent(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ZIP,
+        OOXML,
       ).ok,
     ).toBe(true);
+    // A bare archive under the same declared type is not: see the zip-based formats block below.
+    expect(
+      checkEvidenceContent(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ZIP,
+      ).ok,
+    ).toBe(false);
   });
 
   it("refuses content that does not match its declared type", () => {
@@ -148,5 +162,37 @@ describe("describeMimeType", () => {
     expect(describeMimeType("image/png")).toBe("PNG image");
     expect(describeMimeType(null)).toBe("document");
     expect(describeMimeType("application/unknown")).toBe("document");
+  });
+});
+
+describe("zip-based formats", () => {
+  function zipWith(marker: string): Uint8Array {
+    const head = [0x50, 0x4b, 0x03, 0x04, ...new Array(26).fill(0)];
+    return new Uint8Array([...head, ...[...marker].map((c) => c.charCodeAt(0))]);
+  }
+  const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+  it("refuses a plain archive declared as a Word document", () => {
+    // The archive refusal was decorative: identical PK-prefixed bytes were refused as
+    // application/zip and stored when relabelled .docx, because the magic rule for all four
+    // zip-based types was just "starts with PK".
+    expect(checkEvidenceContent(DOCX, zipWith("holiday-photos/")).ok).toBe(false);
+  });
+
+  it("accepts a real OOXML package", () => {
+    expect(checkEvidenceContent(DOCX, zipWith("[Content_Types].xml")).ok).toBe(true);
+  });
+
+  it("accepts a real OpenDocument package", () => {
+    expect(
+      checkEvidenceContent(
+        "application/vnd.oasis.opendocument.text",
+        zipWith("mimetypeapplication/vnd.oasis.opendocument.text"),
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("still refuses an archive declared as an archive", () => {
+    expect(checkEvidenceUpload({ type: "application/zip", size: 100, name: "x.zip" }).ok).toBe(false);
   });
 });

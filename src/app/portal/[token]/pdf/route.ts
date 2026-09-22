@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { getObject } from "@/lib/storage/local";
 import { resolvePortalAccess } from "../access";
+import { portalRequestAllowed } from "@/lib/portal/rateLimit";
 
 /**
  * Serves the shared Report PDF to a buyer holding a live magic link (spec.md §7).
@@ -25,17 +26,37 @@ export async function GET(
   const { token } = await params;
   const requestHeaders = await headers();
 
-  // The page render already wrote an access-log row for this visit, and the viewer it renders then
-  // fetches this URL as a subresource — logging that fetch too would double every visit in the
-  // access trail spec.md §8 promises. Anything that is NOT that embedded fetch (a direct
-  // navigation, a forwarded link, a download) is a real, separate access and is logged. Missing
-  // header (curl, an old browser) counts as a real access: over-logging an access trail is the safe
-  // direction to fail.
-  const embeddedInOwnPage = requestHeaders.get("sec-fetch-dest") === "iframe";
+  // Before resolving anything, and deliberately before writing an access-log row: this route
+  // serves a multi-hundred-kilobyte document and writes a row on every call, and nothing bounded
+  // either. A refused request is not logged, which is the point — the rows are the resource being
+  // protected — and the requests that got through are still in the trail, so heavy access remains
+  // visible rather than being erased by exceeding the limit.
+  const verdict = portalRequestAllowed(requestHeaders, token);
+  if (!verdict.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests for this link. Retry shortly." },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(verdict.retryAfterSeconds),
+          "Cache-Control": "private, no-store",
+        },
+      },
+    );
+  }
 
+  // Every fetch of the report bytes is logged, including the one the page's own embedded viewer
+  // makes. This used to skip logging when `Sec-Fetch-Dest: iframe` was present, so as not to
+  // double-count that viewer — but that header is forbidden to browser scripts and entirely free
+  // for anything else, so a client that sent it erased itself from the access trail. Ten complete
+  // downloads, and the consultant's audit page read "never viewed".
+  //
+  // The page-and-its-own-viewer pair is collapsed when the trail is summarised instead. Getting
+  // that wrong costs a display artefact; getting this wrong cost the evidence.
   const access = await resolvePortalAccess(token, {
-    log: !embeddedInOwnPage,
-    forwardedFor: requestHeaders.get("x-forwarded-for"),
+    log: true,
+    kind: "DOCUMENT",
+    headers: requestHeaders,
   });
 
   // Same deliberate non-distinction the page makes: unknown, revoked and expired all look alike

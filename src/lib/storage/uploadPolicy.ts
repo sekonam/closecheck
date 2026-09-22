@@ -127,6 +127,9 @@ const MAGIC_BYTES: Array<{
   offset?: number;
   /** A second marker that must also match — for container formats shared across media types. */
   also?: { offset: number; bytes: number[][] };
+  /** A literal that must appear near the start — for zip-based formats, whose header alone is
+   * shared with every other archive. */
+  containing?: { withinBytes: number; anyOf: string[] };
 }> = [
   { mimeTypes: ["application/pdf"], prefixes: [[0x25, 0x50, 0x44, 0x46]] }, // %PDF
   { mimeTypes: ["image/jpeg"], prefixes: [[0xff, 0xd8, 0xff]] },
@@ -165,7 +168,14 @@ const MAGIC_BYTES: Array<{
     },
   },
   {
-    // Every OOXML and OpenDocument file is a zip underneath.
+    // Every OOXML and OpenDocument file is a zip underneath — which is exactly why "starts with PK"
+    // is not enough on its own. It made the archive refusal above decorative: identical PK-prefixed
+    // bytes were refused as application/zip and stored when declared as a .docx.
+    //
+    // A real OOXML package names its content types in a member called "[Content_Types].xml", and
+    // an OpenDocument package declares "mimetype" as its first member — both within the first local
+    // file header, so a prefix scan finds them without unzipping anything. A plain archive has
+    // neither.
     mimeTypes: [
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -173,6 +183,10 @@ const MAGIC_BYTES: Array<{
       "application/vnd.oasis.opendocument.spreadsheet",
     ],
     prefixes: [[0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06], [0x50, 0x4b, 0x07, 0x08]],
+    containing: {
+      withinBytes: 512,
+      anyOf: ["[Content_Types].xml", "mimetypeapplication/vnd.oasis.opendocument"],
+    },
   },
   {
     // Legacy .doc/.xls are OLE compound documents.
@@ -201,9 +215,17 @@ export function checkEvidenceContent(mimeType: string, bytes: Uint8Array): Uploa
         candidate.every((byte, index) => bytes[offset + index] === byte),
     );
 
+  const containsMarker = () => {
+    if (!rule.containing) return true;
+    // latin1 so byte values map to code points directly; these markers are ASCII.
+    const head = Buffer.from(bytes.subarray(0, rule.containing.withinBytes)).toString("latin1");
+    return rule.containing.anyOf.some((marker) => head.includes(marker));
+  };
+
   const matches =
     matchesAt(rule.offset ?? 0, rule.prefixes) &&
-    (!rule.also || matchesAt(rule.also.offset, rule.also.bytes));
+    (!rule.also || matchesAt(rule.also.offset, rule.also.bytes)) &&
+    containsMarker();
 
   if (!matches) {
     return {
