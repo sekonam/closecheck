@@ -34,6 +34,21 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
   let evidenceId: string;
   let storageKey: string;
 
+  /**
+   * Runs the real script. Note what callers must NOT assert on: the process exit code, except where
+   * this fixture's own condition forces it.
+   *
+   * The script scans every engagement in the database, and this suite shares one with every other
+   * spec. A leftover due engagement from another file — pointing at a temp storage root that no
+   * longer exists — makes the run report a missing document and exit non-zero, which has nothing to
+   * do with the case under test. Asserting `code === 0` therefore made these tests pass or fail on
+   * what else happened to be in the database, and they did: green in isolation, red in the full
+   * suite, green again on the next run. A global assertion cannot express a fixture-scoped claim.
+   *
+   * So the assertions below are scoped to this fixture's own row, its own file, and the script's
+   * own per-engagement summary line. Exit code is asserted only in the two cases where this
+   * fixture's condition guarantees it regardless of anything else present.
+   */
   async function purge(env: Record<string, string>, args: string[] = []) {
     try {
       const { stdout } = await run(
@@ -76,8 +91,10 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
   });
 
   it("deletes the file and its row together when everything lines up", async () => {
-    const { code, output } = await purge({ STORAGE_ROOT_DIR: storageRoot });
-    expect(code, output).toBe(0);
+    const { output } = await purge({ STORAGE_ROOT_DIR: storageRoot });
+
+    // This engagement's own summary line, not the global result.
+    expect(output, output).toMatch(new RegExp(`${org.orgId}[^\\n]*1 purged, 0 missing, 0 failed`));
     expect(existsSync(join(storageRoot, storageKey))).toBe(false);
     expect(await directPrisma.evidence.findUnique({ where: { id: evidenceId } })).toBeNull();
   });
@@ -92,8 +109,10 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
     try {
       const { code, output } = await purge({ STORAGE_ROOT_DIR: empty });
 
+      // Safe to assert: this fixture's own missing file forces a non-zero exit whatever else the
+      // database holds. Other rows can only reinforce it, never mask it.
       expect(code, "a run that purged nothing must not report success").not.toBe(0);
-      expect(output).toMatch(/MISSING/i);
+      expect(output).toMatch(new RegExp(`MISSING file for evidence ${evidenceId}`));
 
       const row = await directPrisma.evidence.findUnique({ where: { id: evidenceId } });
       expect(row, "the only pointer to the document was destroyed").not.toBeNull();
@@ -125,8 +144,10 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
       data: { dealStage: "POST_LOI" },
     });
 
-    const { code } = await purge({ STORAGE_ROOT_DIR: storageRoot });
-    expect(code).toBe(0);
+    const { output } = await purge({ STORAGE_ROOT_DIR: storageRoot });
+
+    // The engagement must not appear in the run at all — it is no longer eligible.
+    expect(output).not.toContain(org.orgId);
     expect(existsSync(join(storageRoot, storageKey))).toBe(true);
     expect(await directPrisma.evidence.findUnique({ where: { id: evidenceId } })).not.toBeNull();
   });
@@ -134,8 +155,8 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
   it("purges a dangling row only when explicitly told to", async () => {
     const empty = await mkdtemp(join(tmpdir(), "closecheck-empty2-"));
     try {
-      const { code } = await purge({ STORAGE_ROOT_DIR: empty }, ["--force-missing"]);
-      expect(code).toBe(0);
+      const { output } = await purge({ STORAGE_ROOT_DIR: empty }, ["--force-missing"]);
+      expect(output, output).toMatch(new RegExp(`${org.orgId}[^\\n]*1 purged`));
       expect(await directPrisma.evidence.findUnique({ where: { id: evidenceId } })).toBeNull();
     } finally {
       await rm(empty, { recursive: true, force: true });
