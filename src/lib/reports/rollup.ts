@@ -30,6 +30,24 @@ export interface FindingForRollup {
 export interface Coverage {
   rated: number;
   total: number;
+  /**
+   * Of the rated ones, how many are still IN_PROGRESS — a severity that nobody has confirmed.
+   *
+   * Tier A's automated checks write a status AND a severity in one pass, so a consultant who runs
+   * them and stops has findings that read as rated while their own notes say otherwise: "this is a
+   * fingerprint, not an assertion", "confirm patch status manually". Coverage counted every one of
+   * those, so an audit could report 7 of 11 rated with all seven awaiting a human.
+   *
+   * That is the same failure this field's parent was built to prevent, one level up: the docstring
+   * on RollupResult.perTierCoverage says a severity badge is a claim that something was checked,
+   * and a machine rating that asks to be checked is not yet that claim.
+   *
+   * Deliberately additive. `rated` keeps its meaning — a severity is present — and the roll-up
+   * reduction is untouched, because a provisional YELLOW is still a real signal a buyer should see
+   * and suppressing it would hide risk rather than qualify it. This says how much of the rating
+   * is still the machine's, and lets the surfaces say so.
+   */
+  provisional: number;
 }
 
 export interface RollupResult {
@@ -62,10 +80,16 @@ export interface RollupResult {
 export function computeSeverityRollup(findings: FindingForRollup[]): RollupResult {
   const byTier: Record<Tier, Severity[]> = { A: [], B: [], C: [] };
   const totalByTier: Record<Tier, number> = { A: 0, B: 0, C: 0 };
+  const provisionalByTier: Record<Tier, number> = { A: 0, B: 0, C: 0 };
   for (const f of findings) {
     if (f.status === "NOT_APPLICABLE") continue;
     totalByTier[f.templateItem.tier]++;
-    if (f.severity) byTier[f.templateItem.tier].push(f.severity);
+    if (f.severity) {
+      byTier[f.templateItem.tier].push(f.severity);
+      // Counted only where a severity exists: an IN_PROGRESS finding with no severity is simply
+      // unrated, which `rated` already says, and calling it provisional would double-report it.
+      if (f.status === "IN_PROGRESS") provisionalByTier[f.templateItem.tier]++;
+    }
   }
 
   const perTier: Record<Tier, Severity> = {
@@ -75,9 +99,9 @@ export function computeSeverityRollup(findings: FindingForRollup[]): RollupResul
   };
 
   const perTierCoverage: Record<Tier, Coverage> = {
-    A: { rated: byTier.A.length, total: totalByTier.A },
-    B: { rated: byTier.B.length, total: totalByTier.B },
-    C: { rated: byTier.C.length, total: totalByTier.C },
+    A: { rated: byTier.A.length, total: totalByTier.A, provisional: provisionalByTier.A },
+    B: { rated: byTier.B.length, total: totalByTier.B, provisional: provisionalByTier.B },
+    C: { rated: byTier.C.length, total: totalByTier.C, provisional: provisionalByTier.C },
   };
 
   return {
@@ -87,6 +111,7 @@ export function computeSeverityRollup(findings: FindingForRollup[]): RollupResul
     overallCoverage: {
       rated: byTier.A.length + byTier.B.length + byTier.C.length,
       total: totalByTier.A + totalByTier.B + totalByTier.C,
+      provisional: provisionalByTier.A + provisionalByTier.B + provisionalByTier.C,
     },
   };
 }

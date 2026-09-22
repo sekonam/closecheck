@@ -441,6 +441,20 @@ certificate rule stays readable against that rule rather than silently acquiring
   tracing it is exactly what a buyer's attorney or accountant does first. Every page after the cover
   carries a running header and a numbered footer, so a page detached from a printed diligence pack
   still says whose report it belongs to.
+- **Coverage says how much is rated AND how much of that a human has confirmed.** Tier A's
+  automated checks write a status and a severity in one pass, so an item can carry a severity while
+  its own note says "this is a fingerprint, not an assertion". Counting those as rated is true and
+  incomplete: coverage exists so a badge cannot silently mean "nothing was checked", and a machine
+  rating that asks to be checked is the same failure one level up. Measured against a live template
+  before this was added: seven of eleven Tier A items rated, every one of them the machine's, with
+  nothing anywhere saying so. So every place a coverage number appears — the audit workspace and
+  the report both — names how many ratings are still in progress.
+
+  The roll-up itself is deliberately untouched. A provisional Red is still Red: a machine finding a
+  domain expired is a real risk the buyer must see, and discounting it until someone ticks a box
+  would hide risk rather than qualify it. §6's worst-case rule does not depend on who did the
+  rating. This qualifies the count, never the severity — and like evidence coverage it is a signal,
+  not a gate, for the reasons recorded below.
 - **Severity encoding:** every severity is carried on three channels at once — color, the written
   word, and a shape that escalates (circle → diamond → triangle). A traffic light encoded only in
   hue is unreadable in a greyscale photocopy and to the ~8% of men with a red/green deficiency, and

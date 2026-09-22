@@ -454,7 +454,15 @@ function neutralBadge(label: string): string {
  * directly in this file again without checking coverage.rated first.
  */
 function badgeWithCoverage(severity: Severity, coverage: Coverage, size: "sm" | "md" = "sm"): string {
-  const coverageNote = `<span style="color:${MUTED_TEXT};font-size:11.5px;font-weight:400"> (${coverage.rated}/${coverage.total} rated)</span>`;
+  // Named in the deliverable, not only in the app. Tier A's automated checks write a status and a
+  // severity together, so an audit can present ratings the consultant has not confirmed — and the
+  // buyer is the one person who cannot tell the difference by looking. A count that says "of which
+  // N awaiting confirmation" costs a clause and keeps the number from overstating the work.
+  const awaiting =
+    coverage.provisional > 0
+      ? `, ${coverage.provisional} awaiting confirmation`
+      : "";
+  const coverageNote = `<span style="color:${MUTED_TEXT};font-size:11.5px;font-weight:400"> (${coverage.rated}/${coverage.total} rated${awaiting})</span>`;
   // total === 0 means every item here was marked NOT_APPLICABLE (computeSeverityRollup excludes
   // them from the denominator entirely) — that's a resolved state, not pending work, so it must
   // read differently from "Not yet rated" (total > 0, rated === 0) even though both cases have

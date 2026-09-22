@@ -217,12 +217,25 @@ export default async function AuditPage({
           )}
           <span className="text-xs text-slate-400">
             ({rollup.overallCoverage.rated}/{rollup.overallCoverage.total} rated
+            {rollup.overallCoverage.provisional > 0 &&
+              `, ${rollup.overallCoverage.provisional} awaiting confirmation`}
             {evidenceCoverage.overall.expected > 0 &&
               ` · ${evidenceCoverage.overall.supported}/${evidenceCoverage.overall.expected} evidenced`}
             )
           </span>
         </div>
       </div>
+
+      {rollup.overallCoverage.provisional > 0 && (
+        <p className="mt-3 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          {rollup.overallCoverage.provisional}{" "}
+          {rollup.overallCoverage.provisional === 1 ? "rating is" : "ratings are"} still marked in
+          progress — the automated checks rate an item and set its status in one pass, so these
+          carry a severity nobody has confirmed. Their own notes usually say what is left to do
+          (&ldquo;this is a fingerprint, not an assertion&rdquo;). They count as rated everywhere,
+          including in the report, so the number above overstates the work until you set a status.
+        </p>
+      )}
 
       {evidenceCoverage.unsupportedRatedCount > 0 && (
         <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
