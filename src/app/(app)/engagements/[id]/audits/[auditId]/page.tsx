@@ -11,6 +11,7 @@ import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSche
 import { StructuredFields } from "./StructuredFields";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
 import { PortalAccessHistory } from "./PortalAccessHistory";
+import { describeEvidence } from "@/lib/storage/describeEvidence";
 import { unavailableReason } from "@/lib/audit/blocking";
 import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
@@ -106,7 +107,13 @@ export default async function AuditPage({
         engagement: true,
         template: true,
         findings: {
-          include: { templateItem: true, evidence: { orderBy: { createdAt: "desc" } } },
+          include: {
+            templateItem: true,
+            evidence: {
+              orderBy: { createdAt: "desc" },
+              include: { uploadedBy: { select: { name: true, email: true } } },
+            },
+          },
           orderBy: { templateItem: { sortOrder: "asc" } },
         },
       },
@@ -532,13 +539,19 @@ export default async function AuditPage({
                     {finding.evidence.length > 0 && (
                       <ul className="mt-1.5 space-y-1">
                         {finding.evidence.map((e) => (
-                          <li key={e.id} className="flex items-center justify-between text-sm">
-                            <a
-                              href={`/api/evidence/${e.id}`}
-                              className="text-slate-600 underline hover:text-slate-900"
-                            >
-                              {e.text ?? "document"}
-                            </a>
+                          <li key={e.id} className="flex items-start justify-between gap-3 text-sm">
+                            <div className="min-w-0">
+                              <a
+                                href={`/api/evidence/${e.id}`}
+                                className="block truncate text-slate-600 underline hover:text-slate-900"
+                                title={e.text ?? undefined}
+                              >
+                                {e.label ?? e.text ?? "document"}
+                              </a>
+                              <div className="text-xs text-slate-400">
+                                {describeEvidence(e)}
+                              </div>
+                            </div>
                             <form action={deleteEvidenceAction}>
                               <input type="hidden" name="evidenceId" value={e.id} />
                               <button type="submit" className="text-xs text-slate-400 hover:text-red-600">
@@ -552,6 +565,11 @@ export default async function AuditPage({
                     <form action={attachEvidenceAction} className="mt-2 flex items-center gap-2">
                       <input type="hidden" name="findingId" value={finding.id} />
                       <input type="file" name="file" className="text-xs" />
+                      <input
+                        name="label"
+                        placeholder="Label (optional) — e.g. Toast MSA, executed"
+                        className="w-56 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      />
                       <button
                         type="submit"
                         className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"

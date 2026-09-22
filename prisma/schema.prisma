@@ -75,6 +75,8 @@ model User {
   role         UserRole      @default(OWNER)
   createdAt    DateTime      @default(now())
 
+  uploadedEvidence Evidence[]
+
   @@index([orgId])
   @@map("users")
 }
@@ -304,7 +306,31 @@ model Evidence {
   // Object storage key/URL, not inline bytes — spec.md §8 (encrypted at rest, access-controlled per
   // Engagement). Null for NOTE-kind evidence.
   storageKey String?
+  // The original filename, as uploaded. Doing double duty as the display label since the first
+  // migration; `label` below is the consultant's own name for it where they give one.
   text       String?
+  // Established at upload by src/lib/storage/uploadPolicy.ts, where both the declared type and the
+  // file's own magic bytes have to agree. Recorded rather than discarded so the appendix can say
+  // what a document actually is and how big it was — an appendix listing bare filenames is not
+  // something a buyer's advisor can check anything against.
+  mimeType   String?
+  sizeBytes  Int?
+  // Who attached it. spec.md §4's Tier C model rests on a NAMED professional attesting to what they
+  // saw, and "the consultant" is not a name when a firm has several. Nullable because every row
+  // written before this column existed has no answer, and inventing one would be worse.
+  uploadedById String?
+  uploadedBy   User?       @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  // The consultant's own short name for this document, where the filename isn't one
+  // ("Toast MSA, executed" beats "scan_0043.pdf").
+  label      String?
+  // Links this document to the specific structured claim it substantiates, as
+  // { fieldKey, page?, excerpt? } — see src/lib/audit/sourceRef.ts.
+  //
+  // This is what separates a diligence work product from a checklist export. "Transferable: no" is
+  // an assertion; "Transferable: no — §14.2, p.7 of toast-msa-2023.pdf: 'This Agreement may not be
+  // assigned…'" is a finding a buyer's counsel can verify without asking anyone. spec.md §2.1 says
+  // the report is the product, and this is the difference between the two.
+  sourceRef  Json?
   createdAt  DateTime      @default(now())
 
   @@index([orgId])

@@ -15,13 +15,18 @@ import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadP
  * docs/spec.md §8's retention/encryption requirements — this is a local-dev stand-in only).
  */
 export async function attachEvidence(formData: FormData): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const findingIdResult = z.string().min(1).safeParse(formData.get("findingId"));
   if (!findingIdResult.success) {
     throw new Error("Missing or invalid findingId.");
   }
   const findingId = findingIdResult.data;
   const file = formData.get("file");
+  // Optional: the consultant's own short name for the document. "Toast MSA, executed" is a better
+  // thing to read in an appendix than "scan_0043.pdf", and the filename is often not theirs to
+  // choose — it's whatever the seller's scanner produced.
+  const labelRaw = formData.get("label");
+  const label = typeof labelRaw === "string" && labelRaw.trim() !== "" ? labelRaw.trim().slice(0, 200) : null;
 
   if (!(file instanceof File) || file.size === 0) {
     // Nothing selected — treat as a no-op rather than an error, since this form shares a page with
@@ -90,6 +95,15 @@ export async function attachEvidence(formData: FormData): Promise<void> {
             : EvidenceKind.DOCUMENT,
         storageKey: key,
         text: file.name,
+        label,
+        // Both established by uploadPolicy, where the declared type and the file's own magic bytes
+        // had to agree. Recorded rather than discarded: an appendix that lists bare filenames
+        // gives a buyer's advisor nothing to check against.
+        mimeType: verdict.mimeType,
+        sizeBytes: file.size,
+        // spec.md §4's Tier C model rests on a named professional attesting to what they saw, and
+        // "the consultant" is not a name once a firm has more than one seat.
+        uploadedById: userId,
       },
     });
 

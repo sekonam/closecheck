@@ -75,11 +75,25 @@ otherwise report directly to the user as plain findings with file/line and concr
   already happened once. `assertClientFacingDescriptions` catches the obvious shapes; a reviewer
   should catch the rest.
 
+**Any change that reads the client's network address** (rate limiting, access logging, abuse
+controls):
+- Is it parsed with `clientAddressFrom` (`src/lib/api/rateLimit.ts`), or read straight off
+  `X-Forwarded-For`? The leftmost hop of that header is supplied by the client under every
+  appending proxy, so anything keyed on it is keyed on a value an attacker chooses. This has
+  already produced one real defect: a per-(email, address) sign-in budget intended to make lockout
+  impossible was defeated by presenting the victim's address and burning their budget.
+
 **Any change that makes an outbound network request from tenant-supplied input** (`spec.md` §8):
-- Does the host go through `src/lib/net/hostSafety.ts` before anything connects? Two paths already
-  take a user-controlled host and connect to it — the Tier A check runner
-  (`Engagement.primaryDomain`) and webhook delivery — and a third would be a server-side request
-  forgery primitive by default, not by mistake.
+- Does it go through `src/lib/net/safeFetch.ts`? Not `hostSafety.ts` — checking the host once and
+  then calling `fetch` is exactly the shape that shipped broken: the guard ran on the domain, and
+  both Tier A fetchers then followed redirects unchecked, so a public domain answering
+  `302 Location: http://169.254.169.254/...` was fetched anyway. The attacker controls hop two.
+  `safeFetch` checks every hop before fetching it and never follows automatically; `hostSafety` is
+  the predicate underneath it, correct but insufficient on its own. Two paths already take a
+  user-controlled host and connect to it — the Tier A check runner (`Engagement.primaryDomain`)
+  and webhook delivery — and a third would be a request-forgery primitive by default.
+- Refusing redirects outright (`redirect: "error"`, as webhook delivery does) is simpler and
+  better than validating them, wherever the caller doesn't genuinely need to follow one.
 - Is the *response* reflected back to the user? Tier A persists redirect chains, response headers
   and certificate subjects into a Finding, which turns a request-forgery bug into one with a read
   channel. A new check that echoes response content deserves more scrutiny than one that doesn't.
