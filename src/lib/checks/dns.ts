@@ -24,16 +24,49 @@ const KNOWN_NS_PROVIDERS: Array<{ pattern: RegExp; name: string }> = [
   { pattern: /shopify/i, name: "Shopify" },
 ];
 
+/**
+ * "No records of this type" and "the resolver failed" both produce an empty array, and collapsing
+ * them made every lookup look successful — `error` was structurally always null, so the runner's
+ * error branch was dead code and a resolver outage reported as "this domain publishes nothing",
+ * which is a false observation rather than a failed check.
+ *
+ * ENODATA and NXDOMAIN are genuine absences and stay absences; anything else is a failure and is
+ * reported as one.
+ */
+async function resolveOrFail<T>(lookup: Promise<T[]>, failures: string[]): Promise<T[]> {
+  try {
+    return await lookup;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENODATA" || code === "ENOTFOUND") return [];
+    failures.push(code ?? (err instanceof Error ? err.message : "lookup failed"));
+    return [];
+  }
+}
+
 export async function fingerprintDns(hostname: string): Promise<DnsFingerprint> {
   try {
+    const failures: string[] = [];
     const [nameservers, aRecords, mxRecords] = await Promise.all([
-      dns.resolveNs(hostname).catch(() => [] as string[]),
-      dns.resolve4(hostname).catch(() => [] as string[]),
-      dns
-        .resolveMx(hostname)
-        .then((records) => records.map((r) => r.exchange))
-        .catch(() => [] as string[]),
+      resolveOrFail(dns.resolveNs(hostname), failures),
+      resolveOrFail(dns.resolve4(hostname), failures),
+      resolveOrFail(
+        dns.resolveMx(hostname).then((records) => records.map((r) => r.exchange)),
+        failures,
+      ),
     ]);
+
+    if (failures.length > 0 && nameservers.length === 0 && aRecords.length === 0) {
+      // Only when nothing at all came back: a partial failure alongside real records is worth
+      // reporting as the records it did find, not as a failed lookup.
+      return {
+        nameservers,
+        aRecords,
+        mxRecords,
+        likelyProvider: null,
+        error: `DNS lookup failed (${[...new Set(failures)].join(", ")})`,
+      };
+    }
 
     const likelyProvider =
       KNOWN_NS_PROVIDERS.find((p) => nameservers.some((ns) => p.pattern.test(ns)))?.name ?? null;

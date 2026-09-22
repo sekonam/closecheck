@@ -26,19 +26,26 @@ export interface TierAResult {
  * explicit about what was actually observed, not an inferred conclusion the consultant didn't make.
  */
 /**
- * Whole days from now until `dateString`, rounded UP.
+ * Whole days from now until `dateString`, rounded DOWN.
  *
- * Deliberately ceil rather than floor. An expiry exactly 30 days away is 29.9998 days once the
- * arithmetic runs, and flooring reported "expires in 29 day(s)" and rated it Red — so the stated
- * 30/90-day boundaries actually fired at 29/89 and every number printed next to a closing date was
- * a day low. Rounding up also errs in the right direction for a deadline: it never tells a
- * consultant they have more time than they do.
+ * Floor, and the history is worth keeping because the correction went the wrong way once already.
+ * A review observed that an expiry "exactly 30 days out" prints as 29 and rated it Red, and called
+ * that an off-by-one. It isn't: 29.98 days remaining IS less than 30 days remaining, so Red is
+ * correct for a "fewer than 30 days" threshold, and 29 is the honest count of whole days left.
+ *
+ * Switching to ceil to satisfy that finding inverted three things at once. `Math.ceil(-0.2)` is
+ * `-0`, and `-0 < 0` is false, so a domain that expired in the last 24 hours skipped the expired
+ * branch entirely and printed "expires in 0 day(s)" in the future tense, losing the recovery
+ * guidance. The bands moved the wrong way: 29.2 days remaining printed as "30 days" and rated
+ * Yellow instead of Red. And it overstated time remaining — 89.2 days printed as 90 — which is the
+ * one direction a deadline count must never err in, and which the ceil version's own docstring
+ * claimed it avoided.
  */
 function daysUntil(dateString: string | null): number | null {
   if (!dateString) return null;
   const parsed = new Date(dateString);
   if (Number.isNaN(parsed.getTime())) return null;
-  return Math.ceil((parsed.getTime() - Date.now()) / 86_400_000);
+  return Math.floor((parsed.getTime() - Date.now()) / 86_400_000);
 }
 
 /**
@@ -154,7 +161,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
     return {
       status: FindingStatus.IN_PROGRESS,
       severity: Severity.YELLOW,
-      note: `Registration lookup did not complete automatically (${result.error}). Verify registrar, expiry and transfer status manually.`,
+      note: `Registration lookup did not complete automatically (${result.error}). Verify the registrar, the registrant of record, expiry and transfer status manually.`,
       structuredData,
     };
   }
@@ -165,7 +172,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
       severity: Severity.RED,
       note:
         `The registration is in a state that blocks or complicates transfer. Registrar: ` +
-        `${result.registrar ?? "unknown"}.${suffix}`,
+        `${result.registrar ?? "unknown"}.${registrant}${suffix}`,
       structuredData,
     };
   }
@@ -175,7 +182,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
     return {
       status: FindingStatus.IN_PROGRESS,
       severity: Severity.YELLOW,
-      note: `Registration data returned with no parseable expiry date. Registrar: ${result.registrar ?? "unknown"}. Verify manually.${suffix}`,
+      note: `Registration data returned with no parseable expiry date. Registrar: ${result.registrar ?? "unknown"}.${registrant} Verify the expiry manually.${suffix}`,
       structuredData,
     };
   }
@@ -187,7 +194,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
     return {
       status: FindingStatus.FAIL,
       severity: Severity.RED,
-      note: `The registration expired on ${result.expiryDate}, ${Math.abs(expiryDays)} day(s) ago. Registrar: ${result.registrar ?? "unknown"}. Establish whether it can still be recovered before the close.${suffix}`,
+      note: `The registration expired on ${result.expiryDate}, ${Math.abs(expiryDays)} day(s) ago. Registrar: ${result.registrar ?? "unknown"}.${registrant} Establish whether it can still be recovered before the close.${suffix}`,
       structuredData,
     };
   }
@@ -205,8 +212,8 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
       severity: Severity.YELLOW,
       note:
         (expiryDays < 90
-          ? `Domain expires in ${expiryDays} day(s) (${result.expiryDate}). Registrar: ${result.registrar ?? "unknown"}. Confirm who is responsible for renewal post-close.`
-          : `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).`) + suffix,
+          ? `Domain expires in ${expiryDays} day(s) (${result.expiryDate}). Registrar: ${result.registrar ?? "unknown"}.${registrant} Confirm who is responsible for renewal post-close.`
+          : `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).${registrant}`) + suffix,
       structuredData,
     };
   }
@@ -269,7 +276,19 @@ async function runDnsFingerprint(domain: string): Promise<TierAResult> {
  */
 function isCertificateVerdict(error: string | null): boolean {
   if (!error) return false;
-  return /certificate|cert_|self[- ]signed|unable to verify|hostname\/ip does not match|wrong version number|handshake failure|alert/i.test(
+
+  // Excluded FIRST, because several of these contain words the inclusion list matches. These are
+  // transport and protocol failures, not statements about the certificate: an old server that
+  // cannot negotiate a modern TLS version, or a TLS connection to a plaintext port. Rating them
+  // Red asserted a certificate defect that was never observed — and these are exactly the failure
+  // modes of the legacy servers this product's target businesses tend to run.
+  if (/protocol version|wrong version number|handshake failure|internal error|unexpected message|decode error|record layer|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|socket hang up|timed out|Not checked:/i.test(error)) {
+    return false;
+  }
+
+  // Curated, not a loose keyword match. `/certificate/` alone made a DNS failure for a host called
+  // "certificates.example.com" into a certificate verdict, because the hostname is in the message.
+  return /(certificate|cert) has expired|CERT_HAS_EXPIRED|self[- _]signed certificate|SELF_SIGNED_CERT|unable to verify the first certificate|UNABLE_TO_VERIFY|hostname\/ip does not match|ERR_TLS_CERT_ALTNAME_INVALID|certificate is not yet valid|CERT_NOT_YET_VALID|certificate revoked|CERT_REVOKED|unable to get (local )?issuer certificate|UNABLE_TO_GET_ISSUER|depth zero self[- _]signed|DEPTH_ZERO_SELF_SIGNED_CERT|certificate chain too long|CERT_CHAIN_TOO_LONG|certificate signature failure|no certificate presented/i.test(
     error,
   );
 }
@@ -312,6 +331,29 @@ export function certificateLifetimeRemaining(
 const CERT_RENEWAL_FRACTION = 1 / 3;
 /** Half of the renewal window gone by, i.e. one sixth of lifetime left — renewal is now overdue. */
 const CERT_OVERDUE_FRACTION = 1 / 6;
+
+/**
+ * Absolute ceilings on those proportional windows.
+ *
+ * The proportional rule alone inverted the bug it was written to fix. Replacing a fixed 14/30-day
+ * rule stopped a healthy six-day certificate rating Red — and then made every commercial one-year
+ * certificate Red inside its final ~66 days and Yellow inside its final ~133. Measured live: a
+ * valid DigiCert certificate on quickbooks.intuit.com with 45 days to run rated Red, which under
+ * spec.md §6's worst-item rule turns an entire audit Red for a target doing nothing wrong.
+ *
+ * So the window is whichever is SHORTER: a proportion of the certificate's own lifetime, or a
+ * plain number of days. On a six-day certificate the proportion governs (two days left is fine, as
+ * v4's rubric says); on a one-year certificate the day count governs (thirty days out is fine,
+ * as every commercial renewal process assumes). Both ends behave.
+ *
+ * NOTE FOR THE NEXT TEMPLATE REVISION: v4's severityGuidance for this item says to rate on
+ * proportion of lifetime and calls a day count "vendor folklore". That is right for short-lived
+ * automated certificates and wrong for long-lived manual ones, so the guidance now understates
+ * what the runner does. It should be corrected in the next revision rather than the code being
+ * bent back to match it.
+ */
+const CERT_RENEWAL_MAX_DAYS = 30;
+const CERT_OVERDUE_MAX_DAYS = 14;
 /**
  * Tolerance around those lines, so a certificate sitting exactly on one is not rated by a rounding
  * error.
@@ -390,19 +432,28 @@ async function runSslCheck(domain: string): Promise<TierAResult> {
 
   if (remaining) {
     const lifetime = `on a ${remaining.lifetimeDays}-day certificate`;
-    if (remaining.fraction < CERT_OVERDUE_FRACTION - CERT_FRACTION_TOLERANCE) {
+    const daysLeft = result.daysUntilExpiry ?? remaining.fraction * remaining.lifetimeDays;
+    // Whichever window is shorter — see the constants above for why both are needed.
+    const renewalDays = Math.min(remaining.lifetimeDays * CERT_RENEWAL_FRACTION, CERT_RENEWAL_MAX_DAYS);
+    const overdueDays = Math.min(remaining.lifetimeDays * CERT_OVERDUE_FRACTION, CERT_OVERDUE_MAX_DAYS);
+    const tolerance = remaining.lifetimeDays * CERT_FRACTION_TOLERANCE;
+
+    if (daysLeft < overdueDays - tolerance) {
       return {
         status: FindingStatus.FAIL,
         severity: Severity.RED,
-        note: `Renewal is overdue: ${daysNote} ${lifetime} (${result.validTo}), well past the point an automated renewal would have run. Issuer: ${result.issuer ?? "unknown"}. Ask who is responsible for renewing it.`,
+        // Naming the window that actually governed. Saying "past one third of lifetime" when the
+        // day ceiling is what fired would be a false statement about why — 25 days left on a
+        // 366-day certificate is nowhere near its one-third point.
+        note: `Renewal is overdue: ${daysNote} ${lifetime} (${result.validTo}), inside the ${Math.round(overdueDays)}-day mark where renewal should already have happened. Issuer: ${result.issuer ?? "unknown"}. Ask who is responsible for renewing it.`,
         structuredData,
       };
     }
-    if (remaining.fraction < CERT_RENEWAL_FRACTION - CERT_FRACTION_TOLERANCE) {
+    if (daysLeft < renewalDays - tolerance) {
       return {
         status: FindingStatus.IN_PROGRESS,
         severity: Severity.YELLOW,
-        note: `${daysNote} ${lifetime} (${result.validTo}) — past the one-third-of-lifetime point where an automated renewal normally runs. Issuer: ${result.issuer ?? "unknown"}. Confirm renewal is automated and who owns it.`,
+        note: `${daysNote} ${lifetime} (${result.validTo}) — inside the ${Math.round(renewalDays)}-day window where renewal would normally have run. Issuer: ${result.issuer ?? "unknown"}. Confirm renewal is automated and who owns it.`,
         structuredData,
       };
     }
@@ -614,7 +665,7 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
   // Only state what was actually obtained. With no HTTPS response there is no header to have
   // observed, and "No HSTS header observed" asserted an observation that never happened.
   const hstsNote = !result.httpsReachable
-    ? "HSTS could not be checked — the HTTPS endpoint did not respond."
+    ? "HSTS could not be checked — no usable HTTPS response was obtained."
     : result.hstsHeader
       ? `HSTS header present (${result.hstsHeader}).`
       : "No HSTS header observed.";
@@ -625,7 +676,11 @@ async function runHttpsHygiene(domain: string): Promise<TierAResult> {
     return {
       status: FindingStatus.FAIL,
       severity: Severity.RED,
-      note: `http://${domain} redirects to HTTPS (${result.httpRedirectChain.join(" → ")}), but the HTTPS endpoint did not respond — visitors following that redirect reach nothing. ${hstsNote}`,
+      // "Did not respond" is the honest phrasing only when nothing answered. A server that
+      // answered and was rejected on its certificate DID respond, and the certificate item already
+      // says so — counting one root cause as two Reds and misstating the second is worse than
+      // silence.
+      note: `http://${domain} redirects to HTTPS (${result.httpRedirectChain.join(" → ")}), but the HTTPS endpoint could not be reached over a trusted connection — visitors following that redirect do not arrive. ${hstsNote}`,
       structuredData,
     };
   }

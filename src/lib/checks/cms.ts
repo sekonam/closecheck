@@ -14,7 +14,18 @@ const CMS_SIGNATURES: Array<{ name: string; test: (html: string, headers: Header
   { name: "Squarespace", test: (html) => /squarespace\.com/i.test(html) },
   { name: "Webflow", test: (html) => /webflow\.com/i.test(html) },
   { name: "Weebly", test: (html) => /weebly\.com/i.test(html) },
-  { name: "WooCommerce", test: (html) => /woocommerce/i.test(html) },
+  {
+    // Not a bare /woocommerce/i: modern WordPress core ships the string "WooCommerceBlocksEnabled"
+    // whether or not WooCommerce is installed, so the loose match reported a payment surface on
+    // sites that have none — verified against wordpress.org and techcrunch.com, neither of which
+    // runs it. Listing every matched signature in the note turned that latent false positive into
+    // a printed claim to a buyer, so it needs to be right rather than indicative.
+    name: "WooCommerce",
+    test: (html) =>
+      /wp-content\/plugins\/woocommerce|woocommerce\.min\.(js|css)|class=["'][^"']*woocommerce-page/i.test(
+        html,
+      ),
+  },
   { name: "Toast (restaurant POS/ordering)", test: (html) => /toasttab\.com/i.test(html) },
   { name: "Clover", test: (html) => /clover\.com/i.test(html) },
 ];
@@ -75,3 +86,6 @@ export async function fingerprintCms(url: string, timeoutMs = 8000): Promise<Cms
     };
   }
 }
+
+/** Exposed for tests: the signature list is content, and content nothing verifies drifts. */
+export const __cmsSignaturesForTests = CMS_SIGNATURES;
