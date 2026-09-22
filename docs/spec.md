@@ -200,7 +200,35 @@ written relative to an expected close date that does not exist in the data model
 in v5. The general obligation this creates: **an automated item's rubric either matches the runner
 or says explicitly what the automated rating could not see.** The second is a legitimate answer —
 the close-date gap is stated rather than closed, because closing it would mean inventing a date the
-consultant never gave us — but silence is not. The harder half of
+consultant never gave us — but silence is not.
+
+**An automated pass says what it checked (decision, template v6).** v5 made the rule and then broke
+it by omission: its scope was set by the two divergences that had been noticed, and three more sat
+unexamined in the same template. Those three were worse, because they ended in a *confirmed* pass
+rather than a disagreement — the DNS and mail-provider checks returned a finished Green having
+identified a provider, while their rubrics reserve Green for accounts the seller can demonstrate
+control of and that are on the asset schedule. A target whose DNS sat with an agency outside the
+sale, which those rubrics call **Red**, produced the same confirmed Green as one where control had
+been proved.
+
+Two things follow, and the second is the one that generalises.
+
+*What an automated check may claim.* Where a rubric requires something no automated check can
+observe, the item states what the automated pass covered, and the runner returns a rating marked in
+progress rather than finished — so it counts as awaiting confirmation in §6's coverage rather than
+as a completed rating. The severity is not reduced: what was observed is genuinely unremarkable, and
+downgrading it would invent a concern rather than state a gap. On a clean domain six of the seven
+automated items now read as awaiting confirmation, and only the certificate check reports a finished
+pass, because everything its threshold turns on is inside the certificate. That ratio is the honest
+description of what Tier A is — fingerprinting public records that a consultant connects to the deal
+— and presenting most of it as finished was the overstatement.
+
+*Why the comparison is now enforced rather than remembered.* `src/lib/audit/rubricAlignment.ts`
+records, for every automated check, what the runner can determine and what its rubric asks beyond
+that; the suite fails when a runner has no judgement recorded, when an item admitting a gap does not
+state it in the published rubric, or when such an item claims a finished pass. Writing it caught two
+entries that broke the rule stated in its own docstring, which is how a rule that lives only in a
+docstring goes. The harder half of
 the same rule, and the one that makes this content defensible: **where no authoritative source
 exists, the item says so and gives the consultant the reasoning and the retrieval method instead of a
 number.** The domain-expiry threshold is stated as *this firm's* basis, with the derivation shown and
@@ -388,7 +416,7 @@ type-specific items:
 vertical in the source research) fully built, and the base tier structure factored so the remaining
 three are additive, not rewrites. See `roadmap.md` Phase 2 for sequencing.
 
-**Status:** all four Templates now exist, published at **v5**, ahead of the design-partner deal-flow
+**Status:** all four Templates now exist, published at **v6**, ahead of the design-partner deal-flow
 evidence the MVP-scope decision above called for (`roadmap.md` Phase 2's matching note). That
 decision's reasoning is kept rather than deleted, per this project's convention: it was the right
 call on the evidence available, and the risk it was managing — templates built without observed deal
