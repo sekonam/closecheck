@@ -5,6 +5,7 @@ import {
   includedAuditsPerYear,
   maxSeatsForPlan,
   planForPriceIds,
+  resolveSubscriptionPlan,
   seatPriceIdForPlan,
 } from "./config";
 import { billableSeatQuantity } from "./seats";
@@ -154,5 +155,62 @@ describe("the regression that motivated this module", () => {
     expect(teamMonthlyTotal(1)).toBe(3500);
     expect(teamMonthlyTotal(2)).toBe(6000);
     expect(teamMonthlyTotal(5)).toBe(13500);
+  });
+});
+
+describe("resolveSubscriptionPlan", () => {
+  /**
+   * The case that had no coverage at all, and that cost a real customer a dead end: a Team org with
+   * ONE member has no seat line (there are seats-1 of them), so its subscription is byte-identical
+   * to Solo. Recorded as Solo, its seat cap then refused the first invite and told the owner to
+   * switch to a Team plan — which checkout refused, because a subscription already existed.
+   */
+  it("classifies a one-person Team subscription as Team, from metadata", () => {
+    expect(resolveSubscriptionPlan(["price_solo_m"], "TEAM_MONTHLY")).toBe(BillingPlan.TEAM_MONTHLY);
+    expect(resolveSubscriptionPlan(["price_solo_a"], "TEAM_ANNUAL")).toBe(BillingPlan.TEAM_ANNUAL);
+  });
+
+  it("lets a seat line outrank stale metadata", () => {
+    // Metadata is written at checkout and never rewritten, so a plan changed through Stripe's own
+    // billing portal leaves it describing the old plan. A seat line is proof of what is being
+    // billed right now, so it wins.
+    expect(resolveSubscriptionPlan(["price_solo_m", "price_seat_m"], "SOLO_MONTHLY")).toBe(
+      BillingPlan.TEAM_MONTHLY,
+    );
+  });
+
+  it("falls back to the price lines when there is no metadata at all", () => {
+    // Every subscription created before the metadata existed is in this state.
+    expect(resolveSubscriptionPlan(["price_solo_m"], undefined)).toBe(BillingPlan.SOLO_MONTHLY);
+    expect(resolveSubscriptionPlan(["price_solo_a", "price_seat_a"], null)).toBe(BillingPlan.TEAM_ANNUAL);
+  });
+
+  /**
+   * Prisma generates the enum as a plain object with Object.prototype on its chain, so
+   * `"constructor" in BillingPlan` is TRUE. An `in` check — which is what this originally used —
+   * passed inherited members straight through as a plan, and the Object constructor then went into
+   * a Prisma write that rejects it, producing a webhook that 500s and retries forever.
+   */
+  it("rejects inherited Object members that an `in` check would have accepted", () => {
+    for (const hostile of ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"]) {
+      expect(resolveSubscriptionPlan(["price_solo_m"], hostile)).toBe(BillingPlan.SOLO_MONTHLY);
+    }
+  });
+
+  it("ignores a bogus or wrongly-cased declared plan", () => {
+    expect(resolveSubscriptionPlan(["price_solo_m"], "BOGUS")).toBe(BillingPlan.SOLO_MONTHLY);
+    expect(resolveSubscriptionPlan(["price_solo_m"], "solo_monthly")).toBe(BillingPlan.SOLO_MONTHLY);
+    expect(resolveSubscriptionPlan(["price_solo_m"], "")).toBe(BillingPlan.SOLO_MONTHLY);
+  });
+
+  it("returns null when it recognises nothing", () => {
+    expect(resolveSubscriptionPlan([], undefined)).toBeNull();
+    expect(resolveSubscriptionPlan(["price_from_another_stripe_account"], undefined)).toBeNull();
+  });
+
+  it("still resolves a plan when only metadata is recognisable", () => {
+    // A price rotated in the dashboard without the env being updated: the lines mean nothing here,
+    // but the org's plan is not therefore unknown.
+    expect(resolveSubscriptionPlan(["price_rotated"], "TEAM_ANNUAL")).toBe(BillingPlan.TEAM_ANNUAL);
   });
 });

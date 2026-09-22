@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { BillingPlan, BillingStatus } from "@prisma/client";
+import { BillingStatus, type BillingPlan } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { getStripe } from "@/lib/billing/stripe";
-import { planForPriceIds } from "@/lib/billing/config";
+import { resolveSubscriptionPlan } from "@/lib/billing/config";
 import { grantPlanCreditsIfDue } from "@/lib/billing/credits";
 import { sendEmail } from "@/lib/email/send";
 import { receipt } from "@/lib/email/templates";
@@ -56,15 +56,10 @@ function mapStatus(stripeStatus: Stripe.Subscription.Status): BillingStatus {
  * order — for subscriptions created before the metadata existed.
  */
 function planFromSubscription(subscription: Stripe.Subscription): BillingPlan | null {
-  const declared = subscription.metadata?.plan;
-  if (declared && declared in BillingPlan) {
-    return BillingPlan[declared as keyof typeof BillingPlan];
-  }
-
   const priceIds = subscription.items.data
     .map((item) => item.price?.id)
     .filter((id): id is string => !!id);
-  return planForPriceIds(priceIds);
+  return resolveSubscriptionPlan(priceIds, subscription.metadata?.plan);
 }
 
 async function orgIdFromCustomer(stripe: Stripe, customerId: string): Promise<string | null> {

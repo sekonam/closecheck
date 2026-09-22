@@ -138,24 +138,93 @@ describe("clientAddressFrom — X-Forwarded-For is only trusted as far as the pr
     expect(clientAddressFrom(req())).toBe("unknown");
     expect(clientAddressFrom(undefined)).toBe("unknown");
   });
+
+  /**
+   * A short X-Forwarded-For means the request did not traverse the expected infrastructure —
+   * someone reached the origin directly, past the CDN. Falling through to x-real-ip there hands the
+   * address back to the caller, because nginx only overwrites X-Real-IP when explicitly configured
+   * to, so a direct connection can set both headers itself.
+   */
+  it("does not fall back to x-real-ip when the forwarded chain is too short", () => {
+    process.env.TRUSTED_PROXY_HOPS = "2";
+    const address = clientAddressFrom(
+      req({ "x-forwarded-for": "1.1.1.1", "x-real-ip": "198.51.100.4" }),
+    );
+    expect(address).toBe("unknown");
+  });
+
+  it("does not fall back to x-real-ip when the forwarded header is present but empty", () => {
+    process.env.TRUSTED_PROXY_HOPS = "1";
+    expect(clientAddressFrom(req({ "x-forwarded-for": ",,,", "x-real-ip": "198.51.100.4" }))).toBe("unknown");
+    expect(clientAddressFrom(req({ "x-forwarded-for": "   ", "x-real-ip": "198.51.100.4" }))).toBe("unknown");
+  });
+
+  it("still honours x-real-ip when no forwarded header is sent at all", () => {
+    // A proxy that sets X-Real-IP and not XFF is a real configuration, and there the value is
+    // proxy-set rather than appended.
+    process.env.TRUSTED_PROXY_HOPS = "1";
+    expect(clientAddressFrom(req({ "x-real-ip": "3.3.3.3" }))).toBe("3.3.3.3");
+  });
 });
 
-describe("the focused-guessing budget survives a flood of API buckets", () => {
+describe("the per-address budget never becomes a platform-wide lockout", () => {
   /**
-   * Eviction used to run in Map insertion order. Sign-in failure counters live 15 minutes against
-   * the API's one, so they were always the oldest entries and therefore the first evicted — a
-   * flood of short-lived API buckets flushed exactly the budget meant to survive an attack.
+   * This budget HARD-REJECTS before the password is checked. If every caller shares one bucket —
+   * which is exactly what an unknown address means, and what TRUSTED_PROXY_HOPS=0 guarantees for
+   * every request — then thirty requests a minute from one host would make sign-in return null for
+   * every user on the deployment. A one-line denial of service against the whole product.
    */
-  it("keeps a recorded failure after ten thousand unrelated keys pass through", () => {
+  it("does not apply when the address carries no information", () => {
+    process.env.AUTH_RATE_LIMIT_PER_MINUTE_ADDRESS = "3";
+    for (let i = 0; i < 50; i++) {
+      expect(addressAttemptAllowed("unknown")).toBe(true);
+    }
+  });
+
+  it("still applies normally to a real address", () => {
+    process.env.AUTH_RATE_LIMIT_PER_MINUTE_ADDRESS = "3";
+    expect(addressAttemptAllowed("203.0.113.9")).toBe(true);
+    expect(addressAttemptAllowed("203.0.113.9")).toBe(true);
+    expect(addressAttemptAllowed("203.0.113.9")).toBe(true);
+    expect(addressAttemptAllowed("203.0.113.9")).toBe(false);
+  });
+});
+
+describe("the two budgets cannot evict each other", () => {
+  /**
+   * The API limiter and the sign-in limiter used to share one map, which made them adversaries in
+   * whichever direction the eviction policy favoured. Insertion order evicted the long-lived
+   * sign-in buckets first, so an API flood flushed the budget meant to survive an attack;
+   * soonest-expiry eviction inverted it, making sign-in buckets the most privileged entries so a
+   * flood of THOSE evicted every tenant's API budget. Both directions are reachable — a failed
+   * sign-in mints a bucket keyed on an arbitrary email whether the account exists or not.
+   *
+   * They are separate stores now, so neither test below can be satisfied by a lucky eviction order.
+   * Both floods deliberately exceed MAX_TRACKED_KEYS (10,000), which forces a real prune rather
+   * than being throttled away — the previous version of this test flooded 12,000 keys in 6ms, was
+   * throttled out of pruning entirely, and passed while evicting nothing.
+   */
+  it("keeps a recorded sign-in failure through an API flood large enough to force eviction", () => {
     const victim = "victim@firm.test";
     const address = "203.0.113.9";
     for (let i = 0; i < 3; i++) recordFailedSignIn(victim, address);
     expect(focusedGuessingAllowed(victim, address)).toBe(false);
 
-    for (let i = 0; i < 12_000; i++) {
-      checkRateLimit(`ip:flood-${i}`, { limit: 120 });
-    }
+    for (let i = 0; i < 12_000; i++) checkRateLimit(`ip:flood-${i}`, { limit: 120 });
 
     expect(focusedGuessingAllowed(victim, address)).toBe(false);
+  });
+
+  it("keeps a tenant's API budget through a sign-in flood large enough to force eviction", () => {
+    const tenantKey = "key:paying-customer";
+    checkRateLimit(tenantKey, { limit: 5 });
+    checkRateLimit(tenantKey, { limit: 5 });
+
+    // Each of these mints a long-lived bucket on an arbitrary email — free for an attacker, since
+    // the account need not exist.
+    for (let i = 0; i < 12_000; i++) recordFailedSignIn(`nobody-${i}@nowhere.test`, "203.0.113.9");
+
+    // The tenant has spent 2 of 5; if their bucket had been evicted this would report 4 remaining.
+    expect(checkRateLimit(tenantKey, { limit: 5 }).remaining).toBe(2);
   });
 });

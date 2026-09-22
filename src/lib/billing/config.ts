@@ -1,4 +1,4 @@
-import type { BillingPlan } from "@prisma/client";
+import { BillingPlan } from "@prisma/client";
 
 /**
  * Billing configuration, docs/roadmap.md Phase 2.5 / spec.md §9 (revised 2026-09-21).
@@ -90,6 +90,39 @@ export function planForPriceIds(priceIds: readonly string[]): BillingPlan | null
 
 export function planForPriceId(priceId: string): BillingPlan | null {
   return planForPriceIds([priceId]);
+}
+
+/**
+ * The plan a subscription is actually on, from its price lines plus the plan recorded in its
+ * metadata at checkout.
+ *
+ * Neither input is sufficient alone, which is why this exists as one function rather than a
+ * precedence rule scattered across the webhook:
+ *
+ * - **Price lines cannot see a one-person Team.** A Team subscription is the base price plus one
+ *   seat line per seat beyond the first, so a Team org with a single member has no seat line and is
+ *   byte-identical to Solo. Inference alone recorded such an org as Solo and then dead-ended it.
+ * - **Metadata goes stale.** It is written at checkout and never rewritten, so a plan changed
+ *   through Stripe's own billing portal leaves it describing the old plan.
+ *
+ * So a seat line wins when present — it is proof, and it reflects what is being billed right now —
+ * and metadata is consulted only for the genuinely ambiguous no-seat-line case.
+ *
+ * `declaredPlan` is validated with Object.values().includes(), never `in`: Prisma generates the
+ * enum as a plain object with Object.prototype on its chain, so `"constructor" in BillingPlan` is
+ * true and an `in` check would pass inherited members straight through as a plan.
+ */
+export function resolveSubscriptionPlan(
+  priceIds: readonly string[],
+  declaredPlan: string | null | undefined,
+): BillingPlan | null {
+  const inferred = planForPriceIds(priceIds);
+  if (inferred && isTeam(inferred)) return inferred;
+
+  if (declaredPlan && (Object.values(BillingPlan) as string[]).includes(declaredPlan)) {
+    return declaredPlan as BillingPlan;
+  }
+  return inferred;
 }
 
 /**

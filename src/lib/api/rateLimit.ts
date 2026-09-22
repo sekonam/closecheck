@@ -24,7 +24,27 @@ import { NextResponse } from "next/server";
 
 type Bucket = { count: number; resetAt: number };
 
-const buckets = new Map<string, Bucket>();
+/**
+ * Two stores, not one, each with its own cap and its own eviction.
+ *
+ * A single shared map made the two budgets adversaries. Sign-in failure buckets live fifteen
+ * minutes against the API's one, so under insertion-order eviction they were always the oldest and
+ * an API flood flushed them; correcting that to evict-by-soonest-expiry inverted the problem, since
+ * the long-lived sign-in buckets then became the most privileged entries in the map and a flood of
+ * them would evict every legitimate tenant's API budget instead — resetting exactly the protection
+ * the API limiter exists to provide. That second direction is reachable, because a failed sign-in
+ * mints a bucket keyed on an arbitrary email string whether or not the account exists.
+ *
+ * Partitioning removes the whole class rather than choosing which side loses. Neither budget can
+ * consume the other's capacity no matter how it is flooded.
+ */
+const apiBuckets = new Map<string, Bucket>();
+const authBuckets = new Map<string, Bucket>();
+
+/** Sign-in keys (see src/lib/auth/rateLimit.ts) live in their own store. */
+function storeFor(key: string): Map<string, Bucket> {
+  return key.startsWith("login:") ? authBuckets : apiBuckets;
+}
 
 export const DEFAULT_WINDOW_MS = 60_000;
 
@@ -42,32 +62,33 @@ function apiLimitPerWindow(): number {
 const MAX_TRACKED_KEYS = 10_000;
 
 /** Full scans are O(n); doing one on every call turned a full map into an amplifier, making every
- * request walk 10,000 entries. Once per second is ample for a minute-wide window. */
+ * request walk 10,000 entries. Once per second is ample for budgets a minute or more wide. */
 const PRUNE_INTERVAL_MS = 1_000;
-let lastPruneAt = 0;
+const lastPrunedAt = new WeakMap<Map<string, Bucket>, number>();
 
-function prune(now: number, force: boolean): void {
-  if (!force && now - lastPruneAt < PRUNE_INTERVAL_MS) return;
-  lastPruneAt = now;
-
-  for (const [key, bucket] of buckets) {
-    if (bucket.resetAt <= now) buckets.delete(key);
+function prune(store: Map<string, Bucket>, now: number): void {
+  // Deliberately the real clock, not the caller-supplied `now`. Tests inject `now` to drive window
+  // arithmetic, and letting that also drive the throttle meant a test using a fixed or backwards
+  // timestamp silently disabled pruning — which is how a regression test for eviction came to pass
+  // while evicting nothing.
+  const wall = Date.now();
+  if (wall - (lastPrunedAt.get(store) ?? 0) < PRUNE_INTERVAL_MS && store.size <= MAX_TRACKED_KEYS) {
+    return;
   }
-  if (buckets.size <= MAX_TRACKED_KEYS) return;
+  lastPrunedAt.set(store, wall);
+
+  for (const [key, bucket] of store) {
+    if (bucket.resetAt <= now) store.delete(key);
+  }
+  if (store.size <= MAX_TRACKED_KEYS) return;
 
   /**
    * Still over budget after dropping expired entries: an active flood of distinct keys. Evict the
-   * entries that expire SOONEST, not the ones inserted earliest.
-   *
-   * Insertion order was actively dangerous here. Sign-in failure counters are long-lived by design
-   * (a 15-minute window against the API's one minute), so they were always the oldest entries in
-   * the map and therefore first to be evicted — meaning a flood of short-lived API buckets flushed
-   * exactly the budget that is meant to survive an attack. Evicting by soonest-expiry inverts that:
-   * the short-lived API buckets go first, which is also the cheapest thing to lose.
+   * entries that expire soonest — the cheapest thing to lose, since they were about to go anyway.
    */
-  const byExpiry = [...buckets.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
+  const byExpiry = [...store.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt);
   for (let i = 0; i < byExpiry.length - MAX_TRACKED_KEYS; i++) {
-    buckets.delete(byExpiry[i][0]);
+    store.delete(byExpiry[i][0]);
   }
 }
 
@@ -103,12 +124,13 @@ function resolve(options: RateLimitOptions): { now: number; limit: number; windo
 
 export function checkRateLimit(key: string, options: RateLimitOptions = {}): RateLimitResult {
   const { now, limit, windowMs } = resolve(options);
-  prune(now, false);
+  const store = storeFor(key);
+  prune(store, now);
 
-  const existing = buckets.get(key);
+  const existing = store.get(key);
   const bucket = existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + windowMs };
   bucket.count++;
-  buckets.set(key, bucket);
+  store.set(key, bucket);
 
   const allowed = bucket.count <= limit;
   return {
@@ -127,7 +149,7 @@ export function checkRateLimit(key: string, options: RateLimitOptions = {}): Rat
  */
 export function peekRateLimit(key: string, options: RateLimitOptions = {}): boolean {
   const { now, limit } = resolve(options);
-  const bucket = buckets.get(key);
+  const bucket = storeFor(key).get(key);
   if (!bucket || bucket.resetAt <= now) return true;
   return bucket.count < limit;
 }
@@ -135,13 +157,15 @@ export function peekRateLimit(key: string, options: RateLimitOptions = {}): bool
 /** Drops a key's budget entirely — used when a sign-in succeeds, so a legitimate user who mistyped
  * their password a few times does not carry those failures forward. */
 export function clearRateLimit(key: string): void {
-  buckets.delete(key);
+  storeFor(key).delete(key);
 }
 
 /** Test seam only — the module-level Map would otherwise carry state between test cases. */
 export function resetRateLimitState(): void {
-  buckets.clear();
-  lastPruneAt = 0;
+  apiBuckets.clear();
+  authBuckets.clear();
+  lastPrunedAt.delete(apiBuckets);
+  lastPrunedAt.delete(authBuckets);
 }
 
 export function rateLimitHeaders(result: RateLimitResult): Record<string, string> {
@@ -189,17 +213,20 @@ export function clientAddressFrom(request: Request | undefined): string {
   if (trusted === 0) return "unknown";
 
   const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) {
+  if (forwarded !== null) {
     const parts = forwarded.split(",").map((p) => p.trim()).filter(Boolean);
-    // Fewer hops present than configured means the header did not pass through the expected
-    // infrastructure. Trusting the leftmost value here is what the whole comment above warns
-    // against, so refuse to guess and fall back to the shared bucket.
-    const candidate = parts.length >= trusted ? parts[parts.length - trusted] : undefined;
-    if (candidate) return candidate;
+    // Fewer hops present than configured means the request did not traverse the expected
+    // infrastructure — someone reached the origin directly, past the CDN. Everything about that
+    // header is then hearsay, INCLUDING falling through to x-real-ip: nginx only overwrites
+    // X-Real-IP when explicitly told to, so a direct connection can set both. Returning the shared
+    // bucket here is the whole point; an earlier version's fallback quietly handed the attacker
+    // back the ability to choose their own address, and with it the victim-lockout weapon.
+    return parts.length >= trusted ? parts[parts.length - trusted] : "unknown";
   }
 
-  // x-real-ip is set by the proxy and not appended to, so it is not forgeable the same way — but
-  // it is only meaningful if a proxy is actually in front, which `trusted > 0` asserts.
+  // No X-Forwarded-For at all. A proxy that sets X-Real-IP and not XFF is a real configuration, and
+  // in it X-Real-IP is proxy-set rather than appended, so it is trustworthy to exactly the degree
+  // the operator's `trusted > 0` claim is.
   return request.headers.get("x-real-ip")?.trim() || "unknown";
 }
 

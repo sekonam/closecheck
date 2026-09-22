@@ -125,38 +125,78 @@ export async function syncSeatQuantity(orgId: string): Promise<void> {
      * a paid API. The last write still lands, and the next membership change re-syncs.
      */
     const MAX_PASSES = 3;
+    let lastPassError: unknown = null;
+
     for (let pass = 0; pass < MAX_PASSES; pass++) {
       const seats = await withOrgScope(orgId, (tx) => countSeats(tx, orgId));
       const quantity = billableSeatQuantity(seats);
 
-      const subscription = await stripe.subscriptions.retrieve(account.stripeSubscriptionId);
-      const seatItem = subscription.items.data.find((item) => item.price?.id === seatPriceId);
+      try {
+        const subscription = await stripe.subscriptions.retrieve(account.stripeSubscriptionId);
 
-      if (!seatItem) {
-        if (quantity > 0) {
-          await stripe.subscriptionItems.create({
-            subscription: subscription.id,
-            price: seatPriceId,
-            quantity,
-            // Seats are added and removed mid-cycle; proration is the honest default — the firm
-            // pays for the part of the period each seat actually existed for.
-            proration_behavior: "create_prorations",
-          });
+        // Plural on purpose. Two syncs that both observed no seat line can both create one, and
+        // `find` would then only ever update the first while the second kept billing — silently
+        // double-charging every extra seat, forever. Collapsing duplicates here is cheap and makes
+        // that unrecoverable state self-correcting.
+        const seatItems = subscription.items.data.filter((item) => item.price?.id === seatPriceId);
+        for (const duplicate of seatItems.slice(1)) {
+          await stripe.subscriptionItems.del(duplicate.id, { proration_behavior: "create_prorations" });
         }
-      } else if (seatItem.quantity !== quantity) {
-        if (quantity === 0) {
-          await stripe.subscriptionItems.del(seatItem.id, { proration_behavior: "create_prorations" });
-        } else {
-          await stripe.subscriptionItems.update(seatItem.id, {
-            quantity,
-            proration_behavior: "create_prorations",
-          });
+        const seatItem = seatItems[0];
+
+        if (!seatItem) {
+          if (quantity > 0) {
+            await stripe.subscriptionItems.create({
+              subscription: subscription.id,
+              price: seatPriceId,
+              quantity,
+              // Seats are added and removed mid-cycle; proration is the honest default — the firm
+              // pays for the part of the period each seat actually existed for.
+              proration_behavior: "create_prorations",
+            });
+          }
+        } else if (seatItem.quantity !== quantity) {
+          if (quantity === 0) {
+            await stripe.subscriptionItems.del(seatItem.id, { proration_behavior: "create_prorations" });
+          } else {
+            await stripe.subscriptionItems.update(seatItem.id, {
+              quantity,
+              proration_behavior: "create_prorations",
+            });
+          }
         }
+      } catch (err) {
+        /**
+         * Retry rather than abandon. The catch used to sit outside this loop, so any Stripe error
+         * ended the whole sync — and the most likely error here is precisely the one a retry fixes:
+         * a concurrent sync deleted the seat item between this pass's retrieve and its update, so
+         * the update hits `resource_missing`. Giving up there leaves Stripe holding a quantity that
+         * does not match the seat count, with nothing scheduled to correct it. The next pass
+         * re-retrieves the subscription and sees the current truth.
+         */
+        lastPassError = err;
+        continue;
       }
 
       const settled = await withOrgScope(orgId, (tx) => countSeats(tx, orgId));
       if (settled === seats) return;
     }
+
+    /**
+     * Passes exhausted. Convergence holds within the bound, but past it the LAST write is not
+     * guaranteed to be the settled one, so Stripe may hold a stale quantity — and unlike the
+     * mid-loop case nothing will re-run on its own until the next membership change. Record it so
+     * it is visible in scripts/ops-error-triage.ts rather than being an invisible billing drift.
+     */
+    void recordError(
+      "billing-seat-sync-unsettled",
+      lastPassError instanceof Error
+        ? lastPassError
+        : new Error(
+            `Seat count kept changing across ${MAX_PASSES} sync passes; Stripe may hold a stale quantity for org ${orgId}.`,
+          ),
+      { orgId },
+    );
   } catch (err) {
     void recordError("billing-seat-sync", err instanceof Error ? err : new Error(String(err)), { orgId });
   }

@@ -55,10 +55,22 @@ first "Apply Blueprint" click are yours.
    This prints `DATABASE_URL`, `AUTH_DATABASE_URL`, `SIGNUP_DATABASE_URL`, `PORTAL_DATABASE_URL`,
    and `API_DATABASE_URL` once, to your terminal only. Copy each into the matching env var on the Render web service, then
    clear your terminal scrollback.
-7. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
+7. **Set `TRUSTED_PROXY_HOPS` to the number of reverse proxies in front of the service.** One for
+   Render, Fly, or a single nginx — which is the default, and is already pinned explicitly in
+   `render.yaml`. Set it to `0` only if the app is reachable directly with nothing in front.
+
+   This is small and load-bearing. Every rate limit — the read-only API's, and both of sign-in's —
+   keys on the client address, read from `X-Forwarded-For` counting this many hops from the right.
+   Set too high, and legitimate callers collapse into one shared bucket. Set too low, and the value
+   a caller supplies in that header is trusted: they can evade their own budget, and can present
+   someone else's address to burn that person's sign-in budget and lock them out of their own
+   account. That was a real vulnerability in this codebase (fixed 2026-09-22), and the fix depends
+   entirely on this number matching the deployment.
+
+8. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
    domain, once attached).
-8. **Redeploy.** The app should now serve real traffic.
-9. **Seed the templates, then publish every template version in order.** Required — without the
+9. **Redeploy.** The app should now serve real traffic.
+10. **Seed the templates, then publish every template version in order.** Required — without the
    seed, no active `Template` row exists for any slug and every `createAudit` call fails. The
    publish steps are new template versions (`docs/spec.md` §5 versioning rules; in-progress audits
    stay pinned to the version they started on).
@@ -90,7 +102,7 @@ first "Apply Blueprint" click are yours.
 
    `NODE_ENV=production` skips seeding the local dev login (`dev@closecheck.local`) — production
    accounts come from `/signup` instead.
-10. **Backfill retention dates on any pre-existing engagements** (one-off, only relevant when
+11. **Backfill retention dates on any pre-existing engagements** (one-off, only relevant when
     deploying over a database that already holds data — skip on a fresh install):
     ```
     DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/backfill-retention-dates.ts
@@ -101,7 +113,7 @@ first "Apply Blueprint" click are yours.
     before the retention default existed keep their documents indefinitely — nobody would ever
     re-save them, so nothing else would set a date (`docs/spec.md` §8).
 
-11. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
+12. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
     create an engagement, start an audit, run Tier A checks, generate a report.
 
 ## Ongoing deploys

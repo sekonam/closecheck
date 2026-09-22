@@ -77,8 +77,25 @@ function failureOptions() {
 
 export { clientAddressFrom };
 
-/** Spends from the per-address budget. Call first, before any database or bcrypt work. */
+/**
+ * Spends from the per-address budget. Call first, before any database or bcrypt work.
+ *
+ * Returns true unconditionally when the address is unknown, and that is deliberate. An unknown
+ * address means every anonymous caller shares one bucket — which is fine for the API limiter, where
+ * exhausting it costs the caller their own requests, and catastrophic here, where this budget
+ * HARD-REJECTS before the password is checked. Thirty requests a minute from a single host would
+ * make sign-in return null for every user on the deployment: a one-line denial of service against
+ * the whole product. That is reachable whenever TRUSTED_PROXY_HOPS is 0, and for any individual
+ * request arriving without the expected headers.
+ *
+ * So when the address carries no information, this budget simply does not apply. Anti-spray
+ * protection genuinely is lost in that configuration — an operator running without a proxy cannot
+ * have address-based limiting, because there is no trustworthy address — but the focused
+ * (email, address) failure budget still bounds guessing against any one account, which is the
+ * property that actually protects users.
+ */
 export function addressAttemptAllowed(address: string): boolean {
+  if (address === "unknown") return true;
   return checkRateLimit(`login:addr:${address}`, {
     limit: budget("AUTH_RATE_LIMIT_PER_MINUTE_ADDRESS", DEFAULT_PER_ADDRESS),
   }).allowed;

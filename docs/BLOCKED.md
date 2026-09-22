@@ -32,6 +32,14 @@ zero. The chain works.
   `STRIPE_WEBHOOK_SECRET` from it. **This needs a deployed public URL first — see item 3.**
 - Run one real charge and one real refund, in live mode, and confirm the receipt email arrives.
 
+**One thing to check in the Stripe dashboard while you are there:** the customer billing portal's
+configuration should NOT allow subscription plan switching. The app records which plan an org bought
+in the subscription's metadata at checkout, and a plan changed through the portal does not rewrite
+it. A seat line on the subscription still overrides stale metadata (`resolveSubscriptionPlan` in
+`src/lib/billing/config.ts`), so a Team plan is always recognised correctly — but a Team-to-Solo
+downgrade made in the portal would leave the org recorded as Team. Plan changes are meant to go
+through the app's own checkout. The portal is for payment methods and invoices.
+
 **Do not** flip `BILLING_ENFORCEMENT=true` before that. Enforcement is what starts blocking audits
 and marking overages billable; it ships dark deliberately (`releases.md` §5).
 
