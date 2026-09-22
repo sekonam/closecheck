@@ -1,4 +1,13 @@
-import { Severity, Tier } from "@prisma/client";
+import { CheckMethod, Severity, Tier } from "@prisma/client";
+import {
+  formatFieldValue,
+  hasAnyFieldValue,
+  parseFieldSchema,
+  readPersistedValues,
+  type ColumnDef,
+  type FieldDef,
+  type ItemFieldSchema,
+} from "@/lib/templates/fieldSchema";
 import { computeSeverityRollup, type Coverage, type FindingForRollup } from "./rollup";
 import { REPORT_DISCLAIMER_TEXT } from "./disclaimer";
 
@@ -6,9 +15,28 @@ export interface ReportFinding extends FindingForRollup {
   id: string;
   note: string | null;
   status: string;
+  /**
+   * Whatever was captured for this finding, in one of three shapes — see `structuredFields` below,
+   * which is the only thing in this file that reads it. Never rendered raw.
+   */
   structuredData?: unknown;
   evidenceCount?: number;
-  templateItem: { tier: Tier; title: string; description: string | null };
+  /**
+   * Deliberately a narrow projection of TemplateItem rather than the row itself: `guidance` and
+   * `severityGuidance` are INTERNAL methodology (see prisma/schema.prisma's TemplateItem — they are
+   * the product's IP and were split out of `description` precisely because internal text had leaked
+   * into a client deliverable). `description` is the only client-facing string on that row, and
+   * nothing in this file may render any field not named here.
+   */
+  templateItem: {
+    tier: Tier;
+    title: string;
+    description: string | null;
+    /** Template v3+. Absent on v1/v2 items and on Tier A automated ones. */
+    fieldSchema?: unknown;
+    /** Absent in older callers; treated as MANUAL. See `structuredFields`. */
+    method?: CheckMethod;
+  };
 }
 
 export interface AppendixDocument {
@@ -256,6 +284,13 @@ const PRINT_STYLES = `
   .page-break-after { break-after: page; page-break-after: always; }
   .keep-together { break-inside: avoid; page-break-inside: avoid; }
   tr { break-inside: avoid; page-break-inside: avoid; }
+  /* The one deliberate exception to the rule above, for a finding row carrying a long structured
+     table (the recurring-SaaS inventory routinely runs 5-15 rows). Such a row cannot fit on one
+     page, and an un-honourable "avoid" is worse than no rule: Chromium abandons it and breaks
+     wherever it likes, including through a row of the inner table. Letting the OUTER row break
+     keeps the inner <tr>s' own avoid-rule honourable, so the table paginates between rows with its
+     <thead> repeated, and no row is ever split across the page boundary. */
+  tr.allow-break { break-inside: auto; page-break-inside: auto; }
   thead { display: table-header-group; }
   tfoot { display: table-footer-group; }
   h2, h3 { break-after: avoid; page-break-after: avoid; }
@@ -298,7 +333,7 @@ export function renderReportHtml(data: ReportData): string {
     .map((tier) => {
       const items = byTier[tier];
       if (items.length === 0) return "";
-      const rows = items.map((f) => findingRow(f)).join("");
+      const rows = items.map((f) => findingRow(f, accent)).join("");
 
       return `
       <section style="margin-top:26px">
@@ -563,17 +598,225 @@ function overrideSection(
     </div>`;
 }
 
-function findingRow(f: ReportFinding): string {
-  const structured = (f.structuredData ?? null) as
-    | { transferable?: string | null; penaltyAmount?: string | null; penaltyBasis?: string | null }
-    | null;
-  const structuredParts = structured
-    ? [
-        structured.transferable ? `Transferable: ${escapeHtml(structured.transferable)}` : null,
-        structured.penaltyAmount ? `Penalty: ${escapeHtml(structured.penaltyAmount)}` : null,
-        structured.penaltyBasis ? `Basis: ${escapeHtml(structured.penaltyBasis)}` : null,
-      ].filter((v): v is string => Boolean(v))
-    : [];
+// ---------------------------------------------------------------------------
+// Structured findings (spec.md §4 Tier B: "turn 'here's a PDF contract' into a structured,
+// comparable finding ... rather than just storing an attachment")
+// ---------------------------------------------------------------------------
+
+/**
+ * Template v1/v2's entire structured model: three fixed keys, written by the pre-v3 audit form onto
+ * findings whose item title matched a `/contract/i` regex. v3 replaced this with per-item declared
+ * schemas (src/lib/templates/fieldSchema.ts), but a Report is a historical document and an Audit
+ * stays pinned to the Template version it started on (spec.md §5) — so findings in this shape are
+ * still rendered today, from a template row that has no `fieldSchema` to read labels from.
+ *
+ * The labels are hardcoded here because there is nowhere else to get them; the values are printed
+ * verbatim because v1/v2 captured them as free text ("$4,800", "3 months' fees") and never
+ * canonicalised them — running them through the money formatter would invent precision the data
+ * does not have.
+ */
+const LEGACY_STRUCTURED_FIELDS: { key: string; label: string }[] = [
+  { key: "transferable", label: "Transfers to the buyer" },
+  { key: "penaltyAmount", label: "Early-termination penalty" },
+  { key: "penaltyBasis", label: "Penalty basis" },
+];
+
+/**
+ * Above this many rows in a single structured table, the finding's row in the tier table is allowed
+ * to break across pages (see PRINT_STYLES' `tr.allow-break`). Chosen so a table that plausibly fits
+ * beside its finding still travels with it, while the 5-15-row inventories stop forcing an
+ * unsatisfiable keep-together.
+ */
+const KEEP_TOGETHER_MAX_TABLE_ROWS = 6;
+
+/** One label/value pair, ready for `definitionList`. */
+interface RenderedField {
+  label: string;
+  /** Already-escaped HTML. */
+  html: string;
+}
+
+/**
+ * The three shapes `Finding.structuredData` can hold, resolved explicitly rather than by accident —
+ * each one is a different era of the product and they coexist in live data:
+ *
+ *  1. SCHEMA-DRIVEN (template v3+, manual items). The item declares `fieldSchema` and the values are
+ *     keyed by it. Rendered from the declared labels/kinds, money and percent formatted through
+ *     `formatFieldValue` so "12000" prints as $12,000.00.
+ *  2. LEGACY (template v1/v2 items). No `fieldSchema` on the item; the three keys above. Still
+ *     rendered — a Report generated from an old audit must not silently lose content it used to
+ *     show (spec.md §5/§6).
+ *  3. TIER A AUTOMATED OUTPUT. No `fieldSchema` either, but the JSON here is a check runner's raw
+ *     result object (src/lib/audit/tierA.ts writes e.g. `{registrar, expiryDate, nameservers}`).
+ *     It has none of the legacy keys, so it falls through both paths above and renders NOTHING —
+ *     which is the behaviour before this change, and the right one: the finding's note already
+ *     states what the check observed, in a sentence a buyer can read. Never dump this JSON.
+ *
+ * The method guard mirrors the audit form's (src/app/(app)/.../page.tsx): `structuredData` doubles
+ * as the automated runner's output store, so a schema is honoured on manual items only.
+ */
+function structuredFields(f: ReportFinding, accent: string): string {
+  const schema =
+    f.templateItem.method === CheckMethod.AUTOMATED ? null : parseFieldSchema(f.templateItem.fieldSchema);
+
+  // Path 1.
+  if (schema) return schemaDrivenFields(schema, f.structuredData, accent);
+
+  // Paths 2 and 3.
+  return legacyStructuredFields(f.structuredData);
+}
+
+/** Path 1: values keyed by the item's own declared schema. */
+function schemaDrivenFields(schema: ItemFieldSchema, raw: unknown, accent: string): string {
+  const values = readPersistedValues(schema, raw);
+  if (!hasAnyFieldValue(values)) return "";
+
+  const scalars: RenderedField[] = [];
+  const tables: string[] = [];
+
+  // Schema declaration order, not object-key order: the schema is how the consultant was asked for
+  // these facts, and a buyer reading the item should meet them in the same sequence.
+  for (const field of schema.fields) {
+    const value = values[field.key];
+    // A field the consultant left blank is absent from `values` (readPersistedValues drops empties)
+    // and must not print as an empty row.
+    if (value === undefined) continue;
+
+    if (field.kind === "table") {
+      if (Array.isArray(value) && value.length > 0) tables.push(fieldTable(field, value, accent));
+      continue;
+    }
+    const formatted = formatFieldValue(field, value);
+    if (formatted.trim() === "") continue;
+    scalars.push({
+      label: field.label,
+      html:
+        field.kind === "longtext"
+          ? // Preserve the consultant's own paragraphing in a quoted clause or an observation;
+            // everything else is a single short value.
+            `<span style="white-space:pre-line">${escapeHtml(formatted)}</span>`
+          : escapeHtml(formatted),
+    });
+  }
+
+  return `${definitionList(scalars)}${tables.join("")}`;
+}
+
+/** Paths 2 and 3: no declared schema. Legacy keys render; anything else (Tier A output) does not. */
+function legacyStructuredFields(raw: unknown): string {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return "";
+  const source = raw as Record<string, unknown>;
+
+  const fields: RenderedField[] = [];
+  for (const { key, label } of LEGACY_STRUCTURED_FIELDS) {
+    const value = source[key];
+    if (typeof value !== "string" || value.trim() === "") continue;
+    fields.push({ label, html: escapeHtml(value) });
+  }
+  return definitionList(fields);
+}
+
+/**
+ * The labelled definition list both paths render scalars into. Previously these were joined into a
+ * single grey run-on line ("Transferable: yes · Penalty: 4800 · Basis: …"), which put the label and
+ * the value in the same weight and colour and stopped being readable at more than three fields —
+ * v3 items declare up to eight.
+ *
+ * A two-column table rather than a `<dl>`: the print rules that keep a label with its value
+ * (`tr { break-inside: avoid }`) and repeat headers across pages are table rules, and this file's
+ * whole layout convention is inline-styled tables for exactly that reason.
+ */
+function definitionList(fields: RenderedField[]): string {
+  if (fields.length === 0) return "";
+  const rows = fields
+    .map(
+      (f) => `
+              <tr>
+                <th scope="row" style="text-align:left;padding:3px 12px 3px 0;font-size:11.5px;font-weight:600;color:${MUTED_TEXT};vertical-align:top;width:38%">${escapeHtml(f.label)}</th>
+                <td style="padding:3px 0;font-size:12.5px;color:#334155;vertical-align:top">${f.html}</td>
+              </tr>`,
+    )
+    .join("");
+  return `
+            <table style="width:100%;border-collapse:collapse;margin-top:6px">
+              <tbody>${rows}</tbody>
+            </table>`;
+}
+
+/**
+ * A `table`-kind field: the consultant's rows under the column labels the schema declares.
+ *
+ * The recurring-SaaS inventory (spec.md §4: "structured table the consultant fills from
+ * seller-provided list") is the reason this exists, and it routinely runs 5-15 rows — long enough
+ * to cross a page boundary, which is why the header is a real `<thead>` (repeated on each page by
+ * PRINT_STYLES' `display: table-header-group`, so a continued table is never a grid of unlabelled
+ * values) and every body row carries the avoid-break rule.
+ */
+function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: string): string {
+  const columns = field.columns ?? [];
+  if (columns.length === 0) return "";
+
+  // Numbers right-align so a column of costs can be read down as a column of costs.
+  const align = (c: ColumnDef): string => (c.kind === "money" || c.kind === "percent" ? "right" : "left");
+  // Atomic values — an amount or an ISO date — are never worth breaking across two lines; seen in a
+  // rendered PDF as a term-end column reading "2027-02-" / "28". Free text still wraps.
+  const wrap = (c: ColumnDef): string =>
+    c.kind === "money" || c.kind === "percent" || c.kind === "date" ? "white-space:nowrap;" : "";
+
+  const head = columns
+    .map(
+      (c) => `
+                <th style="text-align:${align(c)};padding:4px 8px;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1;white-space:nowrap">${escapeHtml(c.label)}</th>`,
+    )
+    .join("");
+
+  const body = rows
+    .map((row) => {
+      const cells = columns
+        .map((c) => {
+          const raw = row[c.key];
+          // An empty cell in an otherwise-filled row is a real, meaningful blank — the consultant
+          // did not know. It prints as a blank cell, not as a dropped column.
+          const value =
+            raw === undefined || raw === "" ? "" : escapeHtml(formatFieldValue(columnAsField(c), raw));
+          return `<td style="text-align:${align(c)};${wrap(c)}padding:4px 8px;font-size:11.5px;color:#334155;border-bottom:1px solid #e2e8f0;vertical-align:top">${value}</td>`;
+        })
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return `
+            <div style="margin-top:8px">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${MUTED_TEXT};font-weight:600">${escapeHtml(field.label)}</div>
+              <table style="width:100%;border-collapse:collapse;margin-top:4px;border:1px solid #cbd5e1">
+                <thead><tr style="background:${accentWash(accent, 0.07)}">${head}</tr></thead>
+                <tbody>${body}</tbody>
+              </table>
+            </div>`;
+}
+
+/** A table column is a scalar field in everything but name — formatted by the same rules, so a
+ * money column prints like a money field rather than as a bare "12000". */
+function columnAsField(column: ColumnDef): FieldDef {
+  return { key: column.key, label: column.label, kind: column.kind, options: column.options };
+}
+
+/** Total rows across every table field a finding will render — decides whether the finding's row in
+ * the tier table can still be kept on one page. */
+function structuredTableRowCount(f: ReportFinding): number {
+  if (f.templateItem.method === CheckMethod.AUTOMATED) return 0;
+  const schema = parseFieldSchema(f.templateItem.fieldSchema);
+  if (!schema) return 0;
+  const values = readPersistedValues(schema, f.structuredData);
+  return schema.fields.reduce((total, field) => {
+    const value = values[field.key];
+    return field.kind === "table" && Array.isArray(value) ? total + value.length : total;
+  }, 0);
+}
+
+function findingRow(f: ReportFinding, accent: string): string {
+  const structuredBlock = structuredFields(f, accent);
 
   // A NOT_APPLICABLE finding never presents a severity badge, whatever severity value is still
   // sitting on the row. computeSeverityRollup (rollup.ts) excludes these findings from both the
@@ -591,13 +834,17 @@ function findingRow(f: ReportFinding): string {
   // the right-hand column at all.
   const rail = severity ? SEVERITY_COLOR[severity] : "#cbd5e1";
 
+  // Only the description is client-facing (see the ReportFinding docstring): guidance and
+  // severityGuidance are internal methodology and are not even carried on this type.
+  const rowClass = structuredTableRowCount(f) > KEEP_TOGETHER_MAX_TABLE_ROWS ? "allow-break" : "keep-together";
+
   return `
-        <tr class="keep-together" style="border-bottom:1px solid #e2e8f0">
+        <tr class="${rowClass}" style="border-bottom:1px solid #e2e8f0">
           <td style="padding:9px 12px;vertical-align:top;width:72%;border-left:4px solid ${rail}">
             <div style="font-weight:600">${escapeHtml(f.templateItem.title)}</div>
             ${f.templateItem.description ? `<div style="color:${NEUTRAL_TEXT};font-size:12.5px;margin-top:2px">${escapeHtml(f.templateItem.description)}</div>` : ""}
             ${f.note ? `<div style="margin-top:6px;font-size:12.5px;color:#334155"><em>Finding:</em> ${escapeHtml(f.note)}</div>` : ""}
-            ${structuredParts.length > 0 ? `<div style="margin-top:4px;font-size:12px;color:${NEUTRAL_TEXT}">${structuredParts.join(" · ")}</div>` : ""}
+            ${structuredBlock}
             ${f.evidenceCount ? `<div style="margin-top:4px;font-size:12px;color:#0369a1">${f.evidenceCount} document${f.evidenceCount === 1 ? "" : "s"} attached</div>` : ""}
           </td>
           <td style="padding:9px 12px;text-align:right;vertical-align:top">
