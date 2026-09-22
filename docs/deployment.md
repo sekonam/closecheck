@@ -58,13 +58,32 @@ first "Apply Blueprint" click are yours.
 7. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
    domain, once attached).
 8. **Redeploy.** The app should now serve real traffic.
-9. **Seed the templates** (required — without this, no active `Template` row exists for any slug and
-   every `createAudit` call fails), then publish the Phase 4 Tier A expansion versions
-    (`docs/spec.md` §13.1 — new template versions, in-progress audits stay pinned):
+9. **Seed the templates, then publish every template version in order.** Required — without the
+   seed, no active `Template` row exists for any slug and every `createAudit` call fails. The
+   publish steps are new template versions (`docs/spec.md` §5 versioning rules; in-progress audits
+   stay pinned to the version they started on).
+
+   **Run all three, in this order.** Each builds on the content the previous one published, and a
+   publish script refuses to run if no active version exists yet:
    ```
    NODE_ENV=production DATABASE_URL="<the rotated production DATABASE_URL>" DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config prisma/seed.ts
    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-tierA-expansion.ts
+   DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/publish-evidence-depth.ts
    ```
+   All three are idempotent: each checks whether the active version already carries its change and
+   prints "Skipping" rather than publishing a duplicate, so re-running after a partial failure is
+   safe.
+
+   **Then verify you actually landed on v3**, because stopping short fails in a way that looks like
+   a broken feature rather than a missing step:
+   ```
+   DIRECT_DATABASE_URL="<external connection string>" psql "$DIRECT_DATABASE_URL" -c 'SELECT slug, version FROM templates WHERE "isActive";'
+   ```
+   Every row must read version 3. An install that stops at v2 has the current application code but
+   templates whose items declare no structured-field schema, so every Tier B/C item silently falls
+   back to note-only capture — the consultant sees a product that appears to have lost its evidence
+   capture, with nothing in the logs to say why.
+
    `NODE_ENV=production` skips seeding the local dev login (`dev@closecheck.local`) — production
    accounts come from `/signup` instead.
 10. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
@@ -76,6 +95,20 @@ Every subsequent push runs `preDeployCommand` (`prisma migrate deploy`) automati
 version takes traffic — no manual steps needed unless a migration adds a new narrow-privilege role
 (rare; five roles exist today — app/auth/signup/portal/api), which would need step 6 repeated for
 the new role.
+
+## Local development: restart the dev server after a schema change
+
+`next dev` does not reload the generated Prisma client. Running `prisma migrate dev` or
+`prisma generate` updates `node_modules/.prisma/client` on disk, but a dev server started before
+that keeps the old client in memory for the life of the process — so every query touching a new
+column fails with `Unknown argument \`<field>\``, naming a field that demonstrably exists in both
+the schema and the database.
+
+It reads exactly like a broken migration and is not one. `npx prisma migrate status` will say the
+database is up to date, the column will be present in `information_schema.columns`, and the same
+query will succeed from any fresh process — which is what makes it cost an hour the first time.
+**Restart the dev server.** This affects local development only; production and CI both start from a
+fresh build.
 
 ## Known gaps this runbook does not solve
 
