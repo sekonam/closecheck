@@ -30,7 +30,8 @@
     "db:publish-evidence-depth": "tsx -r dotenv/config scripts/publish-evidence-depth.ts",
     "db:backfill-retention-dates": "tsx -r dotenv/config scripts/backfill-retention-dates.ts",
     "db:backfill-notapplicable-severity": "tsx -r dotenv/config scripts/backfill-notapplicable-severity.ts",
-    "db:publish-evidence-backed-thresholds": "tsx -r dotenv/config scripts/publish-evidence-backed-thresholds.ts"
+    "db:publish-evidence-backed-thresholds": "tsx -r dotenv/config scripts/publish-evidence-backed-thresholds.ts",
+    "db:publish-runner-aligned-thresholds": "tsx -r dotenv/config scripts/publish-runner-aligned-thresholds.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1137.0",
