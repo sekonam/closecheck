@@ -87,9 +87,18 @@ jobs:
         # skipping if one is absent, so this is a hard prerequisite, not a convenience.
         run: npm run db:seed
 
-      # These are the tenant-isolation checks. They run BEFORE the app is even built: if row-level
-      # security or the narrow role grants are wrong, nothing else about this run matters.
-      # docs/spec.md §8 calls isolation the one thing that cannot ship broken.
+      - name: Publish template versions
+        # Every published version, in order, exactly as docs/deployment.md step 9 instructs — not
+        # just the seed. Two reasons this is not redundant. It exercises the publish scripts and the
+        # version-pinning rules on every push, which is the machinery that protects an in-flight
+        # audit from having its findings change underneath it (spec.md §5) and which nothing else
+        # here covers. And it makes CI's data match what a real deployment has, so a test cannot
+        # pass against v1 template content while production runs v4.
+        run: |
+          npm run db:publish-tiera-expansion
+          npm run db:publish-evidence-depth
+          npm run db:publish-evidence-backed-thresholds
+
       - name: Verify row-level security
         run: npm run db:verify-rls
       - name: Verify signup and portal role privileges
