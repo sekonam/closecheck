@@ -96,6 +96,14 @@ this product holds.
   `X-Content-Type-Options: nosniff`, a `default-src 'none'` content-security policy, and
   `Cache-Control: private, no-store`. A seller's document is content this product neither authored
   nor can vouch for; it is never rendered inline in the application's own origin.
+- **Those protections are one decision, not four.** Every route that returns stored bytes — an
+  evidence download, the consultant's report PDF, the buyer's portal PDF, the firm's logo — builds
+  its headers from a single module that sets `nosniff`, `private` caching and a no-index tag and
+  does not let a caller opt out. This followed from finding that the logo route had none of the
+  three while the other three had all of them, with nothing to signal the difference: read alone,
+  every route's headers looked deliberate. The content-security policy is deliberately *not*
+  applied everywhere, because its `sandbox` directive is what would stop a buyer's browser
+  rendering the PDF the portal shows them inline.
 - **Retention is tied to the engagement lifecycle.** A deal reaching a terminal stage (closed or
   dead) schedules deletion after 90 days by default, which the consultant can move. Reviving a deal
   clears the schedule. A purge job deletes the files and requires the engagement still be terminal.
