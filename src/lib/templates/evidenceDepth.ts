@@ -803,9 +803,21 @@ const V3_CHANGE_NOTE =
 
 export { V3_CHANGE_NOTE };
 
+/**
+ * `Object.hasOwn`, not `in`. These registries are plain object literals, so `in` walks the prototype
+ * chain: an item titled `constructor`, `toString` or `valueOf` tested true against RETIRED_ITEMS and
+ * was SILENTLY DROPPED from the published template — no error and no coverage failure, because
+ * dropping is exactly what enrich() does for a retired item. The consultant's checklist would simply
+ * have been one item shorter than the one that was authored. `ENRICHMENTS[item.title]` had the
+ * mirror of it, returning a function that would then be spread over the item.
+ *
+ * Titles are product-authored, so this needed an authoring accident to fire. Closed anyway: the cost
+ * is one lookup, and "someone would have to name an item that" is the same argument that failed
+ * three times in one day.
+ */
 function enrich(item: TemplateItemInput): TemplateItemInput | null {
-  if (item.title in RETIRED_ITEMS) return null;
-  const enrichment = ENRICHMENTS[item.title];
+  if (Object.hasOwn(RETIRED_ITEMS, item.title)) return null;
+  const enrichment = Object.hasOwn(ENRICHMENTS, item.title) ? ENRICHMENTS[item.title] : undefined;
   return enrichment ? { ...item, ...enrichment } : item;
 }
 
@@ -827,7 +839,7 @@ export function assertEnrichmentCoverage() {
   ].map((item) => item.title);
 
   const missing = [...new Set(allV2Titles)].filter(
-    (title) => !(title in ENRICHMENTS) && !(title in RETIRED_ITEMS),
+    (title) => !Object.hasOwn(ENRICHMENTS, title) && !Object.hasOwn(RETIRED_ITEMS, title),
   );
   if (missing.length > 0) {
     throw new Error(

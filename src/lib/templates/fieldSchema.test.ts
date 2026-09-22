@@ -37,7 +37,12 @@ const tableSchema: ItemFieldSchema = {
 
 /** Build a `read` function over a plain object, mimicking FormData.get's null-for-absent. */
 function reader(posted: Record<string, string>) {
-  return (name: string) => (name in posted ? posted[name] : null);
+  // A Map, because that is what production builds (src/lib/actions/audits.ts materialises the
+  // FormData entries into one). A plain object here made the helper simulate something the product
+  // does not do: a field named `constructor` would have resolved through Object.prototype in the
+  // test and not in the app.
+  const entries = new Map(Object.entries(posted));
+  return (name: string) => entries.get(name) ?? null;
 }
 
 describe("schema validation", () => {

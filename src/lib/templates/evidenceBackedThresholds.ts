@@ -641,7 +641,10 @@ export const V4_CHANGE_NOTE =
   "to capture contactable-versus-row count, history depth and the post-close access window.";
 
 function revise(item: TemplateItemInput): TemplateItemInput {
-  const revision = REVISIONS[item.title];
+  // Object.hasOwn for the same reason enrich() uses it (src/lib/templates/evidenceDepth.ts): a bare
+  // index on a plain object literal answers for Object.prototype, so an item titled `constructor`
+  // would be "revised" by spreading a function over it.
+  const revision = Object.hasOwn(REVISIONS, item.title) ? REVISIONS[item.title] : undefined;
   return revision ? { ...item, ...revision } : item;
 }
 
@@ -670,7 +673,7 @@ export function assertThresholdCoverage() {
   const known = new Set(titles);
 
   const undecided = titles.filter(
-    (title) => !(title in REVISIONS) && !(title in UNCHANGED_FROM_V3),
+    (title) => !Object.hasOwn(REVISIONS, title) && !Object.hasOwn(UNCHANGED_FROM_V3, title),
   );
   if (undecided.length > 0) {
     throw new Error(
@@ -679,7 +682,7 @@ export function assertThresholdCoverage() {
     );
   }
 
-  const bothWays = Object.keys(REVISIONS).filter((title) => title in UNCHANGED_FROM_V3);
+  const bothWays = Object.keys(REVISIONS).filter((title) => Object.hasOwn(UNCHANGED_FROM_V3, title));
   if (bothWays.length > 0) {
     throw new Error(
       `Template v4 both revises and declares unchanged: ${bothWays.join("; ")}. Pick one.`,
