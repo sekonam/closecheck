@@ -76,7 +76,8 @@ model User {
   role         UserRole      @default(OWNER)
   createdAt    DateTime      @default(now())
 
-  uploadedEvidence Evidence[]
+  uploadedEvidence   Evidence[]
+  createdPortalLinks ClientPortalLink[]
 
   @@index([orgId])
   @@map("users")
@@ -447,6 +448,20 @@ model ClientPortalLink {
   token     String        @unique
   expiresAt DateTime
   revokedAt DateTime?
+  /**
+   * Which seat sent this report to the outside world.
+   *
+   * Creating a portal link is engagement-scoped work — any seat may do it, because delivering the
+   * deliverable IS the job. But it is the one engagement-scoped action with outward blast radius,
+   * and "any seat may do it" and "nobody can tell who did" must not both be true: without this the
+   * firm could see that a report went to an outside party, and who viewed it, but not which of its
+   * own people sent it. The §8 trail stopped at the firm boundary in the one place it mattered.
+   *
+   * SET NULL on user delete, like Evidence.uploadedById: the link must outlive the person, and a
+   * cascade would erase the access history of a report that had already been shared.
+   */
+  createdById String?
+  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
   createdAt DateTime      @default(now())
 
   accessLog PortalAccessLogEntry[]

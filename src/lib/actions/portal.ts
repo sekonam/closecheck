@@ -22,7 +22,7 @@ const createPortalLinkSchema = z.object({
  * anonymous public-viewer path in src/app/portal/[token]/page.tsx.
  */
 export async function createPortalLink(formData: FormData): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const result = createPortalLinkSchema.safeParse({ reportId: formData.get("reportId") });
   if (!result.success) {
     throw new Error(result.error.issues[0]?.message ?? "Invalid report id.");
@@ -51,6 +51,10 @@ export async function createPortalLink(formData: FormData): Promise<void> {
         reportId,
         token,
         expiresAt: new Date(Date.now() + LINK_LIFETIME_MS),
+        // Any seat may share a report — delivering the deliverable is the job — but the firm has
+        // to be able to say which of its own people did it. Without this, the §8 trail could show
+        // that a report went outside and who viewed it, and not who sent it.
+        createdById: userId,
       },
     });
 

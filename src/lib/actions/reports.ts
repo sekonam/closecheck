@@ -129,7 +129,11 @@ export async function generateReport(formData: FormData): Promise<void> {
     // reviewed it once on /settings (src/lib/actions/org.ts's acknowledgeDisclaimer).
     if (!org.disclaimerAcknowledgedAt) {
       throw new Error(
-        "Review the report disclaimer language on the Branding settings page before generating a report.",
+        // Names WHO can resolve it rather than instructing the reader. Accepting liability
+        // language on the firm's behalf is owner-only, so telling a member to go and do it sends
+        // them to a control they cannot use — a firm-level prerequisite presenting as something
+        // they got wrong.
+        "This firm has not yet accepted the report disclaimer language. The account owner can do that on the Branding settings page.",
       );
     }
 

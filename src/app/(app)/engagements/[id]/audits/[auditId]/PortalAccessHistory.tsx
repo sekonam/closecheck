@@ -25,6 +25,8 @@ import {
 } from "@/lib/portal/accessHistory";
 
 type Props = {
+  /** Which seat sent this report outside. Null for links created before it was recorded. */
+  createdBy: string | null;
   createdAt: Date;
   expiresAt: Date;
   revokedAt: Date | null;
@@ -35,7 +37,13 @@ function formatTimestamp(value: Date): string {
   return value.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 }
 
-export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog: rawLog }: Props) {
+export function PortalAccessHistory({
+  createdBy,
+  createdAt,
+  expiresAt,
+  revokedAt,
+  accessLog: rawLog,
+}: Props) {
   // Every request is logged; the page's own embedded viewer is collapsed here rather than being
   // skipped at write time, because at write time the only way to recognise it was a header the
   // client could forge to erase itself.
@@ -55,7 +63,10 @@ export function PortalAccessHistory({ createdAt, expiresAt, revokedAt, accessLog
 
       <ol className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3">
         <li className="text-slate-500">
-          <span className="font-medium text-slate-600">Link created</span> · {formatTimestamp(createdAt)}
+          <span className="font-medium text-slate-600">
+            {createdBy ? `Sent by ${createdBy}` : "Link created"}
+          </span>{" "}
+          · {formatTimestamp(createdAt)}
         </li>
 
         {accessLog.length === 0 && (

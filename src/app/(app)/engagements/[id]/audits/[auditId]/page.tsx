@@ -16,7 +16,7 @@ import { StructuredFields } from "./StructuredFields";
 import { FieldSources } from "./FieldCitations";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
 import { PortalAccessHistory } from "./PortalAccessHistory";
-import { describeEvidence } from "@/lib/storage/describeEvidence";
+import { attributionFor, describeEvidence } from "@/lib/storage/describeEvidence";
 import { unavailableReason } from "@/lib/audit/blocking";
 import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
@@ -161,7 +161,10 @@ export default async function AuditPage({
   const portalLinks = await withOrgScope(orgId, (tx) =>
     tx.clientPortalLink.findMany({
       where: { reportId: { in: reports.map((r) => r.id) } },
-      include: { accessLog: { orderBy: { viewedAt: "desc" } } },
+      include: {
+        accessLog: { orderBy: { viewedAt: "desc" } },
+        createdBy: { select: { name: true, email: true } },
+      },
       orderBy: { createdAt: "desc" },
     }),
   );
@@ -290,7 +293,7 @@ export default async function AuditPage({
         )}
         {!org.disclaimerAcknowledgedAt && (
           <p className="self-center text-xs text-amber-600">
-            Review the report disclaimer on the{" "}
+            The account owner must accept the report disclaimer on the{" "}
             <Link href="/settings" className="underline">
               Branding
             </Link>{" "}
@@ -411,6 +414,7 @@ export default async function AuditPage({
                             )}
                           </div>
                           <PortalAccessHistory
+                            createdBy={attributionFor(link.createdBy)}
                             createdAt={link.createdAt}
                             expiresAt={link.expiresAt}
                             revokedAt={link.revokedAt}
