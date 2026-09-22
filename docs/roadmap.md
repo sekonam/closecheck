@@ -136,11 +136,28 @@ signature-verified webhook, audit-credit ledger with batched overage), transacti
 with a LOGGED dev fallback), success-metric + error instrumentation with a founder report script,
 the RDAP-first WHOIS migration, and a guided first-audit onboarding flow. Verified against a fresh
 local Postgres (full RLS/role/versioning verify suite passing on a deliberately non-UTC cluster) and
-a live browser end-to-end run. The **exit criterion remains unmet**: billing enforcement ships dark
-(`BILLING_ENFORCEMENT=false`) and no real Stripe/Resend account is wired yet, so no production charge
-or refund has been processed — that needs the account credentials only the founder can provision
-(blocked on that, not on code). Per explicit user direction (2026-09-22) to build the roadmap out
-ahead of its evidence gates, same override recorded for Phases 3 and 4.
+a live browser end-to-end run.
+
+**Correction (2026-09-22, evening):** an earlier version of this note said "no real Stripe/Resend
+account is wired yet." That was already stale when written and is superseded here rather than
+deleted, per this repo's convention of keeping revised reasoning visible. What is actually true: the
+full revenue loop has been exercised end-to-end against **real accounts in test/sandbox mode** —
+Stripe test-mode checkout (Solo annual), signature-verified webhooks delivering 200, the credit
+ledger recording `PLAN_GRANT` then `AUDIT_CONSUMED`, a live Tier A run via RDAP, report + portal
+link + receipt emails, and a full refund via the Stripe API. Resend is a real account sending from
+the `onboarding@resend.dev` sandbox sender, with delivery confirmed in its dashboard.
+
+The **exit criterion is still unmet**, but the remaining gap is narrower and more specific than
+"no accounts": (a) billing enforcement ships dark (`BILLING_ENFORCEMENT=false`) by standing
+decision, kept dark until prices are evidence-backed; (b) no *live-mode* Stripe keys, so no real
+money has moved — a test-mode charge and refund is not a production charge and refund; (c) Resend's
+custom-domain verification needs a domain the founder owns, so system email still sends from a
+sandbox sender that real prospects should not receive; (d) no production deployment exists, so there
+is no public URL to register a live Stripe webhook endpoint against. All four need founder-provisioned
+credentials or a founder-owned domain — blocked on that, not on code. Tracked in `docs/BLOCKED.md`.
+
+Per explicit user direction (2026-09-22) to build the roadmap out ahead of its evidence gates, same
+override recorded for Phases 3 and 4.
 
 **Deliverables:**
 - **Stripe billing implementing `spec.md` §9 as revised 2026-09-21.** Annual-credits plan as the
