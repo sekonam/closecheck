@@ -25,11 +25,20 @@ export interface TierAResult {
  * silently costs a consultant's credibility, so keep the thresholds conservative and the notes
  * explicit about what was actually observed, not an inferred conclusion the consultant didn't make.
  */
+/**
+ * Whole days from now until `dateString`, rounded UP.
+ *
+ * Deliberately ceil rather than floor. An expiry exactly 30 days away is 29.9998 days once the
+ * arithmetic runs, and flooring reported "expires in 29 day(s)" and rated it Red — so the stated
+ * 30/90-day boundaries actually fired at 29/89 and every number printed next to a closing date was
+ * a day low. Rounding up also errs in the right direction for a deadline: it never tells a
+ * consultant they have more time than they do.
+ */
 function daysUntil(dateString: string | null): number | null {
   if (!dateString) return null;
   const parsed = new Date(dateString);
   if (Number.isNaN(parsed.getTime())) return null;
-  return Math.floor((parsed.getTime() - Date.now()) / 86_400_000);
+  return Math.ceil((parsed.getTime() - Date.now()) / 86_400_000);
 }
 
 /**
@@ -126,6 +135,14 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
   const result = await lookupWhois(domain);
   const structuredData = { ...result };
   const transferNotes = domainTransferNotes(result);
+  // The registrant of record is collected and was never shown. v4's rubric makes "the registrant
+  // is not the selling entity" its strongest Red trigger — a domain held personally by the owner,
+  // by a former web developer, or by a marketing agency is a transfer problem however clean every
+  // other answer is. It reached neither the note nor the report, because Tier A structuredData is
+  // deliberately never rendered.
+  const registrant = result.registrantOrg
+    ? ` Registrant of record: ${result.registrantOrg} — confirm this is the entity being sold.`
+    : " Registrant of record is not public (privacy shielding or registry redaction) — ask the seller to evidence control.";
   const suffix = transferNotes.length > 0 ? ` ${transferNotes.join(" ")}` : "";
   // A status that stops a transfer outright is a Red on its own terms — the expiry date can read
   // perfectly while the domain cannot actually be handed over.
@@ -178,7 +195,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
     return {
       status: FindingStatus.FAIL,
       severity: Severity.RED,
-      note: `Domain expires in ${expiryDays} day(s) (${result.expiryDate}). Registrar: ${result.registrar ?? "unknown"}. Confirm renewal and transfer plan before close.${suffix}`,
+      note: `Domain expires in ${expiryDays} day(s) (${result.expiryDate}). Registrar: ${result.registrar ?? "unknown"}.${registrant} Confirm renewal and transfer plan before close.${suffix}`,
       structuredData,
     };
   }
@@ -196,7 +213,7 @@ async function runDomainWhois(domain: string): Promise<TierAResult> {
   return {
     status: FindingStatus.PASS,
     severity: Severity.GREEN,
-    note: `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).`,
+    note: `Registrar: ${result.registrar ?? "unknown"}. Expires ${result.expiryDate} (${expiryDays} days out).${registrant}`,
     structuredData,
   };
 }
@@ -205,11 +222,32 @@ async function runDnsFingerprint(domain: string): Promise<TierAResult> {
   const result = await fingerprintDns(domain);
   const structuredData = { ...result };
 
-  if (result.error || result.nameservers.length === 0) {
+  // A subdomain has no NS record of its own — it is served by its parent zone's nameservers — so
+  // gating on `nameservers.length === 0` reported "could not resolve DNS" for a host whose own
+  // structuredData carried its A records, right beside the claim. Say what was actually missing.
+  if (result.error) {
     return {
       status: FindingStatus.IN_PROGRESS,
       severity: Severity.YELLOW,
-      note: `Could not resolve DNS for ${domain} (${result.error ?? "no nameservers returned"}). Verify the domain is live.`,
+      note: `Could not resolve DNS for ${domain} (${result.error}). Verify the domain is live.`,
+      structuredData,
+    };
+  }
+
+  if (result.nameservers.length === 0 && result.aRecords.length === 0) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${domain} returned neither nameservers nor address records. Verify the domain is live.`,
+      structuredData,
+    };
+  }
+
+  if (result.nameservers.length === 0) {
+    return {
+      status: FindingStatus.IN_PROGRESS,
+      severity: Severity.YELLOW,
+      note: `${domain} resolves (${result.aRecords.join(", ")}) but publishes no nameservers of its own — it is most likely a subdomain served by a parent zone. Establish which domain actually holds the DNS, and check that one.`,
       structuredData,
     };
   }
@@ -409,13 +447,20 @@ async function runCmsFingerprint(domain: string): Promise<TierAResult> {
     };
   }
 
+  const additionalPlatforms = result.signals
+    .map((signal) => /^matched signature:\s*(.+)$/.exec(signal)?.[1]?.trim())
+    .filter((name): name is string => Boolean(name));
+
   // Deliberately not scoring a severity from version alone (docs/idea.md's evidentiary bar,
   // .claude/skills/audit-methodology/SKILL.md): a bare version string is not evidence of a known
   // vulnerability without checking it against something. Flag for manual review instead of guessing.
   return {
     status: FindingStatus.IN_PROGRESS,
     severity: Severity.YELLOW,
-    note: `Detected ${result.cms}${result.version ? ` (version signal: ${result.version})` : ""}. Confirm patch status manually — CloseCheck does not assert vulnerability status from a version string alone.`,
+    // Every matched signature, not just the first. A site matching both WordPress and WooCommerce
+    // was reported as WordPress alone, silently dropping a payment surface from the client-facing
+    // note — and what else is running on the platform is precisely what a buyer is inheriting.
+    note: `Detected ${[...new Set([result.cms, ...additionalPlatforms])].join(", ")}${result.version ? ` (version signal: ${result.version})` : ""}. Confirm patch status manually — this is a fingerprint, not an assertion of vulnerability status from a version string.`,
     structuredData,
   };
 }
