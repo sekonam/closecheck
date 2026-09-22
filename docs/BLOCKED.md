@@ -112,7 +112,40 @@ feature stays dark. That is the gate working, not a gap.
 
 ---
 
-## 7. SOC 2 posture
+## 7. The deferred Phase 4 items — deliberately not built
+
+`spec.md` §13.4 and `roadmap.md` Phase 4 list several things as "indicative, not committed". They
+were reconsidered on 2026-09-22 under an explicit instruction to build the deferred set, and the
+outcome was to build none of them. Recording the reasoning here rather than leaving them looking
+merely forgotten:
+
+- **Named CRM/deal-tracking connectors.** The primitive they would sit on — signed webhooks and the
+  read-only API — is built, tested and documented (`docs/api.md`). Picking a named CRM now is
+  exactly the guessed-feature-list mistake `idea.md` is explicit about avoiding, and §13.3 already
+  decided that the connector waits for a firm to name the tool. Nothing about the last two days
+  changes that; no firm exists to name one.
+
+- **Tier A checks against paid third-party APIs** (vulnerability databases, trademark search). Two
+  separate blockers, and only one is money. The first is that they need paid accounts nobody can
+  provision but the founder. The second is the sequencing constraint from
+  `research/competitors-2026-09.md` §3, which `roadmap.md` Phase 4 already encodes: AI report
+  generation has commoditized the automated-checks-to-PDF layer, so **Tier A is the wedge, not the
+  moat**, and further Tier A expansion ranks *below* Tier B/C evidence depth and template quality
+  whenever they compete for the same time. They competed, and the moat work won — see the template
+  v3 and evidence-capture work landed the same day.
+
+- **Whitelabel as a paid add-on tier** (`spec.md` §12). This is a segmentation decision, and §12
+  says to make it "once real customers exist to segment". There are none. Implementing the billing
+  for a tier whose existence is unresolved would also freeze a price before the Phase 0 head-to-head
+  test, which is the specific failure mode `roadmap.md` Phase 2.5 names as its primary risk.
+
+- **SOC 2** — see below; unchanged.
+
+The honest summary: the Phase 4 scope that could be built without new evidence or a paid account
+*was* built, and is covered by tests and documentation. What remains is gated on things code cannot
+supply.
+
+## 8. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
