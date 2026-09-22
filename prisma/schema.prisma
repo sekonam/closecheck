@@ -139,11 +139,36 @@ model Template {
   isActive    Boolean  @default(true) // new Audits pick the active version for a slug
   createdAt   DateTime @default(now())
 
+  // What changed in this version relative to the previous one, in the consultant's language.
+  // Templates are versioned (spec.md §5) specifically so a mid-engagement checklist change cannot
+  // silently invalidate recorded findings — but a version number alone doesn't tell a consultant
+  // comparing two reports what actually moved. Null on v1, which has no predecessor.
+  changeNote  String?
+
   items  TemplateItem[]
   audits Audit[]
 
   @@unique([slug, version])
   @@map("templates")
+}
+
+// What a checklist item requires as evidence before a severity on it means anything.
+// Not a hard gate — spec.md §4 leaves completion a consultant judgment call — but the product
+// must be able to SAY that a Green with no document behind it is weaker than a Green with one.
+enum EvidenceExpectation {
+  NONE // a rating stands on the consultant's own observation (most Tier A manual items)
+  DOCUMENT // Tier B: a seller/broker-provided document should back the finding
+  ATTESTATION // Tier C: a named consultant attests they performed the check themselves
+}
+
+// spec.md §4: "Blocking dependency — whether the item requires deal-stage access the consultant
+// may not have yet". Declared on the item so the product can tell a consultant, before they start,
+// which items are simply not runnable at their current deal stage. This is the pre-LOI/post-LOI
+// separation spec.md §2.3 calls load-bearing, made machine-readable.
+enum BlockingDependency {
+  NONE // runnable immediately, public information only
+  SELLER_DOCUMENTS // needs the seller/broker to hand over documents (typically post-LOI)
+  LIVE_ACCESS // needs live access to a seller-controlled system (typically very late pre-close)
 }
 
 model TemplateItem {
@@ -153,7 +178,30 @@ model TemplateItem {
   tier          Tier
   method        CheckMethod
   title         String
+  // CLIENT-FACING. This string is rendered verbatim into the whitelabeled PDF the consultant hands
+  // to a buyer (src/lib/reports/renderHtml.ts). It must read as the consultant's own methodology —
+  // no product cross-references, no "see spec.md §N", no CloseCheck implementation notes. Internal
+  // commentary belongs in `guidance`/`severityGuidance` below, which never leave the app.
   description   String?
+  // INTERNAL, consultant-facing only. How to actually perform this check: which registers to
+  // search, which fields to read off a statement, what counts as done. Never rendered into a
+  // client deliverable. This is the product's core IP (see .claude/skills/audit-methodology).
+  guidance      String?
+  // INTERNAL, consultant-facing only. When this item is Red vs Yellow vs Green, with the threshold
+  // and its source where one exists. Severity has to be defensible to a buyer who pushes back, and
+  // an unstated threshold makes one consultant's Yellow another's Red — which defeats the
+  // repeatability that is the whole value proposition (spec.md §2.2).
+  severityGuidance String?
+  // Declares the structured fields this item captures, as {"fields":[...]} — see
+  // src/lib/templates/fieldSchema.ts for the shape and the supported field kinds.
+  //
+  // This lives on TemplateItem, not in code, on purpose. spec.md §5 pins an in-progress Audit to
+  // its Template version so checklist changes can't reinterpret recorded findings; a field set
+  // defined in application code would sit outside that guarantee and silently change the meaning
+  // of every historical Finding.structuredData when edited. Here it is versioned for free.
+  fieldSchema   Json?
+  evidenceExpectation EvidenceExpectation @default(NONE)
+  blockingDependency  BlockingDependency  @default(NONE)
   // Stable key used by the Tier A automation runner (src/lib/audit/tierA) to know which checker to
   // invoke for AUTOMATED items — not meaningful for MANUAL items.
   automationKey String?
