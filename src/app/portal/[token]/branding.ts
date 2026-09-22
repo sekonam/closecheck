@@ -1,5 +1,6 @@
 import { withOrgScope } from "@/lib/db/scoped";
-import { getObject } from "@/lib/storage/local";
+import { getObject } from "@/lib/storage/objectStore";
+import { logoContentTypeFor } from "@/lib/branding/logoContentType";
 
 /**
  * The consultant's brand kit, for the portal chrome around a shared report.
@@ -50,16 +51,6 @@ export interface ReportBrandSnapshot {
   logoKey: string | null;
 }
 
-// Mirrors src/app/api/branding/logo/route.ts's map, and deliberately excludes svg: an uploaded file's
-// extension is not trustworthy, and an SVG inlined into the page could carry script. Anything
-// unrecognized simply renders no logo.
-const EXTENSION_CONTENT_TYPE: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-};
 
 /** Logos are brand marks, not artwork; anything past this is not inlined into the page. */
 const MAX_INLINE_LOGO_BYTES = 512 * 1024;
@@ -102,7 +93,9 @@ export async function loadPortalBranding(
 
 async function loadLogoDataUri(storageKey: string | null): Promise<string | null> {
   if (!storageKey) return null;
-  const contentType = EXTENSION_CONTENT_TYPE[storageKey.split(".").pop()?.toLowerCase() ?? ""];
+  // Deliberately excludes svg: an uploaded file's extension is not trustworthy, and an SVG inlined
+  // into this page could carry script. Anything unrecognised renders no logo at all.
+  const contentType = logoContentTypeFor(storageKey);
   if (!contentType) return null;
 
   try {

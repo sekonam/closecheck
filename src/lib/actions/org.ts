@@ -5,15 +5,14 @@ import { revalidatePath } from "next/cache";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { requireOwner } from "@/lib/auth/requireOwner";
-import { putObject, deleteObject, orgLogoKey } from "@/lib/storage/local";
+import { putObject, deleteObject, orgLogoKey } from "@/lib/storage/objectStore";
+import { ALLOWED_LOGO_MIME_TYPES, logoContentTypeFor } from "@/lib/branding/logoContentType";
 
 // Raster only — deliberately excludes SVG. An uploaded SVG can carry a <script>, and
 // /api/branding/logo serves it back with Content-Type: image/svg+xml; browsers don't execute that
 // when it's used as an <img> src (how the settings page and report render it today), but the route
 // itself doesn't stop someone from navigating to it directly, which does execute it. Not worth the
 // risk for a whitelabel logo when PNG/JPEG/WebP/GIF cover every real case.
-const ALLOWED_LOGO_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-
 const updateOrgBrandingSchema = z.object({
   // Trimmed before the length check — otherwise a whitespace-only name (spaces, tabs) passes
   // validation and saves, leaving the org with a name that renders blank on every report cover.
@@ -79,6 +78,29 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
     throw new Error(`Unsupported logo file type "${file.type || "unknown"}" — use PNG, JPEG, WebP, or GIF.`);
   }
 
+  // The FILENAME has to be typeable too, and has to agree with the declared type.
+  //
+  // Every path that serves this logo back decides its type from the stored key's extension, never
+  // from what was declared here (src/lib/branding/logoContentType.ts). So a file accepted on its
+  // declared type alone could be stored under a key nothing can type — which showed up as a logo
+  // that rendered in the PDF and was silently absent from the portal chrome around it. Refusing it
+  // here is the only point where the person can still fix it by renaming the file; everywhere
+  // later, the only available behaviour is to drop the logo and not say why.
+  const fileType = logoContentTypeFor(file.name);
+  if (!fileType) {
+    throw new Error(
+      `The file name "${file.name}" has no usable image extension — rename it to end in .png, ` +
+        `.jpg, .gif or .webp and upload it again.`,
+    );
+  }
+  if (fileType !== file.type) {
+    throw new Error(
+      `"${file.name}" says it is ${file.type} but its name ends in a ${fileType.replace("image/", ".")} ` +
+        `extension. Rename the file to match its real format, or re-export it — a mismatch here is ` +
+        `a logo that renders in some places and not others.`,
+    );
+  }
+
   // Checked in its own transaction, BEFORE the file is written. This action writes the object
   // first and updates the row second (see the note below on why), so a role check inside that
   // later transaction would refuse the change only after a non-owner's bytes were already on disk.
@@ -90,7 +112,11 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   // Write the file first here (unlike attachEvidence/generateReport's commit-then-write ordering):
   // the only failure mode if the DB update below doesn't land is the old logo (or none) staying
   // referenced, not a dangling reference to a file that doesn't exist.
-  await putObject(key, bytes);
+  // The extension-derived type, not file.type. Both serving paths decide from the key's extension
+  // (src/lib/branding/logoContentType.ts), and the declared type is an unverified claim — storing
+  // it would put the uploader's assertion on the object, which matters the moment a backend serves
+  // the stored Content-Type directly rather than one this application chose.
+  await putObject(key, bytes, logoContentTypeFor(key) ?? undefined);
 
   const previousKey = await withOrgScope(orgId, async (tx) => {
     const previous = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { brandLogoUrl: true } });

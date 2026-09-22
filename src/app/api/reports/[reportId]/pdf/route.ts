@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { withOrgScope, type ScopedTx } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
-import { getObject } from "@/lib/storage/local";
+import { getObject } from "@/lib/storage/objectStore";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ reportId: string }> }) {
   const { reportId } = await params;

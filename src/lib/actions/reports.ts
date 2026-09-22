@@ -8,23 +8,14 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtml";
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
-import { putObject, getObject, deleteObject, reportPdfKey } from "@/lib/storage/local";
+import { putObject, getObject, deleteObject, reportPdfKey } from "@/lib/storage/objectStore";
+import { logoContentTypeFor } from "@/lib/branding/logoContentType";
 import { attributionFor } from "@/lib/storage/describeEvidence";
 import { citationsByField } from "@/lib/audit/sourceRef";
 import { parseFieldSchema } from "@/lib/templates/fieldSchema";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { recordMetric } from "@/lib/metrics/record";
 
-// No svg — see the matching comment in src/app/api/branding/logo/route.ts. Embedded as a data URI
-// inside an <img> src here, which doesn't execute SVG scripts, but keeping the two maps in sync
-// avoids a future accidental reintroduction of one without the other.
-const LOGO_EXTENSION_MIME: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-};
 
 /** "Pre-LOI" / "Post-LOI" / … for the report cover (spec.md §6). Mirrors the label map the
  * engagements list uses, so a consultant sees the same words in the app and in the deliverable;
@@ -51,8 +42,14 @@ async function resolveLogo(storageKey: string | null): Promise<ResolvedLogo | nu
   if (!storageKey) return null;
   try {
     const bytes = await getObject(storageKey);
+    // No logo rather than a guess. This previously fell back to image/png for an unrecognised
+    // extension while the portal and the authenticated route both refused the same key — so one
+    // logo could appear in the PDF and be absent from the portal chrome around it, which is the
+    // one place the firm's brand is supposed to be identical. uploadOrgLogo now refuses a file
+    // this cannot type, so reaching null here means a key stored before that check existed.
+    const mime = logoContentTypeFor(storageKey);
+    if (!mime) return null;
     const extension = storageKey.split(".").pop()?.toLowerCase() ?? "";
-    const mime = LOGO_EXTENSION_MIME[extension] ?? "image/png";
     return { dataUri: `data:${mime};base64,${bytes.toString("base64")}`, bytes, extension };
   } catch {
     return null;
@@ -234,7 +231,7 @@ export async function generateReport(formData: FormData): Promise<void> {
     if (logo) {
       const candidateKey = reportBrandLogoKey(reportOrgId, reportId, logo.extension);
       try {
-        await putObject(candidateKey, logo.bytes);
+        await putObject(candidateKey, logo.bytes, logoContentTypeFor(candidateKey) ?? undefined);
         brandLogoKey = candidateKey;
       } catch {
         brandLogoKey = null;
@@ -261,7 +258,8 @@ export async function generateReport(formData: FormData): Promise<void> {
 
     const pdf = await renderHtmlToPdf(html);
     const key = reportPdfKey(reportOrgId, reportId);
-    await putObject(key, pdf);
+    // This one the product authored, so the type is a fact rather than a claim.
+    await putObject(key, pdf, "application/pdf");
 
     await withOrgScope(orgId, (tx) =>
       tx.report.update({

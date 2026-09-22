@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
-import { getObject } from "@/lib/storage/local";
+import { getObject } from "@/lib/storage/objectStore";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ evidenceId: string }> }) {
   const { evidenceId } = await params;

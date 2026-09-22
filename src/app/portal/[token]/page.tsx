@@ -1,10 +1,8 @@
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { recordMetric } from "@/lib/metrics/record";
-import { storageRoot } from "@/lib/storage/local";
+import { objectExists } from "@/lib/storage/objectStore";
 import { resolvePortalAccess } from "./access";
 import { loadPortalBranding, type PortalBranding } from "./branding";
 
@@ -124,17 +122,31 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
  * explanation as the not-yet-generated case, instead of an empty viewer frame with two buttons that
  * both 404.
  *
- * A stat, not a read: the point is presence, and reading a multi-megabyte PDF into memory to decide
- * whether to render a page would be a real cost on every view. `storageRoot()` is exported for
- * exactly this kind of out-of-module path resolution (src/lib/storage/local.ts) — when this moves to
- * object storage, this becomes a HEAD request, not a filesystem call.
+ * Presence, not a read: pulling a multi-megabyte PDF into memory to decide whether to render a page
+ * would be a real cost on every view. `objectExists` is a stat on local and a HEAD on S3.
+ *
+ * THIS USED TO RESOLVE THE PATH ITSELF — `stat(join(storageRoot(), key))` — with a comment
+ * predicting that it would become a HEAD request when storage moved. It did, and the prediction is
+ * why this was caught: under an S3 configuration `storageRoot()` still names a local directory, so
+ * every stat would have missed, and every buyer on every live link would have been told the report
+ * was unavailable while it sat readable in the bucket. Nothing would have looked broken.
+ *
+ * ONLY A DEFINITE ABSENCE COUNTS AS ABSENT. `objectExists` throws on anything indeterminate — a
+ * permissions failure, a throttle, a dropped socket — rather than reporting false, and a throw here
+ * means the report is shown. The two wrong answers are not symmetric: a viewer that fails to load
+ * is a visible malfunction and the buyer knows something is wrong, while "the report isn't
+ * available, contact the firm" is a confident false statement indistinguishable from the real case
+ * — so the buyer has no reason to doubt it and the consultant may never hear. That is the same
+ * failure as an appendix promising documents that had already been deleted.
  */
 async function reportFileExists(key: string): Promise<boolean> {
   try {
-    await stat(join(storageRoot(), key));
+    return await objectExists(key);
+  } catch (err) {
+    // Recorded, not swallowed: a storage backend that cannot answer is an operator problem, and
+    // the buyer is the last person who should be the one to notice it.
+    console.error("portal: could not determine whether the report PDF exists", { key, err });
     return true;
-  } catch {
-    return false;
   }
 }
 

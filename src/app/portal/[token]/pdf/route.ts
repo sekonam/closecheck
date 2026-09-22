@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { getObject } from "@/lib/storage/local";
+import { getObject } from "@/lib/storage/objectStore";
 import { resolvePortalAccess } from "../access";
 import { portalRequestAllowed } from "@/lib/portal/rateLimit";
 

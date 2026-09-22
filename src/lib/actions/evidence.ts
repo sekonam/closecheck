@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { EvidenceKind, Tier } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
-import { putObject, evidenceKey } from "@/lib/storage/local";
+import { putObject, evidenceKey } from "@/lib/storage/objectStore";
 import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadPolicy";
 import { parseSourceRef, withFieldCitation } from "@/lib/audit/sourceRef";
 import { parseFieldSchema } from "@/lib/templates/fieldSchema";
@@ -114,7 +114,11 @@ export async function attachEvidence(formData: FormData): Promise<void> {
   });
 
   try {
-    await putObject(key, bytes);
+    // verdict.mimeType, not file.type: the declared type is an assertion by the uploader and the
+    // verdict is what the file's own leading bytes say it is (src/lib/storage/uploadPolicy.ts).
+    // Storing the declared one would put the uploader's claim on the object and hand it back on
+    // every download, which is the thing checkEvidenceContent exists to stop believing.
+    await putObject(key, bytes, verdict.mimeType);
   } catch (err) {
     // The row committed but the file didn't land — remove the row rather than leave Evidence
     // pointing at a file that will never exist, and surface the failure to the caller.
