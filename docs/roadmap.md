@@ -23,6 +23,20 @@ moat (Tier B/C evidence capture, business-type templates, whitelabel workflow) o
 expansion when the two compete. The promotion/GTM track (`docs/research/promotion.md`'s 90-day
 sequence) runs in parallel with Phase 2.5 and is owned by `docs/releases.md` §4, not this file.
 
+**Status note (2026-09-22): Phase 1/2 scope deepened; the evidence gates are untouched.** A pass
+over Tier B/C capture, template content, and the report landed well after those phases were
+nominally built — structured capture declared per checklist item, template v3 (a verification
+procedure and severity rubric on every manual item, three methodology defects fixed), evidence
+coverage reported alongside rating coverage, a client-ready report (cover page, running
+header/footer, an executive summary naming what drove the rating, colorblind-legible severity), and
+a streamed, whitelabeled portal. See `spec.md` §4–8. Two things this is *not*. It is not new scope:
+it is Phase 1's and Phase 2's own deliverables reaching the bar those phases specified, which they
+had not. And it is not evidence: the code exists and is verified end to end in a real browser, no
+design partner has run a real audit, and no customer has paid. Every exit criterion below reads
+exactly as it did before this work. It does follow the sequencing the competitive-window constraint
+above states — the weeks went to the durable moat (Tier B/C evidence capture, template quality,
+whitelabel workflow) rather than to further Tier A expansion.
+
 ## Phase 0 — Design partner discovery (no product yet)
 
 **Goal:** confirm the reframe in `idea.md` actually converts to willingness-to-pay before writing a
@@ -66,6 +80,16 @@ tier, and export a whitelabeled PDF report they actually send to a buyer.
 and unmet — no design partner has run a real-deal audit; recruiting them is the Phase 0 work that
 still gates this phase's *completion*, build state notwithstanding.
 
+**Update (2026-09-22):** two of the deliverables below have since been taken to the bar they
+describe rather than the bar they had. "Tier B document upload + structured-field capture" now means
+fields declared per checklist item and versioned with the template (`spec.md` §4) — it previously
+meant three hardcoded keys shown only on items whose title matched a regex, so five of the eight
+Tier B items captured nothing structured. And report generation now has a real cover page, a running
+header/footer, an executive summary that names the findings behind the rating, and colorblind-legible
+severity (`spec.md` §6) — the "genuinely client-ready visual bar" the risk note below names as one of
+this phase's two real time sinks. Tier C attested capture gained the same structured treatment. Exit
+criterion unchanged and still unmet.
+
 **Deliverables:**
 - Consultant Org + Engagement + Audit data model (`spec.md` §3), single-tenant-safe from day one
   (`spec.md` §8's isolation rule applies even with one paying customer).
@@ -103,6 +127,17 @@ page is display-only — no billing exists anywhere in the codebase — so "self
 paid" cannot happen until Phase 2.5 below lands. Note the template-proliferation risk below
 materialized in the way it predicted: all four templates now exist without design-partner deal-flow
 evidence for their sequencing.
+
+**Update (2026-09-22):** all four templates are published at **v3** (`spec.md` §5). Every manual
+item now carries a verification procedure and severity thresholds — twelve had neither, which meant
+one consultant's Yellow was another's Red on the same evidence — and three methodology defects were
+fixed: the franchise and e-commerce templates silently had no platform-transferability item, the
+salon template had no Tier C item at all, and a bundled four-system live-login item was split so
+§6's roll-up can distinguish a Red on the point-of-sale from a Red on a social account. That publish
+is the first real exercise of the last deliverable below — v1/v2 content stays frozen, defects
+included, and only new audits see v3 — though "post-launch" still overstates it, since no audit
+outside development has been rated against any version. The deliverables below are now built as
+written; the exit criterion stays unmeasurable until Phase 2.5's billing runs in live mode.
 
 **Deliverables:**
 - Salon/booking and Franchise templates (`spec.md` §5) — sequenced by whichever design partners'
@@ -204,6 +239,14 @@ regardless of the normal evidence gate. The distribution-channel decision remain
 business/strategy call, not something buildable from this codebase, and stays open per the reasoning
 below.
 
+**Update (2026-09-22):** the portal now serves its PDF from a streamed route behind the same token
+resolution as the page (it previously base64-inlined the whole file into the served HTML, which
+mobile browsers increasingly refuse to render — broken on the one surface a buyer sees), carries the
+consultant's brand rather than CloseCheck's, and is `noindex`/`no-store` throughout (`spec.md` §7).
+The third deliverable below is **half done and worth stating precisely:** access is now *recorded*
+for portal views and for consultant-side exports (`spec.md` §8), but surfacing that history to the
+consultant as a feature — which is what this deliverable asks for — is not built.
+
 **Deliverables:**
 - Magic-link, no-account Client Portal Link (`spec.md` §7) — built only if Phase 1/2 design partners
   or their buyers explicitly asked for it; otherwise this deliverable is replaced by whatever gap
@@ -268,3 +311,8 @@ beyond the already-built committed slice, further Tier A expansion (the paid-API
 *below* deepening the durable moat — Tier B/C evidence capture, template quality, and whitelabel/
 portal polish — whenever the two compete for the same weeks. This tightens, not replaces, the
 existing "re-plan from real usage" gate.
+
+**Followed (2026-09-22):** the work recorded in the top status note went exactly there — Tier B/C
+structured and attested capture, template v3 content quality, and report/whitelabel polish — with no
+further Tier A expansion beyond the committed slice above. Recorded because a sequencing constraint
+nobody ever checks against the weeks actually spent is decoration.

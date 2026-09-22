@@ -47,7 +47,7 @@ the buyer."
 |---|---|
 | **Consultant Org** | The paying account — a solo consultant or firm. Has seats, a plan, and a brand kit (logo, color, report footer) for whitelabeled output. |
 | **Engagement** | One acquisition deal being diligenced. Belongs to a Consultant Org. Has a target business, a deal stage (pre-LOI / post-LOI / closing), and one Audit. |
-| **Template** | A versioned checklist definition for a business type (see §5). Defines which checklist items exist, which tier each belongs to, and how each is scored. Templates are shared, product-owned content — a consultant selects one per Engagement, and may add engagement-specific custom items but cannot edit the shared template from inside an engagement. |
+| **Template** | A versioned checklist definition for a business type (see §5). Defines which checklist items exist, which tier each belongs to, how each is scored, and what structured evidence each captures (§4). Templates are shared, product-owned content — a consultant selects one per Engagement, and may add engagement-specific custom items but cannot edit the shared template from inside an engagement. |
 | **Audit** | One run of a Template against one Engagement. Holds the state of every checklist item: not started / in progress / pass / fail / not applicable / blocked (seller cooperation not yet available), plus evidence (notes, uploaded documents, screenshots) per item. |
 | **Finding** | A checklist item's resolved state plus its evidence and severity. The unit that renders into the Report. |
 | **Report** | Generated, versioned, exportable output of an Audit at a point in time. See §6. |
@@ -62,9 +62,35 @@ into an implementable structure. Each checklist item in a Template declares:
 - **Method** — `automated` (system runs a check with no human input) or `manual` (consultant records
   a finding by hand, optionally attaching evidence)
 - **Severity model** — traffic light (Green / Yellow / Red) plus a free-text finding note; Red items
-  require a note, Yellow items recommend one, Green items don't need one
+  require a note, Yellow items recommend one, Green items don't need one. The Red-requires-a-note
+  rule is enforced when the finding is saved, not advised in the UI: an unexplained Red is the
+  finding a buyer's advisory team pushes back on hardest, and it was specified here long before
+  anything enforced it.
 - **Blocking dependency** — whether the item requires deal-stage access the consultant may not have
-  yet (relevant to Tier B/C)
+  yet: none, seller documents, or live access. Declared on the item and compared against the
+  Engagement's deal stage, so a consultant can see before starting which items aren't runnable yet —
+  this is §2 principle 3's pre-LOI/post-LOI separation made machine-readable rather than left to the
+  consultant to infer from the tier. **Advisory, never enforced:** a cooperative broker hands over
+  contracts earlier than the tidy model expects, and a consultant holding the document must be able
+  to record the finding whatever stage the Engagement is nominally at.
+- **Structured capture** — the typed fields this item turns its evidence into, declared per item
+  (see the Tier B note below)
+- **Evidence expectation** — `none`, `document`, or `attestation`: what a rating on this item is
+  supposed to be resting on. **Decision:** declared explicitly per item rather than inferred from
+  the tier. Tier is usually a good proxy (Tier B wants a document, Tier C an attestation) but not
+  always — a Tier A manual item like Google Business Profile claim status rests on the consultant's
+  own observation with nothing to attach, and inferring an expectation there would report a
+  permanent, unclosable gap on a finding that is complete. The reason to declare it at all is §6's
+  evidence-coverage signal, which needs an honest denominator: the count of items that were supposed
+  to have something behind them, not the count of items.
+- **Verification procedure and severity rubric** — how to actually run the item, and where the
+  Red/Yellow/Green thresholds sit. Both are **internal**: shown to the consultant in the app, never
+  rendered into the client report. That split is not a presentation preference — it exists because
+  internal methodology text carrying literal `spec.md §N` cross-references leaked into the
+  whitelabeled PDF through the item's client-facing description, which is the one string on the item
+  a buyer reads. Recording thresholds also serves §2 principle 2 directly: an unstated threshold
+  makes one consultant's Yellow another's Red, which is the opposite of the repeatability being
+  sold.
 
 ### Tier A — external, no seller cooperation needed
 
@@ -101,13 +127,37 @@ started (post-LOI in most deals, sometimes earlier if broker is cooperative).
 | Item | Method |
 |---|---|
 | POS system contract terms, term length, early-termination penalty | manual, document upload + structured fields |
-| Online-ordering / booking platform contract and transferability clause | manual, document upload + structured fields |
+| Customer-facing platform contract and transferability clause (online-ordering, booking, storefront, or franchisor-contracted equivalent) | manual, document upload + structured fields |
 | Payment processor account standing (chargebacks, holds, reserve) | manual, document/statement upload |
 | Recurring SaaS inventory: what tools, what each costs, transfers vs. must-rebuild | manual, structured table the consultant fills from seller-provided list |
+
+The transferability row is **universal** — every Template instantiates it in its own vertical's
+language (§5). It is stated here, in the base table, because the alternative was tried and failed:
+v1/v2 expressed it only as the restaurant Template's online-ordering contract and the salon
+Template's booking contract, which left the franchise and e-commerce Templates with no
+transferability item at all. A base item that lives in one Template's list is silently missing from
+every other one.
 
 Tier B items are inherently document-heavy. The product's job is to turn "here's a PDF contract" into
 a structured, comparable finding (transferable: yes/no/unclear, penalty: $X or Y% of ARR) rather than
 just storing an attachment.
+
+**How that works:** each Template item declares its own field schema — typed fields (short text, long
+text, enum, money, percent, date, boolean, plus a repeating table for inventories — which is how the
+recurring-SaaS row above finally renders as the table it literally asks for, rather than as a note
+box). The schema drives both the capture form and the report rows, so the comparable finding and the
+thing the consultant fills in are the same object.
+
+**Decision: the schema lives on the Template item row, not in application code.** The superseded
+implementation hardcoded three keys — `transferable`, `penaltyAmount`, `penaltyBasis` — and decided
+whether to show them by running a `/contract/i` regex against the item's *title*, so five of the
+eight shipped Tier B items matched nothing and captured no structured data at all. They degraded to
+"upload a PDF and write a sentence", which is exactly the behavior the paragraph above names as
+insufficient. Fixing the coverage is the obvious half; the reason it moved onto the row is §5's
+version pinning. A field set defined in code sits *outside* that guarantee — editing it would
+retroactively change the meaning of every finding already recorded against it, all at once, with no
+version to pin to and no migration story. On the row, the definitions are versioned by the same
+machinery that versions the item's title, and an Audit reads both from the same pinned row.
 
 ### Tier C — live access verification
 
@@ -117,8 +167,16 @@ actual login credentials to seller-controlled systems.
 | Item | Method |
 |---|---|
 | Live login to hosting/CMS admin | manual, consultant performs the check outside the product; product records pass/fail + notes |
-| Live login to POS/booking/GBP/socials | manual, same pattern |
+| Live login to the primary operating system (POS, booking, or equivalent) | manual, same pattern |
+| Live login to listing and social accounts | manual, same pattern |
 | Data-export test (can the buyer actually get their data out) | manual, same pattern |
+
+The two live-login rows were **one item** in v1/v2 — "Live login to POS/booking/GBP/socials" —
+carrying four unrelated systems under a single pass/fail and a single severity. That cannot be read
+through §6's roll-up: any single Red makes its tier Red, so a Red on a social account and a Red on
+the point-of-sale produced an identical report, though what they cost a buyer is not remotely
+comparable (losing the point-of-sale stops the business; losing a listing erodes demand over
+months). Split in template v3. The bundled item stays in v1/v2 content, frozen, per §5.
 
 **Product decision:** CloseCheck does **not** accept, store, or proxy live third-party credentials in
 v1. Tier C items are recorded as consultant-attested findings (the consultant did the login themselves,
@@ -135,29 +193,73 @@ type-specific items:
 | Template | Distinguishing items beyond the base checklist |
 |---|---|
 | Restaurant with online ordering | POS-to-ordering-platform integration health, third-party delivery platform (DoorDash/UberEats) account ownership and menu sync |
-| Salon/service business with booking | Booking software client-data export format, recurring membership/package liability transfer |
-| Franchise location (any vertical) | Franchisor-mandated tech stack compliance (can the buyer even choose a different vendor), franchise-system SSO/account transfer process |
-| General e-commerce | Platform (Shopify/WooCommerce/etc.) ownership transfer mechanics, app/plugin inventory and licensing, payment gateway PCI scope |
+| Salon/service business with booking | Booking software client-data export format, recurring membership/package liability transfer, live verification of the client-record count and of the export the platform actually produces (Tier C) |
+| Franchise location (any vertical) | Franchisor-mandated tech stack compliance (can the buyer even choose a different vendor), franchise-system SSO/account transfer process, who holds the customer-facing platform contract — location or franchisor |
+| General e-commerce | Platform (Shopify/WooCommerce/etc.) ownership transfer mechanics, app/plugin inventory and licensing, payment gateway PCI scope, storefront contract terms including who owns the customer data |
 
 **MVP scope:** ship with **one** template (Restaurant with online ordering — the highest-evidence
 vertical in the source research) fully built, and the base tier structure factored so the remaining
 three are additive, not rewrites. See `roadmap.md` Phase 2 for sequencing.
 
+**Status:** all four Templates now exist, published at **v3**, ahead of the design-partner deal-flow
+evidence the MVP-scope decision above called for (`roadmap.md` Phase 2's matching note). That
+decision's reasoning is kept rather than deleted, per this project's convention: it was the right
+call on the evidence available, and the risk it was managing — templates built without observed deal
+flow — is now realized rather than avoided.
+
+What v3 changed, beyond the two structural fixes recorded in §4: every manual item across all four
+Templates carries a verification procedure and a severity rubric, where twelve previously had
+neither; every document-backed and live-access item declares structured capture, where three did;
+and the salon Template gained a Tier C item, having had none at all — for a business whose entire
+value is a client list living inside a booking platform, and whose Tier B item recorded only what
+that platform is *contractually obliged* to export, with nothing verifying that it does.
+
 Templates are versioned (`v1`, `v2`, ...). An in-progress Audit stays pinned to the Template version
 it started on; only new Audits pick up a new Template version. This matters because mid-engagement
-checklist changes would silently invalidate a consultant's already-recorded findings.
+checklist changes would silently invalidate a consultant's already-recorded findings. v3 is the
+first revision to exercise that rule rather than merely state it: v1/v2 content is frozen
+**including its defects** — the bundled live-login item, the missing transferability items — and the
+improvements are applied as a new version rather than edited in, because an Audit already rated
+against v2 was rated against v2's questions.
 
 ## 6. Report generation
 
-- **Structure:** cover (business name, engagement date, consultant/firm branding) → executive summary
-  (one traffic-light row per tier, plus an overall rating) → tiered findings detail (grouped by tier,
-  each finding showing status, severity, note, evidence) → appendix (raw uploaded documents, if the
-  consultant opts to include them).
+- **Structure:** cover page (business name, engagement date and deal stage, consultant/firm
+  branding) → executive summary (one traffic-light row per tier, an overall rating, and the Red
+  findings named individually) → tiered findings detail (grouped by tier, each finding showing
+  status, severity, note, its structured fields, and evidence) → appendix (raw uploaded documents, if
+  the consultant opts to include them). The executive summary names what drove the rating because an
+  overall Red a reader cannot trace to specific findings is an assertion rather than evidence — and
+  tracing it is exactly what a buyer's attorney or accountant does first. Every page after the cover
+  carries a running header and a numbered footer, so a page detached from a printed diligence pack
+  still says whose report it belongs to.
+- **Severity encoding:** every severity is carried on three channels at once — color, the written
+  word, and a shape that escalates (circle → diamond → triangle). A traffic light encoded only in
+  hue is unreadable in a greyscale photocopy and to the ~8% of men with a red/green deficiency, and
+  this is a financial deliverable a stranger reads under the consultant's name.
 - **Severity roll-up:** overall Audit rating = worst tier rating; tier rating = worst item rating
   within that tier, with an explicit rule that any single Red item makes its tier Red regardless of
   how many Greens surround it. Consultants can override the computed overall rating with a manual
   note explaining why (e.g., a Red item they've independently judged immaterial) — the override is
-  always shown alongside the computed rating, never silently replacing it.
+  always shown alongside the computed rating, never silently replacing it. "Always" includes the
+  case where the override *agrees* with the computed rating: the report previously dropped the whole
+  block whenever the two matched, which read as though no override had been made and removed the
+  consultant's reasoning from the document precisely when it was corroborating the machine.
+- **Evidence coverage, alongside rating coverage (decision).** The roll-up already refuses to let a
+  severity badge stand alone, because a fresh Audit with nothing rated rolls up Green and reads as
+  "verified safe" — a severity badge is a claim that something was checked, so how much of the Audit
+  is *rated* travels with it. That principle stopped one level short. Rating coverage answers "is
+  there a rating", which is one click; it does not answer "is there anything behind it". A Tier B
+  contract item could be rated Green with no document attached and every structured field blank, and
+  be presented identically to one backed by an executed agreement. Coverage is therefore reported on
+  two axes — rated and evidenced — measured against §4's declared evidence expectation, at item,
+  tier and Audit level, with ratings that have nothing behind them called out by name.
+  **This is a signal, not a gate**, deliberately. Completing an Audit is the consultant's judgment
+  call, and a seller who will not produce a contract is a real situation with a real finding attached
+  — "terms could not be obtained", which §5's v3 severity rubrics rate explicitly. A product that
+  refused to record that would be worse than one that shows the gap. It lives here rather than in
+  §4's severity model because it qualifies a rating that already exists: §4 declares what each item
+  expects, §6 reports what the Audit actually got.
 - **Export formats:** PDF (v1, primary — this is what gets emailed/handed over in a deal), shareable
   link (Phase 3, see §7).
 - **Whitelabeling:** consultant's logo, name, and color accent on the cover and footer of every page.
@@ -176,7 +278,13 @@ called for, per explicit user direction to build through Phase 3 regardless — 
 `docs/roadmap.md` Phase 3's matching note. The rationale below is preserved as the reasoning that was
 superseded, not deleted, per this project's `spec-writing` convention for resolved-but-overridden
 sections. The implementation matches the "magic-link, no account required" shape this section
-specifies: `src/app/portal/[token]/page.tsx`, `src/lib/actions/portal.ts`.
+specifies: `src/app/portal/[token]/page.tsx`, `src/lib/actions/portal.ts`. The portal serves the
+report from its own streamed PDF route behind the same token resolution as the page — an earlier
+build base64-inlined the whole file into the served HTML, which inflated every page load by ~33% and
+is increasingly refused outright by mobile browsers, i.e. broken on the one surface the buyer sees.
+Portal chrome carries the consultant's logo, name and accent rather than CloseCheck's (§2 principle
+4), and both the page and the PDF route are `noindex` and `no-store`: a revocable link must never be
+indexed or left sitting in a shared cache.
 
 Deferred per `idea.md`'s open question, resolved here: **not core to v1.** Rationale: the PDF export
 already satisfies "hand the buyer something professional," and a portal adds auth, hosting, and
@@ -203,12 +311,34 @@ affected.
   exactly one Consultant Org. No cross-org data access path, including in support tooling — an admin
   impersonation feature must be scoped and logged per-org, never a blanket "view any data" mode.
 - **Document retention:** uploaded Tier B documents (contracts, statements) are the most sensitive
-  data at rest. Default retention: tied to the Engagement lifecycle, with a consultant-configurable
-  deletion policy (e.g., auto-purge N days after the Engagement is marked closed/dead). No indefinite
-  default retention.
+  data at rest. Retention is tied to the Engagement lifecycle, with a consultant-configurable
+  deletion policy. **N = 90 days (decision):** moving an Engagement into a terminal stage (closed or
+  dead) with no purge date set fills one in, 90 days out — long enough to cover post-close questions
+  and a dispute window, short enough that a dead deal's contracts and merchant statements aren't
+  still held a year later for a business nobody ever bought. A date the consultant set themselves
+  always wins, in either direction, including a deliberate blank on an already-closed deal: this is
+  a default, not a policy imposed on them. Recording the number matters because the previous state
+  implemented only the configurable half — the field existed and nothing ever wrote it unless the
+  consultant filled in a form input that is blank by default and easy to miss, so "no indefinite
+  default retention" was a promise the product did not actually keep.
+- **Outbound requests from consultant-supplied input:** Tier A checks fetch the Engagement's primary
+  domain and write what comes back into the Finding — redirect chains and their `Location` headers,
+  HSTS, the CMS generator tag, the TLS certificate's issuer and subject. That is a request-forgery
+  primitive with a read channel attached, reachable by anyone through open self-serve signup, which
+  is why it belongs in this section and not in §10. Two layers, because a name check is not an
+  address check: `primaryDomain` must be a public domain name at input (a bare IP is refused even
+  when public — every Tier A check reads domain-level records, so an address is meaningless to all
+  of them, and refusing the shape is a smaller surface than allow-listing ranges), and the name is
+  resolved and every returned address checked to be public before anything connects. Stated plainly
+  because the opposite assumption is easy to make: **this is not a DNS-rebinding defence.** A record
+  that changes between the check and the connection still wins; closing that needs address pinning
+  or a network-level egress control, neither of which exists.
 - **Audit logging:** who viewed/exported/shared a given Report and when, per Engagement — this is
   itself a feature consultants can point to when a buyer's advisory team asks "who's had access to
-  this."
+  this." Recorded today for portal views (one row per human access, with hashed IPs) and for
+  consultant-side exports — the moment the document leaves the system, which was previously logged
+  nowhere at all. Surfacing that trail to the consultant in-product is Phase 3 work (`roadmap.md`)
+  and is not done.
 - **Compliance posture:** no SOC 2 / compliance certification targeted for MVP; revisit once a design
   partner's own compliance requirements (or a firm's client contract) makes it a sales blocker, not
   before. Track this as a roadmap trigger, not a fixed date.
@@ -371,6 +501,15 @@ Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
   customers exist to segment; grandfather design partners either way.
 - Whether trademark-conflict scanning (Tier A) should eventually be automated against a paid search
   API, or stays a manual, consultant-triggered step indefinitely.
+- Whether evidence coverage (§6) should ever become a gate rather than a signal — e.g., refusing to
+  mark an Audit complete while a Tier B item is rated Green with nothing attached. Currently signal-
+  only, for the reasons recorded in §6. The evidence that would change it is a design partner
+  shipping a report with an unsupported rating that a buyer's advisory team then challenged.
+- Whether 90 days (§8) is the right post-terminal retention default. It's a judgment call, not a
+  researched number, and the consultants' own professional-liability or client-contract retention
+  obligations may cut against it in either direction — ask in Phase 0 discovery, since a firm with a
+  seven-year record-keeping obligation and a firm that wants documents gone at close will both be
+  in the target population.
 - Which named CRM/deal-tracking connector (if any) to build on top of the §13 webhook/API primitive —
   gated on a paying firm naming the tool they'd actually connect, not guessed in advance (see §13's
   integration decision).
