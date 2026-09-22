@@ -16,6 +16,7 @@
     "db:verify-template-versioning": "tsx -r dotenv/config scripts/verify-template-versioning.ts",
     "db:publish-tiera-expansion": "tsx -r dotenv/config scripts/publish-tierA-expansion.ts",
     "db:verify-api-role": "tsx -r dotenv/config scripts/verify-api-role.ts",
+    "db:verify-billing-credits": "tsx -r dotenv/config scripts/verify-billing-credits.ts",
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "metrics:report": "tsx -r dotenv/config scripts/metrics-report.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
