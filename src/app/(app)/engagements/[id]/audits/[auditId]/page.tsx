@@ -311,7 +311,7 @@ export default async function AuditPage({
         </h2>
         <p className="mt-1 text-xs text-slate-500">
           The computed rating above is always kept and shown — an override is added alongside it in
-          the report, never in place of it (docs/spec.md §6).
+          the report, never in place of it.
         </p>
         <form action={updateAuditOverrideAction} className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[140px_1fr_auto]">
           <input type="hidden" name="auditId" value={audit.id} />

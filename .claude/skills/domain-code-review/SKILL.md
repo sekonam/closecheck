@@ -123,6 +123,19 @@ otherwise report directly to the user as plain findings with file/line and concr
   outage, not a restriction. The same config value that safely over-restricts an API limiter made
   sign-in return null for every user on the deployment.
 
+**Any change touching roles, or any message shown when work is blocked** (`spec.md` §3):
+- Firm-scoped actions call `requireOwner`; engagement-scoped ones do not. An action that changes
+  what the FIRM is — billing, seats, API keys, webhooks, branding, the disclaimer acknowledgement —
+  and does not call it is making a claim that it is engagement-scoped. The line is scope, not
+  seniority: a seat that cannot take an audit or issue a report cannot do what the seat is sold for.
+- **Does a blocked-work message instruct a reader who cannot act?** This has appeared twice: a
+  credit-limit message telling a teammate to choose a plan, and a disclaimer gate telling them to
+  accept it — both owner-only. To a member each reads as something they got wrong, with an
+  instruction they cannot follow. Name who can resolve it instead of instructing the reader.
+- Portal-link attribution (`createdById`) is expected to be present and nullable. Any seat may
+  share a report, so the firm must be able to say which seat did — "any seat may do it" and
+  "nobody can tell who did" must not both be true.
+
 **Any change that reads the client's network address** (rate limiting, access logging, abuse
 controls):
 - Never use `in` to test membership of a generated enum or plain object. Prisma's generated enums

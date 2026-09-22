@@ -238,7 +238,12 @@ export async function updateFinding(formData: FormData) {
   // on hardest, and the consultant has to be able to answer. Yellow stays a recommendation, per
   // the spec; the audit page nudges for it without blocking.
   if (severity === Severity.RED && !parsed.note?.trim()) {
-    throw new Error("A Red finding needs a note explaining it — spec §4 requires one.");
+    // No internal reference in a message a consultant reads. "spec §4 requires one" is this
+    // product's paperwork, not a reason — and it is the same leak that put spec.md cross-references
+    // into template descriptions and from there into a client's PDF. Say why the note matters.
+    throw new Error(
+      "A Red finding needs a note. Red is the rating a buyer pushes back on hardest, so record what you found and why it rates Red.",
+    );
   }
 
   const updated = await withOrgScope(orgId, async (tx) => {
