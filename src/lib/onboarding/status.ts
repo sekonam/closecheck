@@ -1,3 +1,4 @@
+import type { UserRole } from "@prisma/client";
 import type { ScopedTx } from "@/lib/db/scoped";
 
 /**
@@ -12,7 +13,20 @@ export type OnboardingStep = {
   title: string;
   detail: string;
   done: boolean;
-  /** The first not-done step is the call-to-action; earlier ones are checkmarks, later ones muted. */
+  /**
+   * Firm setup, which only an account owner can complete (spec.md §3's firm-scoped set: branding,
+   * and accepting the disclaimer on the firm's behalf).
+   *
+   * Shown to a member rather than hidden, deliberately. These two gate work a member CAN do — an
+   * unacknowledged disclaimer blocks report generation for everyone — so a member who cannot
+   * generate a report needs to know why, and "waiting on the account owner" is a better answer than
+   * an item that silently is not there. Hiding it would turn a firm-level prerequisite into an
+   * unexplained failure later, which is the same shape as telling someone to use a control they do
+   * not have.
+   */
+  ownerOnly: boolean;
+  /** True when this step is owner-only and the viewer is not an owner: it is someone else's to do. */
+  waitingOnOwner: boolean;
 };
 
 export type OnboardingStatus = {
@@ -23,7 +37,11 @@ export type OnboardingStatus = {
   disclaimerAcknowledged: boolean;
 };
 
-export async function getOnboardingStatus(tx: ScopedTx, orgId: string): Promise<OnboardingStatus> {
+export async function getOnboardingStatus(
+  tx: ScopedTx,
+  orgId: string,
+  viewerRole: UserRole,
+): Promise<OnboardingStatus> {
   const [org, engagementCount, auditCount, tierAFinding, reportCount, portalLinkCount] = await Promise.all([
     tx.consultantOrg.findUniqueOrThrow({
       where: { id: orgId },
@@ -41,49 +59,68 @@ export async function getOnboardingStatus(tx: ScopedTx, orgId: string): Promise<
   ]);
 
   const brandingSet = !!org.brandLogoUrl || !!org.brandColorHex;
+  const isOwner = viewerRole === "OWNER";
 
   const steps: OnboardingStep[] = [
     {
       key: "branding",
       title: "Set your firm branding",
-      detail: "Add your logo and brand color on Settings — every report goes out under your name, not CloseCheck's.",
+      detail: isOwner
+        ? "Add your logo and brand color on Settings — every report goes out under your name, not CloseCheck's."
+        : "Your account owner sets the firm's logo and color. Reports go out under the firm's name once they have.",
       done: brandingSet,
+      ownerOnly: true,
+      waitingOnOwner: !isOwner && !brandingSet,
     },
     {
       key: "disclaimer",
       title: "Review the report disclaimer",
-      detail: "A one-time review on Settings unlocks report generation (spec.md §6).",
+      detail: isOwner
+        ? "A one-time review on Settings unlocks report generation (spec.md §6)."
+        : "Report generation is blocked for the whole firm until your account owner reviews the disclaimer once.",
       done: !!org.disclaimerAcknowledgedAt,
+      ownerOnly: true,
+      waitingOnOwner: !isOwner && !org.disclaimerAcknowledgedAt,
     },
     {
       key: "engagement",
       title: "Create your first engagement",
       detail: "One engagement per deal. Add the target business and its primary domain.",
       done: engagementCount > 0,
+      ownerOnly: false,
+      waitingOnOwner: false,
     },
     {
       key: "audit",
       title: "Start an audit",
       detail: "Pick a business-type template and start working the tiered checklist.",
       done: auditCount > 0,
+      ownerOnly: false,
+      waitingOnOwner: false,
     },
     {
       key: "tier-a",
       title: "Run the Tier A automated checks",
       detail: "Domain, DNS, SSL, email auth, and HTTPS checks run from public info — no seller cooperation needed.",
       done: !!tierAFinding,
+      ownerOnly: false,
+      waitingOnOwner: false,
     },
     {
       key: "report",
       title: "Generate a report",
       detail: "Turn the findings into a whitelabeled PDF you can hand to the buyer.",
       done: reportCount > 0,
+      ownerOnly: false,
+      waitingOnOwner: false,
     },
     {
       key: "share",
       title: "Share it with a client portal link",
       detail: "Optional: a revocable, no-account link the buyer can open directly (spec.md §7).",
       done: portalLinkCount > 0,
+      ownerOnly: false,
+      waitingOnOwner: false,
     },
   ];
 

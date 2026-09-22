@@ -19,7 +19,7 @@ export default async function EngagementsPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
 
   async function createEngagementAction(formData: FormData) {
     "use server";
@@ -32,7 +32,13 @@ export default async function EngagementsPage({
       include: { audits: { select: { id: true } } },
     }),
   );
-  const onboarding = await withOrgScope(orgId, (tx) => getOnboardingStatus(tx, orgId));
+  // The viewer's own role: the first two onboarding steps are firm setup only an owner can do
+  // (spec.md §3), and a member should be told they are waiting on someone rather than pointed at a
+  // control they do not have.
+  const onboarding = await withOrgScope(orgId, async (tx) => {
+    const viewer = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return getOnboardingStatus(tx, orgId, viewer?.role ?? "MEMBER");
+  });
 
   return (
     <div>
@@ -63,7 +69,12 @@ export default async function EngagementsPage({
           </div>
           <ol className="mt-3 space-y-1.5">
             {(() => {
-              const firstTodo = onboarding.steps.findIndex((s) => !s.done);
+              // The highlighted call-to-action is the first unfinished step THIS VIEWER can act on.
+              // Without the second condition a member's next action was "Set your firm branding" —
+              // owner-only — so the checklist nudged them toward a control they do not have. The
+              // step still shows, because an unacknowledged disclaimer blocks report generation for
+              // the whole firm and a member needs to know why; it just is not presented as theirs.
+              const firstTodo = onboarding.steps.findIndex((s) => !s.done && !s.waitingOnOwner);
               return onboarding.steps.map((step, i) => {
                 const isNext = i === firstTodo;
                 return (
@@ -82,14 +93,23 @@ export default async function EngagementsPage({
                     </span>
                     <span>
                       <span className={isNext ? "font-medium" : ""}>{step.title}</span>
-                      {isNext && <span className="block text-xs text-slate-300">{step.detail}</span>}
+                      {/* Also shown for a step that is someone else's to do: detail used to render
+                          only for the call-to-action, so making owner-only steps non-actionable for
+                          a member hid the very sentence explaining why. The member would have seen
+                          "Set your firm branding" with no indication it was not theirs. */}
+                      {(isNext || step.waitingOnOwner) && (
+                        <span className="block text-xs text-slate-300">{step.detail}</span>
+                      )}
                     </span>
                   </li>
                 );
               });
             })()}
           </ol>
-          {(!onboarding.steps[0].done || !onboarding.disclaimerAcknowledged) && (
+          {/* Only offered to someone who can actually finish it: firm branding and the disclaimer
+              are owner-only (spec.md §3), so sending a member to Settings would land them on
+              controls that reject them. Their checklist copy names the owner instead. */}
+          {onboarding.steps.some((s) => s.ownerOnly && !s.done && !s.waitingOnOwner) && (
             <Link
               href="/settings"
               className="mt-3 inline-block rounded-md bg-white px-3 py-1.5 text-xs font-medium text-slate-900 hover:bg-slate-100"
