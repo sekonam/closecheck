@@ -155,6 +155,13 @@ this manual motion; expect a first reply/meeting in 2–4 weeks, not immediately
   the lead offer, monthly second, per-audit overage billed as a monthly rollup invoice rather than
   one charge per audit (`docs/research/profitability.md`'s lever #4).
 
+  **How to re-verify, because CI does not.** That suite creates real objects against a real Stripe
+  test-mode account, so CI opts out of it explicitly (`CLOSECHECK_SKIP_STRIPE_E2E`). It is a manual
+  pre-release check, not a per-push one: run `npm run test:integration` on a machine with
+  `STRIPE_SECRET_KEY` (an `sk_test_` key) and `STRIPE_WEBHOOK_SECRET` set. If neither the key nor
+  the opt-out is present the suite now fails rather than skipping — it used to skip silently, which
+  meant this gate reported itself verified on every run while asserting nothing.
+
   *Superseded note (2026-09-21), kept rather than deleted:* "the pricing page is display-only — no
   payment dependency or billing code exists anywhere in the app. Public beta with signup but no
   payment path burns the one first-impression each prospect gives us."

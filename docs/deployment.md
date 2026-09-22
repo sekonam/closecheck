@@ -86,7 +86,18 @@ first "Apply Blueprint" click are yours.
 
    `NODE_ENV=production` skips seeding the local dev login (`dev@closecheck.local`) — production
    accounts come from `/signup` instead.
-10. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
+10. **Backfill retention dates on any pre-existing engagements** (one-off, only relevant when
+    deploying over a database that already holds data — skip on a fresh install):
+    ```
+    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/backfill-retention-dates.ts
+    DIRECT_DATABASE_URL="<external connection string>" npx tsx -r dotenv/config scripts/backfill-retention-dates.ts --apply
+    ```
+    Dry-run first (the default), then `--apply`. It only fills nulls on engagements already in a
+    terminal deal stage and is idempotent. Without it, engagements that reached CLOSED or DEAD
+    before the retention default existed keep their documents indefinitely — nobody would ever
+    re-save them, so nothing else would set a date (`docs/spec.md` §8).
+
+11. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
     create an engagement, start an audit, run Tier A checks, generate a report.
 
 ## Ongoing deploys
