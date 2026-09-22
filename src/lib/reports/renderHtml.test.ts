@@ -5,9 +5,12 @@ import {
   countFindingsBySeverity,
   escapeHtml,
   normalizeAccentColor,
+  pageTextAccent,
   readableTextOn,
   renderReportHtml,
   safeImageDataUri,
+  statusContradictsSeverity,
+  structuralAccent,
   topRiskFindings,
   type ReportData,
   type ReportFinding,
@@ -572,7 +575,9 @@ describe("appendix", () => {
     expect(html).toContain("scan_0043.pdf"); // real filename kept alongside the label
     expect(html).toContain("PDF");
     expect(html).toContain("2.3 MB");
-    expect(html).toContain("J. Smith, 2026-09-14");
+    // Reads "J. Smith, 2026-09-14"; the date sits in its own nowrap span so that a long attributor
+    // name can wrap inside the column without the ISO date splitting as "2026-09-" / "14".
+    expect(html).toContain(`J. Smith, <span style="white-space:nowrap">2026-09-14</span>`);
     expect(html).toContain("Primary business-system contract terms");
   });
 
@@ -692,5 +697,325 @@ describe("citations in the report", () => {
     );
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four defects found by rendering real PDFs and reading the pages.
+// ---------------------------------------------------------------------------
+
+describe("table width can never push content off the paper", () => {
+  // The defect, reproduced against a real PDF: one 600-character unbroken token in ONE finding's
+  // note widened the shared tier table past A4, and every OTHER finding's structured columns were
+  // clipped off the right edge — absent from the PDF's text layer, not merely overflowing it.
+  const saasSchema = {
+    fields: [
+      {
+        key: "tools",
+        label: "Recurring SaaS inventory",
+        kind: "table",
+        columns: [
+          { key: "vendor", label: "Vendor", kind: "text" },
+          { key: "monthlyCost", label: "Monthly cost", kind: "money" },
+          { key: "termEnd", label: "Term end", kind: "date" },
+          { key: "owner", label: "Account owner of record at the seller organisation", kind: "text" },
+        ],
+      },
+    ],
+  };
+
+  function poisonedReport(): ReportData {
+    return report({
+      findings: [
+        finding({
+          id: "poison",
+          tier: Tier.B,
+          title: "Third-party integration identifiers",
+          status: "FAIL",
+          severity: Severity.YELLOW,
+          note: "The seller's export emitted this identifier verbatim: " + "A".repeat(600),
+          templateItem: {
+            tier: Tier.B,
+            title: "Third-party integration identifiers",
+            description: null,
+            method: CheckMethod.MANUAL,
+          },
+        }),
+        finding({
+          id: "saas",
+          tier: Tier.B,
+          title: "Recurring SaaS inventory",
+          status: "FAIL",
+          severity: Severity.RED,
+          templateItem: {
+            tier: Tier.B,
+            title: "Recurring SaaS inventory",
+            description: null,
+            method: CheckMethod.MANUAL,
+            fieldSchema: saasSchema,
+          },
+          structuredData: {
+            tools: Array.from({ length: 40 }, (_, i) => ({
+              vendor: `Vendor ${i + 1}`,
+              monthlyCost: `${137 + i}`,
+              termEnd: "2027-02-11",
+              owner: "owner@seller.example",
+            })),
+          },
+        }),
+      ],
+      appendixDocuments: [
+        {
+          findingTitle: "Recurring SaaS inventory",
+          tier: Tier.B,
+          filename: "seller_export_" + "b".repeat(180) + ".pdf",
+          label: null,
+          mimeType: "application/pdf",
+          sizeBytes: 2_411_724,
+          attributedTo: "J. Smith",
+          attachedAt: new Date("2026-09-14T09:30:00Z"),
+        },
+      ],
+    });
+  }
+
+  it("breaks a long unbroken token instead of letting it size the table", () => {
+    // overflow-wrap:anywhere and NOT break-word: only `anywhere` reduces min-content width, which
+    // is the number auto table layout sizes columns from. break-word alone leaves the defect.
+    expect(renderReportHtml(poisonedReport())).toContain("overflow-wrap: anywhere");
+  });
+
+  it("fixes every table's layout so no cell content can widen it", () => {
+    expect(renderReportHtml(poisonedReport())).toContain("table-layout: fixed");
+  });
+
+  it("declares a width on the first row of every table, which is what fixed layout reads", () => {
+    const html = renderReportHtml(poisonedReport());
+    // The outer tier table.
+    expect(html).toContain('<th style="width:72%;text-align:left');
+    expect(html).toContain('<th style="width:28%;text-align:right');
+    // The structured table inside it: 2 text columns + 2 atomic ones, weighted 2:2:1:1.
+    expect(html).toContain('<th style="width:33.33%;text-align:left');
+    expect(html).toContain('<th style="width:16.67%;text-align:right');
+    // The appendix.
+    expect(html).toContain('<th style="width:30%;text-align:left');
+    expect(html).toContain('<th style="width:22%;text-align:left');
+    // Every <table> carries an explicit width, or fixed layout has nothing to distribute.
+    for (const openTag of html.match(/<table style="[^"]*"/g) ?? []) {
+      expect(openTag).toMatch(/width:\s*\d/);
+    }
+  });
+
+  it("lets a long schema-declared column label wrap rather than holding the table open", () => {
+    const html = renderReportHtml(poisonedReport());
+    // The <th> opening tag the label sits in, not the label text that follows it.
+    const labelAt = html.indexOf("Account owner of record");
+    const openingTag = html.slice(html.lastIndexOf("<th", labelAt), labelAt);
+    // A 50-character schema-declared label held on one line was half of what pushed this table off
+    // the paper. Column labels are consultant-authored strings of any length; they wrap.
+    expect(openingTag).not.toContain("white-space:nowrap");
+  });
+
+  // Passes before the fix as well as after, deliberately: it guards the EARLIER deliberate fix
+  // (a term end must never print as "2027-02-" / "11") against the new wrapping rules, rather than
+  // the defect above. nowrap removes every soft wrap opportunity, so overflow-wrap cannot reach
+  // these cells.
+  it("still keeps money, percent and date cells atomic", () => {
+    const html = renderReportHtml(poisonedReport());
+    expect(html).toContain("white-space:nowrap;padding:4px 8px");
+    const cell = html.slice(html.indexOf("2027-02-11") - 200, html.indexOf("2027-02-11"));
+    expect(cell).toContain("white-space:nowrap");
+  });
+});
+
+describe("a status that contradicts its own severity", () => {
+  it("names the two genuinely contradictory pairs and nothing else", () => {
+    expect(statusContradictsSeverity("PASS", Severity.RED)).toBe(true);
+    expect(statusContradictsSeverity("PASS", Severity.YELLOW)).toBe(true);
+    expect(statusContradictsSeverity("FAIL", Severity.GREEN)).toBe(true);
+    // Unresolved is not the same as contradictory: an item can be blocked AND already known bad.
+    expect(statusContradictsSeverity("BLOCKED", Severity.RED)).toBe(false);
+    expect(statusContradictsSeverity("IN_PROGRESS", Severity.RED)).toBe(false);
+    expect(statusContradictsSeverity("PASS", Severity.GREEN)).toBe(false);
+    expect(statusContradictsSeverity("FAIL", Severity.RED)).toBe(false);
+    expect(statusContradictsSeverity("PASS", null)).toBe(false);
+  });
+
+  function contradictoryReport(): ReportData {
+    return report({
+      findings: [
+        finding({
+          id: "ssl",
+          tier: Tier.A,
+          title: "SSL certificate validity",
+          status: "PASS",
+          severity: Severity.RED,
+          note: "Expires 2029-04-01 (925 days out)",
+          templateItem: {
+            tier: Tier.A,
+            title: "SSL certificate validity",
+            description: null,
+            method: CheckMethod.AUTOMATED,
+          },
+        }),
+      ],
+    });
+  }
+
+  it("keeps the severity the roll-up used and states the disagreement in words", () => {
+    // The row printed "Pass" beside a Red badge with no explanation. The severity cannot be dropped
+    // — every aggregate in the document was computed from it — and the status cannot be hidden, so
+    // both are shown and the contradiction is named.
+    const html = renderReportHtml(contradictoryReport());
+    // The LAST occurrence: the title also appears in the executive summary's risk panel above.
+    const row = html.slice(html.lastIndexOf("SSL certificate validity"));
+    const cell = row.slice(0, row.indexOf("</tr>"));
+    expect(cell).toContain("Pass");
+    expect(cell).toContain("Red");
+    expect(cell).toContain("Recorded status and rating disagree");
+  });
+
+  it("marks the contradiction in the executive summary's risk panel too", () => {
+    // This finding is listed under "What drove the rating" while its own note reads benign. Without
+    // the marker the entry is unexplainable on the one page some readers open.
+    const html = renderReportHtml(contradictoryReport());
+    const panel = html.slice(
+      html.indexOf("What drove the rating"),
+      html.indexOf("How to read the ratings"),
+    );
+    expect(panel).toContain("recorded status: Pass");
+    expect(panel).toContain("disagrees with this rating");
+  });
+
+  it("says nothing on a finding whose status and severity agree", () => {
+    const html = renderReportHtml(
+      report({ findings: [finding({ status: "FAIL", severity: Severity.RED })] }),
+    );
+    expect(html).not.toContain("Recorded status and rating disagree");
+    expect(html).not.toContain("recorded status:");
+  });
+});
+
+describe("a brand colour too pale to draw structure with", () => {
+  it("leaves a brand colour that is already visible on paper exactly as chosen", () => {
+    // The consultant's own colour is never second-guessed where it does no harm.
+    expect(structuralAccent("#0d7a6f")).toBe("#0d7a6f");
+    expect(structuralAccent("#0f172a")).toBe("#0f172a");
+    expect(structuralAccent("#b91c1c")).toBe("#b91c1c");
+  });
+
+  it("darkens an accent that cannot be seen against the page, keeping its hue", () => {
+    const white = structuralAccent("#ffffff");
+    expect(white).not.toBe("#ffffff");
+    // Neutral in, neutral out.
+    expect(white.slice(1, 3)).toBe(white.slice(3, 5));
+    expect(white.slice(3, 5)).toBe(white.slice(5, 7));
+
+    // A pale gold stays gold rather than becoming grey.
+    const gold = structuralAccent("#fff3c4");
+    expect(parseInt(gold.slice(1, 3), 16)).toBeGreaterThan(parseInt(gold.slice(5, 7), 16));
+  });
+
+  it("clamps to WCAG's 3:1 non-text contrast bar against white, and no further", () => {
+    const luminance = (hex: string): number => {
+      const channel = (start: number): number => {
+        const v = parseInt(hex.slice(start, start + 2), 16) / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+    };
+    for (const pale of ["#ffffff", "#fff3c4", "#f8fafc", "#e2e8f0"]) {
+      const clamped = structuralAccent(pale);
+      expect(1.05 / (luminance(clamped) + 0.05)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("uses the muted slate for accent-coloured text an accent is too pale to carry", () => {
+    // Text needs 4.5:1, which many perfectly good brand accents miss — falling back beats darkening
+    // the brand into something the firm did not pick.
+    expect(pageTextAccent("#0d7a6f")).toBe("#0d7a6f");
+    expect(pageTextAccent("#ffffff")).toBe("#64748b");
+    expect(pageTextAccent(structuralAccent("#ffffff"))).toBe("#64748b");
+  });
+
+  it("renders a structured document for a white-branded firm", () => {
+    // Observed: brandColorHex "#ffffff" produced a cover band, section rules, table-header fills and
+    // running header/footer rules that were all white on white. Text stayed legible, so nothing
+    // looked broken — the deliverable had simply lost every boundary a reader navigates by.
+    const html = renderReportHtml(
+      report({
+        org: { name: "Whitehall Advisory", brandColorHex: "#ffffff", brandLogoDataUri: null },
+        findings: [finding({ severity: Severity.RED, status: "FAIL" })],
+      }),
+    );
+    expect(html).not.toContain("solid #ffffff");
+    expect(html).not.toContain("background:#ffffff;color:");
+    expect(html).not.toContain("rgba(255,255,255,");
+    // And a normally-branded firm's document is untouched.
+    expect(renderReportHtml(report({ findings: [finding({})] }))).toContain("solid #0d7a6f");
+  });
+});
+
+describe("the executive summary's risk list represents every tier", () => {
+  function twentyPerTier(): ReportFinding[] {
+    const findings: ReportFinding[] = [];
+    for (const tier of [Tier.A, Tier.B, Tier.C]) {
+      for (let i = 0; i < 20; i++) {
+        findings.push(
+          finding({
+            id: `${tier}${i}`,
+            tier,
+            title: `${tier} red item ${i + 1}`,
+            status: "FAIL",
+            severity: Severity.RED,
+            templateItem: { tier, title: `${tier} red item ${i + 1}`, description: null },
+          }),
+        );
+      }
+    }
+    return findings;
+  }
+
+  it("does not let one tier fill the whole panel", () => {
+    // Observed: with 20 Reds in each tier the panel listed eight Tier A items and "+ 52 further Red
+    // items in the detail section" — Tier B and C, where the material findings in a deal live,
+    // never reached the one page some readers open.
+    const tiers = topRiskFindings(twentyPerTier(), 8).map((f) => f.templateItem.tier);
+    expect(new Set(tiers)).toEqual(new Set([Tier.A, Tier.B, Tier.C]));
+    // Round-robin: nobody gets a second slot before every tier has had a first.
+    expect(tiers.filter((t) => t === Tier.A)).toHaveLength(3);
+    expect(tiers.filter((t) => t === Tier.B)).toHaveLength(3);
+    expect(tiers.filter((t) => t === Tier.C)).toHaveLength(2);
+  });
+
+  it("keeps the panel in tier order for reading", () => {
+    const order = { A: 0, B: 1, C: 2 } as const;
+    const tiers = topRiskFindings(twentyPerTier(), 8).map((f) => order[f.templateItem.tier]);
+    expect([...tiers].sort()).toEqual(tiers);
+  });
+
+  it("names items from every tier in the rendered summary panel", () => {
+    const html = renderReportHtml(report({ findings: twentyPerTier() }));
+    const panel = html.slice(
+      html.indexOf("What drove the rating"),
+      html.indexOf("How to read the ratings"),
+    );
+    expect(panel).toContain("A red item 1");
+    expect(panel).toContain("B red item 1");
+    expect(panel).toContain("C red item 1");
+    expect(panel).toContain("+ 52 further Red items");
+  });
+
+  it("degrades to plain order when only one tier has Reds", () => {
+    const only = Array.from({ length: 5 }, (_, i) =>
+      finding({ id: `a${i}`, tier: Tier.A, title: `A ${i}`, severity: Severity.RED, status: "FAIL" }),
+    );
+    expect(topRiskFindings(only, 8).map((f) => f.templateItem.title)).toEqual([
+      "A 0",
+      "A 1",
+      "A 2",
+      "A 3",
+      "A 4",
+    ]);
   });
 });

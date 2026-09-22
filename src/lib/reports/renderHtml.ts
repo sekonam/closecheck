@@ -169,20 +169,90 @@ export function normalizeAccentColor(hex: string | null | undefined): string {
   return DEFAULT_ACCENT;
 }
 
-/**
- * Text color to put on top of an arbitrary brand accent. The consultant picks their own brand color
- * and the product has no say in it — a firm whose accent is pale gold gets white-on-gold table
- * headers that are unreadable in print unless the foreground flips. WCAG relative luminance, 0.5 as
- * the crossover (the point where contrast against white and against near-black are equal).
- */
-export function readableTextOn(hex: string): string {
+/** WCAG relative luminance of a normalized hex color. */
+function relativeLuminance(hex: string): number {
   const normalized = normalizeAccentColor(hex);
   const channel = (start: number): number => {
     const v = parseInt(normalized.slice(start, start + 2), 16) / 255;
     return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
   };
-  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
-  return luminance > 0.4 ? "#0f172a" : "#ffffff";
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** Contrast ratio of a color against the white page this document is printed on. */
+function contrastWithPage(hex: string): number {
+  return 1.05 / (relativeLuminance(hex) + 0.05);
+}
+
+/**
+ * Text color to put on top of an arbitrary brand accent. The consultant picks their own brand color
+ * and the product has no say in it — a firm whose accent is pale gold gets white-on-gold table
+ * headers that are unreadable in print unless the foreground flips.
+ *
+ * The crossover is the luminance at which contrast against #ffffff and against #0f172a are equal:
+ * (L+0.05)/0.0614 = 1.05/(L+0.05) solves to L ≈ 0.204. It was previously 0.4, which is nowhere in
+ * particular — a fill at L = 0.35 got white text at 2.6:1 when dark text would have given 5.0:1.
+ * Every color the existing tests pin (#0d7a6f, #0f172a, #facc15, #ffffff) lands on the same side of
+ * 0.204 as it did of 0.4; what changes is the mid-tones between them, all of them for the better.
+ */
+export function readableTextOn(hex: string): string {
+  return relativeLuminance(hex) > 0.204 ? "#0f172a" : "#ffffff";
+}
+
+/**
+ * The accent, darkened only as far as it must be to still read as a *shape* on white paper.
+ *
+ * Observed in a rendered PDF: an org whose brandColorHex is "#ffffff" got a document with no
+ * structure at all — the cover band, every section rule, every table-header fill and the running
+ * header/footer rules were white on white. Text stayed legible (readableTextOn flips correctly), so
+ * nothing looked broken; the deliverable had simply lost every visual boundary a reader navigates
+ * by, with no error anywhere to say so.
+ *
+ * The rule is WCAG 1.4.11's non-text contrast bar, 3:1 against the page — the same line the
+ * standard draws for "is this graphical object perceivable at all". An accent that already clears it
+ * is returned untouched, so a consultant's deliberately-chosen brand color is never second-guessed:
+ * #0d7a6f, #0f172a, and every other normal brand accent come back byte-identical. Only an accent
+ * that cannot be seen is changed, and then only by scaling its sRGB channels — which holds the hue,
+ * so a pale-gold firm gets a deeper gold rather than a grey, and a white firm gets a neutral grey
+ * because grey is what white actually is once it has to be visible.
+ *
+ * Deliberately NOT applied to accent-colored *text*, which needs the stricter 4.5:1 and gets
+ * `pageTextAccent` instead.
+ */
+export function structuralAccent(hex: string): string {
+  const normalized = normalizeAccentColor(hex);
+  if (contrastWithPage(normalized) >= 3) return normalized;
+
+  const rgb = [
+    parseInt(normalized.slice(1, 3), 16),
+    parseInt(normalized.slice(3, 5), 16),
+    parseInt(normalized.slice(5, 7), 16),
+  ];
+  const scaled = (factor: number): string =>
+    `#${rgb.map((c) => Math.round(c * factor).toString(16).padStart(2, "0")).join("")}`;
+
+  // Binary search the largest channel scale that still clears 3:1. Monotonic in `factor`, so 24
+  // iterations is far more than enough to land inside one 8-bit step.
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (low + high) / 2;
+    if (contrastWithPage(scaled(mid)) >= 3) low = mid;
+    else high = mid;
+  }
+  return scaled(low);
+}
+
+/**
+ * The accent used as *text* on the white page (the cover's eyebrow line). Body text needs 4.5:1,
+ * which plenty of perfectly good brand accents do not reach — so rather than darkening the brand
+ * color into something the firm did not choose, this falls back to the document's own muted slate
+ * and leaves the brand to the places it does work (the bands, rules and fills `structuralAccent`
+ * covers, plus the firm's own logo). An accent that clears 4.5:1 is used exactly as given.
+ */
+export function pageTextAccent(hex: string): string {
+  const normalized = normalizeAccentColor(hex);
+  return contrastWithPage(normalized) >= 4.5 ? normalized : MUTED_TEXT;
 }
 
 /** A very light wash of the accent, for table-header and panel backgrounds where full-strength
@@ -238,18 +308,82 @@ export function countFindingsBySeverity(findings: ReportFinding[]): SeverityCoun
   return counts;
 }
 
+const TIER_ORDER: Record<Tier, number> = { A: 0, B: 1, C: 2 };
+
 /**
- * The Red findings, in tier order, for the summary's "what drove this rating" list. spec.md §6's
- * roll-up rule means a single Red turns the whole audit Red — without naming which item did it, the
- * traffic light tells a buyer's advisor that something is wrong but not what, which is the one
- * question they will actually ask the consultant.
+ * The Red findings for the summary's "what drove this rating" list. spec.md §6's roll-up rule means
+ * a single Red turns the whole audit Red — without naming which item did it, the traffic light tells
+ * a buyer's advisor that something is wrong but not what, which is the one question they will
+ * actually ask the consultant.
+ *
+ * Selection is round-robin across the tiers, not "sort by tier then take the first N". Observed in a
+ * rendered PDF with 20 Red findings in each tier: the panel listed eight Tier A items and then
+ * "+ 52 further Red items in the detail section" — so the one page some readers open showed nothing
+ * from Tier B or C, which is precisely where the material findings in a deal live (spec.md §4: Tier
+ * A is the external, no-cooperation-needed surface; Tier B is the seller's own contracts and
+ * statements). A tier-blind slice is worse than a shorter list, because a reader has no way to tell
+ * that the omission is an artifact of the ordering rather than a statement about the deal.
+ *
+ * Taking one from each tier in turn means every tier that has a Red is represented before any tier
+ * gets a second slot, and the list still degrades correctly: with Reds in one tier only, this is
+ * exactly the old behaviour. The selected findings are then re-sorted into tier order for display,
+ * so the panel still reads A-then-B-then-C rather than interleaved.
  */
 export function topRiskFindings(findings: ReportFinding[], limit = 8): ReportFinding[] {
-  const tierOrder: Record<Tier, number> = { A: 0, B: 1, C: 2 };
-  return findings
-    .filter((f) => f.status !== "NOT_APPLICABLE" && f.severity === Severity.RED)
-    .sort((a, b) => tierOrder[a.templateItem.tier] - tierOrder[b.templateItem.tier])
-    .slice(0, limit);
+  const reds = findings.filter((f) => f.status !== "NOT_APPLICABLE" && f.severity === Severity.RED);
+  const queues: Record<Tier, ReportFinding[]> = { A: [], B: [], C: [] };
+  for (const f of reds) queues[f.templateItem.tier].push(f);
+
+  const picked: ReportFinding[] = [];
+  for (let round = 0; picked.length < limit; round++) {
+    let tookOne = false;
+    for (const tier of ["A", "B", "C"] as Tier[]) {
+      const next = queues[tier][round];
+      if (next === undefined) continue;
+      tookOne = true;
+      picked.push(next);
+      if (picked.length === limit) break;
+    }
+    if (!tookOne) break;
+  }
+
+  return picked.sort(
+    (a, b) => TIER_ORDER[a.templateItem.tier] - TIER_ORDER[b.templateItem.tier],
+  );
+}
+
+/**
+ * A finding whose recorded status and severity say opposite things about the same item.
+ *
+ * Observed in a rendered PDF: a row printing status "Pass" beside a Red badge, note "Expires
+ * 2029-04-01 (925 days out)" — and then listed in the executive summary's "What drove the rating"
+ * panel, where its own note tells the buyer nothing is wrong. Whichever of the two fields is the
+ * mistake, the reader is holding a document that contradicts itself under the consultant's name.
+ *
+ * WHY THE SEVERITY WINS AND THE STATUS IS STATED ANYWAY. The severity is not cosmetic here: it is
+ * the value computeSeverityRollup already counted, so it is behind the tier badge, the overall
+ * rating, the Red/Yellow/Green tallies and this finding's place in the risk panel. Dropping it from
+ * the row would make the row disagree with every aggregate in the document that was computed from
+ * it — the same failure the NOT_APPLICABLE suppression exists to prevent, just pointed the other
+ * way. (That path is different and stays as it is: a NOT_APPLICABLE finding is excluded from the
+ * roll-up entirely, so suppressing its badge makes the row agree with the aggregates.)
+ *
+ * But silently dropping the *status* is not honest either — the consultant recorded it, it is a
+ * client-facing field per spec.md §6 ("each finding showing status, severity, note, evidence"), and
+ * a reader who later sees it in any other artifact would find a report that had quietly hidden it.
+ * So both are printed and the disagreement is named in words, which also tells the reader the
+ * contradiction is real data rather than a rendering glitch, and gives them the one sentence they
+ * need to raise it with the consultant.
+ *
+ * Only the two genuinely contradictory pairs qualify. "Blocked" or "In progress" beside a Red badge
+ * is not a contradiction — an item can be unresolved *and* already known to be bad — and flagging
+ * those would train readers to ignore the flag.
+ */
+export function statusContradictsSeverity(status: string, severity: Severity | null): boolean {
+  if (severity === null) return false;
+  if (status === "PASS") return severity === Severity.RED || severity === Severity.YELLOW;
+  if (status === "FAIL") return severity === Severity.GREEN;
+  return false;
 }
 
 function badge(severity: Severity, size: "sm" | "md" = "sm"): string {
@@ -294,6 +428,29 @@ function formatDate(date: Date): string {
  * The defect these fix: without `break-inside: avoid` a finding's title landed at the bottom of one
  * page and its severity badge at the top of the next, i.e. a row of the deliverable that says
  * nothing about risk followed by a Red badge attached to no title.
+ *
+ * TABLE WIDTH IS NOT NEGOTIABLE (the `body`/`table` rules at the end of the block)
+ * -------------------------------------------------------------------------------
+ * Observed in a rendered PDF: a Tier B finding whose note carried a 600-character unbroken
+ * identifier widened the tier table past the paper, and every OTHER finding's structured columns
+ * were clipped off the right edge. A 40-row recurring-SaaS inventory printed its Vendor column and
+ * nothing else — no monthly costs, no term ends, no account owners; the evidence appendix printed
+ * Document and dropped Type, Evidence for, Tier and Provided by. `pdftotext`, plain and `-layout`,
+ * confirmed the clipped columns were absent from the PDF's text layer entirely. That is data loss,
+ * not visual overflow, and nothing on the page said anything was missing: a consultant would have
+ * sent a buyer a SaaS inventory with no costs and an appendix with no provenance, and neither of
+ * them would have had any way to know.
+ *
+ * `overflow-wrap: anywhere` and NOT `break-word`, because only `anywhere` reduces an element's
+ * min-content width — which is exactly the number auto table layout sizes columns from, and
+ * therefore the number that was pushing the table past the page. `table-layout: fixed` is the belt
+ * to that braces: a table's width becomes its declared width, full stop, so no cell content of any
+ * shape can widen it again. Every table in this file consequently declares a width, and its FIRST
+ * row declares the column widths, because fixed layout reads the first row and ignores the rest.
+ *
+ * Cells that must stay atomic — money, percent, date — set `white-space: nowrap` locally. That
+ * suppresses every soft wrap opportunity, so this rule cannot touch them and the earlier fix for a
+ * term-end column reading "2027-02-" / "28" still holds. Only free text breaks.
  */
 const PRINT_STYLES = `
   @page { size: A4; }
@@ -313,6 +470,11 @@ const PRINT_STYLES = `
   tfoot { display: table-footer-group; }
   h2, h3 { break-after: avoid; page-break-after: avoid; }
   section { break-inside: auto; }
+
+  /* The two rules that stop one long token from deleting other findings' data — see the "TABLE
+     WIDTH IS NOT NEGOTIABLE" note above this constant, which is where the reasoning lives. */
+  body { overflow-wrap: anywhere; }
+  table { table-layout: fixed; max-width: 100%; }
 `;
 
 /**
@@ -338,7 +500,12 @@ const PRINT_STYLES = `
  */
 export function renderReportHtml(data: ReportData): string {
   const rollup = computeSeverityRollup(data.findings);
-  const accent = normalizeAccentColor(data.org.brandColorHex);
+  // Everything downstream paints `accent` onto the white page — bands, rules, table-header fills,
+  // the running header/footer, the panel washes — so the accent is resolved through
+  // structuralAccent once, here. For every brand color that is already visible on paper this is the
+  // identity function and the whitelabel treatment is byte-for-byte unchanged; it only bites on an
+  // accent so pale that the structure it draws would not exist. See structuralAccent.
+  const accent = structuralAccent(normalizeAccentColor(data.org.brandColorHex));
   const accentText = readableTextOn(accent);
   const logo = safeImageDataUri(data.org.brandLogoDataUri);
   const counts = countFindingsBySeverity(data.findings);
@@ -362,8 +529,8 @@ export function renderReportHtml(data: ReportData): string {
         <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
           <thead>
             <tr style="background:${accent};color:${accentText}">
-              <th style="text-align:left;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600">${escapeHtml(TIER_SHORT[tier])} finding</th>
-              <th style="text-align:right;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;white-space:nowrap">Status &amp; rating</th>
+              <th style="width:72%;text-align:left;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600">${escapeHtml(TIER_SHORT[tier])} finding</th>
+              <th style="width:28%;text-align:right;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;white-space:nowrap">Status &amp; rating</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -425,7 +592,7 @@ function coverPage(
     </div>
 
     <div style="flex:1 1 auto;padding-top:44px">
-      <div style="font-size:13px;text-transform:uppercase;letter-spacing:0.18em;color:${accent === "#0f172a" ? MUTED_TEXT : accent};font-weight:600">Technology Due-Diligence Report</div>
+      <div style="font-size:13px;text-transform:uppercase;letter-spacing:0.18em;color:${accent === DEFAULT_ACCENT ? MUTED_TEXT : pageTextAccent(accent)};font-weight:600">Technology Due-Diligence Report</div>
       <h1 style="margin:12px 0 0 0;font-size:38px;line-height:1.15;letter-spacing:-0.01em">${escapeHtml(data.businessName)}</h1>
 
       <div class="keep-together" style="margin-top:28px;display:inline-block;padding:12px 18px;border:1px solid #cbd5e1;border-left:6px solid ${accent};background:#f8fafc">
@@ -438,7 +605,7 @@ function coverPage(
         }
       </div>
 
-      <table style="margin-top:34px;border-collapse:collapse">
+      <table style="width:100%;margin-top:34px;border-collapse:collapse">
         ${data.engagementDate ? metaRow("Engagement date", formatDate(data.engagementDate)) : ""}
         ${data.dealStage ? metaRow("Deal stage", data.dealStage) : ""}
         ${metaRow("Audit template", data.templateName)}
@@ -491,7 +658,11 @@ function executiveSummary(
       <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;white-space:nowrap">${escapeHtml(TIER_SHORT[tier])}</td>
       <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:12px;color:${NEUTRAL_TEXT}">${escapeHtml(TIER_LABEL[tier].replace(/^Tier [ABC] — /, ""))}</td>
       <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${tierCounts.red} ${SEVERITY_GLYPH.RED} · ${tierCounts.yellow} ${SEVERITY_GLYPH.YELLOW} · ${tierCounts.green} ${SEVERITY_GLYPH.GREEN}</td>
-      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;text-align:right;white-space:nowrap">${rating}</td>
+      <!-- Not nowrap: the badge holds itself on one line, but the coverage note beside it
+           ("(20/20 rated)", "(not in this template)") is prose and must be allowed onto a second
+           line. Under table-layout:fixed a nowrap cell does not widen its column, it is clipped —
+           seen in a rendered PDF as a Rating column reading "(not in this te". -->
+      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;text-align:right">${rating}</td>
     </tr>`;
   };
 
@@ -510,6 +681,13 @@ function executiveSummary(
           <td style="padding:6px 10px 6px 0;vertical-align:top;width:18px;color:${SEVERITY_COLOR.RED};font-size:13px">${SEVERITY_GLYPH.RED}</td>
           <td style="padding:6px 8px 6px 0;vertical-align:top;font-size:12px;color:${MUTED_TEXT};white-space:nowrap;width:56px">${escapeHtml(TIER_SHORT[f.templateItem.tier])}</td>
           <td style="padding:6px 0;vertical-align:top;font-size:13px;font-weight:600">${escapeHtml(f.templateItem.title)}${
+            statusContradictsSeverity(f.status, f.severity)
+              ? // Named here too, not only on the detail row: this panel sits on the page some
+                // readers are the only ones to open, and a Red entry whose own note reads benign
+                // ("Expires 2029-04-01 (925 days out)") is unexplainable without it.
+                `<span style="font-weight:400;font-size:11.5px;color:${MUTED_TEXT}"> — recorded status: ${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}, which disagrees with this rating</span>`
+              : ""
+          }${
             f.note
               ? `<div style="margin-top:2px;font-size:12px;font-weight:400;color:${NEUTRAL_TEXT}">${escapeHtml(truncate(f.note, 160))}</div>`
               : ""
@@ -558,10 +736,10 @@ function executiveSummary(
     <table style="width:100%;border-collapse:collapse;margin-top:16px;border:1px solid #cbd5e1">
       <thead>
         <tr style="background:${accent};color:${accentText}">
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">What it covers</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap">${SEVERITY_GLYPH.RED} / ${SEVERITY_GLYPH.YELLOW} / ${SEVERITY_GLYPH.GREEN}</th>
-          <th style="text-align:right;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Rating</th>
+          <th style="width:12%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
+          <th style="width:41%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">What it covers</th>
+          <th style="width:21%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap">${SEVERITY_GLYPH.RED} / ${SEVERITY_GLYPH.YELLOW} / ${SEVERITY_GLYPH.GREEN}</th>
+          <th style="width:26%;text-align:right;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Rating</th>
         </tr>
       </thead>
       <tbody>
@@ -799,13 +977,24 @@ function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: str
   const align = (c: ColumnDef): string => (c.kind === "money" || c.kind === "percent" ? "right" : "left");
   // Atomic values — an amount or an ISO date — are never worth breaking across two lines; seen in a
   // rendered PDF as a term-end column reading "2027-02-" / "28". Free text still wraps.
-  const wrap = (c: ColumnDef): string =>
-    c.kind === "money" || c.kind === "percent" || c.kind === "date" ? "white-space:nowrap;" : "";
+  const atomic = (c: ColumnDef): boolean => c.kind === "money" || c.kind === "percent" || c.kind === "date";
+  const wrap = (c: ColumnDef): string => (atomic(c) ? "white-space:nowrap;" : "");
+
+  // Declared column widths, because PRINT_STYLES puts every table in `table-layout: fixed` and fixed
+  // layout reads widths from the first row only. Atomic columns need just enough for an amount or an
+  // ISO date and are given half the share of a free-text column, which is where the long values
+  // actually are.
+  const weight = (c: ColumnDef): number => (atomic(c) || c.kind === "boolean" ? 1 : 2);
+  const totalWeight = columns.reduce((sum, c) => sum + weight(c), 0);
+  const width = (c: ColumnDef): string => `${((weight(c) / totalWeight) * 100).toFixed(2)}%`;
 
   const head = columns
     .map(
+      // No `white-space: nowrap` on the header: a column labelled "Account owner of record at the
+      // seller organisation" is a schema-declared string of any length, and holding it on one line
+      // was half of what pushed this table off the paper. It wraps instead.
       (c) => `
-                <th style="text-align:${align(c)};padding:4px 8px;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1;white-space:nowrap">${escapeHtml(c.label)}</th>`,
+                <th style="width:${width(c)};text-align:${align(c)};padding:4px 8px;font-size:10.5px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1">${escapeHtml(c.label)}</th>`,
     )
     .join("");
 
@@ -868,6 +1057,10 @@ function findingRow(f: ReportFinding, accent: string): string {
   const suppressSeverity = f.status === "NOT_APPLICABLE";
   const severity = suppressSeverity ? null : f.severity;
 
+  // See statusContradictsSeverity: both values are shown and the disagreement is named, rather than
+  // printing "Pass" next to a Red badge and leaving the reader to work out which one to believe.
+  const contradiction = !suppressSeverity && statusContradictsSeverity(f.status, f.severity);
+
   // The severity rail: a second, positional encoding of severity that survives greyscale printing
   // and sits on the same row as the title, so a scanning reader finds the bad rows without reading
   // the right-hand column at all.
@@ -889,6 +1082,11 @@ function findingRow(f: ReportFinding, accent: string): string {
           <td style="padding:9px 12px;text-align:right;vertical-align:top">
             <div style="font-size:11.5px;color:${MUTED_TEXT};margin-bottom:4px;white-space:nowrap">${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}</div>
             ${severity ? badge(severity) : neutralBadge(suppressSeverity ? "Not applicable" : "Not rated")}
+            ${
+              contradiction
+                ? `<div style="margin-top:5px;font-size:10.5px;line-height:1.45;color:${NEUTRAL_TEXT};font-weight:600;text-align:right">Recorded status and rating disagree. The rating shown is the one this report&#39;s roll-up used.</div>`
+                : ""
+            }
           </td>
         </tr>`;
 }
@@ -921,9 +1119,11 @@ function appendixSection(
         d.mimeType ? describeMimeType(d.mimeType) : null,
         d.sizeBytes != null ? formatFileSize(d.sizeBytes) : null,
       ].filter(Boolean);
-      const provenance = d.attributedTo
-        ? `${d.attributedTo}, ${d.attachedAt.toISOString().slice(0, 10)}`
-        : d.attachedAt.toISOString().slice(0, 10);
+      // The date is wrapped in its own nowrap span rather than the whole cell being nowrap: an
+      // attributor's name is free text and must be allowed to break, but an ISO date splitting as
+      // "2026-09-" / "14" is the same defect the table cells guard against.
+      const attachedOn = `<span style="white-space:nowrap">${escapeHtml(d.attachedAt.toISOString().slice(0, 10))}</span>`;
+      const provenance = d.attributedTo ? `${escapeHtml(d.attributedTo)}, ${attachedOn}` : attachedOn;
 
       return `
     <tr class="keep-together" style="border-bottom:1px solid #e2e8f0">
@@ -934,7 +1134,7 @@ function appendixSection(
       <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${escapeHtml(descriptors.join(" · "))}</td>
       <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT}">${escapeHtml(d.findingTitle)}</td>
       <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">Tier ${d.tier}</td>
-      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${escapeHtml(provenance)}</td>
+      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT}">${provenance}</td>
     </tr>`;
     })
     .join("");
@@ -946,11 +1146,11 @@ function appendixSection(
     <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
       <thead>
         <tr style="background:${accent};color:${accentText}">
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Document</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Type</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Evidence for</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
-          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Provided by</th>
+          <th style="width:30%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Document</th>
+          <th style="width:15%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Type</th>
+          <th style="width:24%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Evidence for</th>
+          <th style="width:9%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
+          <th style="width:22%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Provided by</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
