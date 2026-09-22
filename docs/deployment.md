@@ -122,10 +122,18 @@ later measurement). To turn billing on:
    one-off price used for batched audit-overage invoice items. Suggested test amounts per `spec.md`
    §9 as revised (all still awaiting the Phase 0 head-to-head test, so keep them changeable): Solo
    ~$35/mo or ~$348/yr, Team +$25/seat, overage in the $99–149 band.
+
+   **The two Team prices are per ADDITIONAL SEAT, not per plan.** §9 defines the Team tier as
+   "additional seats ... on top of the base", so a Team subscription is billed as the Solo price
+   plus one per-seat line for every seat beyond the first — which is why a one-person Team org costs
+   exactly what Solo costs. Creating the Team prices as whole-plan amounts makes a firm pay less
+   than a solo consultant and every extra seat free; that was a real bug, fixed 2026-09-22.
 2. Set on the web service: `STRIPE_SECRET_KEY`, and the five price ids —
    `STRIPE_PRICE_SOLO_MONTHLY`, `STRIPE_PRICE_SOLO_ANNUAL`, `STRIPE_PRICE_TEAM_MONTHLY`,
    `STRIPE_PRICE_TEAM_ANNUAL`, `STRIPE_PRICE_AUDIT_OVERAGE`. Optionally override the included-audit
-   counts with `BILLING_INCLUDED_AUDITS_MONTHLY` / `BILLING_INCLUDED_AUDITS_ANNUAL` (defaults 3 / 6).
+   counts with `BILLING_INCLUDED_AUDITS_MONTHLY` / `BILLING_INCLUDED_AUDITS_ANNUAL` (defaults 3 / 6),
+   and the Team seat allowance with `BILLING_TEAM_MAX_SEATS` (default 5). On Team plans the included
+   audit bundle is multiplied by the seat count at grant time, per §9's tier table.
 3. In the Stripe dashboard, add a webhook endpoint pointing at
    `https://<your-domain>/api/stripe/webhook`, subscribed to `checkout.session.completed`,
    `customer.subscription.updated`, `customer.subscription.deleted`, and `invoice.paid`. Copy its

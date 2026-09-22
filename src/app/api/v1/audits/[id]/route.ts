@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
 import { withOrgScope } from "@/lib/db/scoped";
-import { authenticateApiRequest, apiUnauthorized, apiNotFound } from "@/lib/api/auth";
+import { apiNotFound } from "@/lib/api/auth";
+import { guardApiRequest, apiJson } from "@/lib/api/guard";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await authenticateApiRequest(request);
-  if (!auth) return apiUnauthorized();
+  const guard = await guardApiRequest(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
 
-  const audit = await withOrgScope(auth.orgId, (tx) =>
+  const audit = await withOrgScope(guard.auth.orgId, (tx) =>
     tx.audit.findUnique({
       where: { id },
       select: {
@@ -35,5 +35,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   );
   if (!audit) return apiNotFound();
 
-  return NextResponse.json({ audit });
+  return apiJson({ audit }, guard.headers);
 }

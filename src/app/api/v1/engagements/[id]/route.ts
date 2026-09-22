@@ -1,13 +1,13 @@
-import { NextResponse } from "next/server";
 import { withOrgScope } from "@/lib/db/scoped";
-import { authenticateApiRequest, apiUnauthorized, apiNotFound } from "@/lib/api/auth";
+import { apiNotFound } from "@/lib/api/auth";
+import { guardApiRequest, apiJson } from "@/lib/api/guard";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await authenticateApiRequest(request);
-  if (!auth) return apiUnauthorized();
+  const guard = await guardApiRequest(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
 
-  const engagement = await withOrgScope(auth.orgId, (tx) =>
+  const engagement = await withOrgScope(guard.auth.orgId, (tx) =>
     // findUnique, not findUniqueOrThrow — a foreign-org id resolves to zero rows under RLS and must
     // be a clean 404, not a crash (same convention as the app's server actions).
     tx.engagement.findUnique({
@@ -34,5 +34,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   );
   if (!engagement) return apiNotFound();
 
-  return NextResponse.json({ engagement });
+  return apiJson({ engagement }, guard.headers);
 }

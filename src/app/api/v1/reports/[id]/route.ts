@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { withOrgScope } from "@/lib/db/scoped";
-import { authenticateApiRequest, apiUnauthorized, apiNotFound } from "@/lib/api/auth";
+import { apiNotFound } from "@/lib/api/auth";
+import { guardApiRequest, apiJson } from "@/lib/api/guard";
 
 /**
  * Report METADATA only (docs/spec.md §13.2) — the rendered PDF stays behind the interactive app's
@@ -8,11 +8,11 @@ import { authenticateApiRequest, apiUnauthorized, apiNotFound } from "@/lib/api/
  * what it concluded, not becoming a second document-distribution channel.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await authenticateApiRequest(request);
-  if (!auth) return apiUnauthorized();
+  const guard = await guardApiRequest(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
 
-  const report = await withOrgScope(auth.orgId, (tx) =>
+  const report = await withOrgScope(guard.auth.orgId, (tx) =>
     tx.report.findUnique({
       where: { id },
       select: {
@@ -28,15 +28,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   );
   if (!report) return apiNotFound();
 
-  return NextResponse.json({
-    report: {
-      id: report.id,
-      auditId: report.auditId,
-      engagementId: report.audit.engagementId,
-      computedOverallSeverity: report.computedOverallSeverity,
-      overallCoveredCount: report.overallCoveredCount,
-      overallTotalCount: report.overallTotalCount,
-      generatedAt: report.generatedAt,
+  return apiJson(
+    {
+      report: {
+        id: report.id,
+        auditId: report.auditId,
+        engagementId: report.audit.engagementId,
+        computedOverallSeverity: report.computedOverallSeverity,
+        overallCoveredCount: report.overallCoveredCount,
+        overallTotalCount: report.overallTotalCount,
+        generatedAt: report.generatedAt,
+      },
     },
-  });
+    guard.headers,
+  );
 }
