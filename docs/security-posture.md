@@ -118,6 +118,18 @@ this product holds.
   strip paths. Recorded here rather than omitted as "latent" because the consumer of these
   operations is a scheduled job that deletes.
 
+- **A stored object is served only to the tenant whose prefix it sits under.** Every key begins with
+  an owning organisation, and that is now enforced at the operation rather than being a naming
+  convention: a tenant-scoped read or write takes the organisation as a required argument and
+  refuses a key naming a different one, before any request is issued. Six routes previously read a
+  key out of a database row and fetched it — row-level security scoped the *row*, and nothing
+  constrained the *key* on it, so a row carrying another firm's key served that firm's document.
+  Demonstrated against the running application, then fixed, then held by a test that exercises the
+  authenticated download, the report PDF, and the anonymous client portal, plus a legitimate read
+  that must still succeed. The retention job is the one deliberate cross-tenant caller and uses a
+  separately named operation that says so, mirroring how the database layer names that same script
+  as its single documented exception.
+
 **Storage backend, stated precisely, because this was the largest gap in this document and is now
 a smaller and differently-shaped one.**
 
