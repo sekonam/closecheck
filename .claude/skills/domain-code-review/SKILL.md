@@ -58,6 +58,23 @@ otherwise report directly to the user as plain findings with file/line and concr
   vendor shares one profile and a consultant is shown another company's contract terms. Widening
   the normalisation merges vendors; check what a change makes collide.
 
+**Any path that reads two related rows and takes different facts from each**:
+- **Does anything check they agree?** `resolvePortalAccess` read the link by token and the report by
+  `link.reportId`, returned the org from the LINK and the document from the REPORT, and compared
+  them nowhere — so a row where those disagreed served one firm's report resolved against another
+  firm's identity, and the portal would have wrapped a seller's report in a different consultancy's
+  branding for a buyer. The application layer could not create such a row; it was the only thing
+  preventing one.
+- "Unreachable through the application" is the argument to distrust most on the anonymous surfaces.
+  `spec.md` §8 asks for two independent layers so a bug in *either alone* cannot cross tenants, and
+  a check that exists only in the writing path leaves the reading path holding nothing. The same
+  reasoning applies to the storage containment guard and for the same reason: the consumer does
+  something irreversible — deletes a document, or hands one to an outsider.
+- Refuse, do not reconcile. Two rows disagreeing about who owns something is a corrupt row, and
+  picking whichever field looks more authoritative serves the document anyway. Return nothing.
+- Put the check before any write the request causes. A refused request must not leave a view in an
+  access trail a consultant reads.
+
 **Any change touching credentials, live logins, or anything that looks like Tier C automation**
 (`spec.md` §4):
 - The product decision is **no live credential storage or proxying in v1**. Any code that accepts,
