@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
+import { requireOwner } from "@/lib/auth/requireOwner";
 import { putObject, deleteObject, orgLogoKey } from "@/lib/storage/local";
 
 // Raster only — deliberately excludes SVG. An uploaded SVG can carry a <script>, and
@@ -30,7 +31,7 @@ const updateOrgBrandingSchema = z.object({
 /** ConsultantOrg is itself tenant-owned data — a consultant can only ever edit their own org row,
  * enforced the same way as every other tenant table, via withOrgScope. */
 export async function updateOrgBranding(formData: FormData): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const result = updateOrgBrandingSchema.safeParse({
     name: formData.get("name"),
     brandColorHex: formData.get("brandColorHex") || "",
@@ -43,15 +44,18 @@ export async function updateOrgBranding(formData: FormData): Promise<void> {
   }
   const parsed = result.data;
 
-  await withOrgScope(orgId, (tx) =>
-    tx.consultantOrg.update({
+  await withOrgScope(orgId, async (tx) => {
+    // Firm-scoped: this changes the name and colour on every report the firm has ever issued and
+    // every portal link it has ever sent, including engagements this user never worked on.
+    await requireOwner(tx, userId, "change the firm's branding");
+    await tx.consultantOrg.update({
       where: { id: orgId },
       data: {
         name: parsed.name,
         brandColorHex: parsed.brandColorHex || null,
       },
-    }),
-  );
+    });
+  });
 
   revalidatePath("/settings");
 }
@@ -63,7 +67,7 @@ export async function updateOrgBranding(formData: FormData): Promise<void> {
  * rather than relying on the new write to overwrite it in place.
  */
 export async function uploadOrgLogo(formData: FormData): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
   const file = formData.get("file");
 
   if (!(file instanceof File) || file.size === 0) {
@@ -74,6 +78,11 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   if (!ALLOWED_LOGO_MIME_TYPES.has(file.type)) {
     throw new Error(`Unsupported logo file type "${file.type || "unknown"}" — use PNG, JPEG, WebP, or GIF.`);
   }
+
+  // Checked in its own transaction, BEFORE the file is written. This action writes the object
+  // first and updates the row second (see the note below on why), so a role check inside that
+  // later transaction would refuse the change only after a non-owner's bytes were already on disk.
+  await withOrgScope(orgId, (tx) => requireOwner(tx, userId, "change the firm's logo"));
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const key = orgLogoKey(orgId, file.name);
@@ -106,19 +115,27 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
  * resetting it via migration (see the schema comment on ConsultantOrg.disclaimerAcknowledgedAt).
  */
 export async function acknowledgeDisclaimer(): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
 
-  await withOrgScope(orgId, (tx) =>
-    tx.consultantOrg.update({ where: { id: orgId }, data: { disclaimerAcknowledgedAt: new Date() } }),
-  );
+  await withOrgScope(orgId, async (tx) => {
+    // Firm-scoped, and the clearest case in this file: this records that the firm has reviewed and
+    // accepted liability language that then appears on every deliverable it issues. Accepting that
+    // on the firm's behalf is an owner's act, not a step any seat completes in passing.
+    await requireOwner(tx, userId, "accept the report disclaimer on the firm's behalf");
+    await tx.consultantOrg.update({
+      where: { id: orgId },
+      data: { disclaimerAcknowledgedAt: new Date() },
+    });
+  });
 
   revalidatePath("/settings");
 }
 
 export async function removeOrgLogo(): Promise<void> {
-  const { orgId } = await requireOrgSession();
+  const { orgId, userId } = await requireOrgSession();
 
   const previousKey = await withOrgScope(orgId, async (tx) => {
+    await requireOwner(tx, userId, "change the firm's logo");
     const previous = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { brandLogoUrl: true } });
     await tx.consultantOrg.update({ where: { id: orgId }, data: { brandLogoUrl: null } });
     return previous.brandLogoUrl;
