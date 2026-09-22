@@ -3,6 +3,7 @@ import {
   deleteObject as localDelete,
   deleteObjectIfPresent as localDeleteIfPresent,
   getObject as localGet,
+  objectExists as localExists,
   putObject as localPut,
   storageRoot,
 } from "./local";
@@ -46,6 +47,21 @@ export type StorageBackend = {
    */
   deleteIfPresent(key: string): Promise<"deleted" | "missing">;
   /**
+   * Whether an object is there, WITHOUT reading it.
+   *
+   * Throws on anything that is not a definite not-found. That asymmetry is the whole design: the
+   * caller is deciding whether to show a buyer their report or tell them it is unavailable, and
+   * reporting a credentials or network failure as `false` would tell every buyer the report is
+   * missing while it sits there readable. A confident false statement is worse than a visible
+   * malfunction, and it is indistinguishable from the legitimate case.
+   *
+   * This exists because the portal page was resolving `storageRoot()` and calling `stat` itself.
+   * Under an S3 configuration that returns a local directory, every check fails, and the portal
+   * renders "the report isn't available" for every buyer on every link — silently, and looking
+   * exactly like the feature working. The seam is only a seam if nobody reaches around it.
+   */
+  exists(key: string): Promise<boolean>;
+  /**
    * Fails unless the backend is actually usable right now: the directory exists, or the bucket
    * answers with these credentials.
    *
@@ -66,6 +82,11 @@ const localBackend: StorageBackend = {
     await localPut(key, data);
   },
   get: localGet,
+  async exists(key) {
+    // Goes through the local backend's own resolution, so the containment guard applies here too —
+    // an existence probe with a traversing key must not be the one operation that escapes.
+    return localExists(key);
+  },
   delete: localDelete,
   deleteIfPresent: localDeleteIfPresent,
   async assertUsable() {
@@ -108,6 +129,9 @@ export function deleteObject(key: string): Promise<void> {
 }
 export function deleteObjectIfPresent(key: string): Promise<"deleted" | "missing"> {
   return storageBackend().deleteIfPresent(key);
+}
+export function objectExists(key: string): Promise<boolean> {
+  return storageBackend().exists(key);
 }
 export function assertStorageUsable(): Promise<void> {
   return storageBackend().assertUsable();

@@ -117,6 +117,17 @@ describe("the storage operations refuse a key that escapes the root", () => {
     });
   });
 
+  it("reports existence only for a definite absence, and stays contained", async () => {
+    await withRoot(async (mod) => {
+      const key = "orgA/reports/r1.pdf";
+      expect(await mod.objectExists(key), "a key that was never written").toBe(false);
+      await mod.putObject(key, Buffer.from("%PDF"));
+      expect(await mod.objectExists(key)).toBe(true);
+      // An existence probe must not be the one operation that escapes the root.
+      await expect(mod.objectExists(ESCAPING_KEY)).rejects.toThrow(/outside the storage root/);
+    });
+  });
+
   it("still allows ordinary contained keys, including nested ones", async () => {
     await withRoot(async (mod) => {
       const key = "orgA/evidence/finding1/doc.pdf";

@@ -154,6 +154,21 @@ export function createS3Backend(): StorageBackend {
       return Buffer.from(await response.Body.transformToByteArray());
     },
 
+    async exists(key) {
+      assertPlainKey(key);
+      try {
+        await s3().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+        return true;
+      } catch (err) {
+        // ONLY a definite not-found is absence. A throttle, an expired credential or a network
+        // failure reported as `false` would tell every buyer their report is missing while it sits
+        // in the bucket readable — a confident false statement, and indistinguishable from the
+        // legitimate case. Anything indeterminate propagates so the caller can decide.
+        if (isNotFound(err)) return false;
+        throw err;
+      }
+    },
+
     async delete(key) {
       assertPlainKey(key);
       // S3 DELETE is idempotent and succeeds for a key that was never there, which is exactly this

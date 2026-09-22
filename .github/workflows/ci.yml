@@ -8,6 +8,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Weekly, for the policy-watch job below only. Everything else runs on push.
+    - cron: "0 9 * * 1"
 
 concurrency:
   # A newer push supersedes an in-flight run on the same ref; nothing here is a deploy, so there is
@@ -39,6 +42,33 @@ jobs:
       # type error be skipped as already-checked.
       - run: npx tsc --noEmit --incremental false
       - run: npm test
+
+  policy-watch:
+    name: Externally-owned facts still current
+    # Scheduled and manual only — deliberately NOT on push or pull_request.
+    #
+    # These assert that facts this product does not own (card-network thresholds, certificate
+    # lifetime schedules, an ICANN revision adopted with no effective date) have been re-verified by
+    # a date, so they go red on a calendar day with nobody having changed any code. That is the
+    # whole point: it is the answer to "who remembers to check", replacing a note in a document that
+    # nobody re-reads.
+    #
+    # It must not gate pull requests, for a reason worth stating: a check that turns an unrelated
+    # push red is a check that gets deleted, and deleting it leaves the note it replaced. Failing
+    # loudly on its own schedule keeps the prompt and removes the incentive to silence it. It is
+    # excluded from the default suite by glob rather than by a skip, so it can never report green
+    # without having run.
+    if: github.event_name != 'push' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run test:policy-watch
 
   integration:
     name: Integration and browser journey

@@ -26,6 +26,7 @@
     "ops:backup-drill": "tsx -r dotenv/config scripts/ops-backup-drill.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:policy-watch": "vitest run --config vitest.policy-watch.config.mts",
     "db:publish-evidence-depth": "tsx -r dotenv/config scripts/publish-evidence-depth.ts",
     "db:backfill-retention-dates": "tsx -r dotenv/config scripts/backfill-retention-dates.ts",
     "db:backfill-notapplicable-severity": "tsx -r dotenv/config scripts/backfill-notapplicable-severity.ts",

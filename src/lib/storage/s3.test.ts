@@ -174,3 +174,44 @@ describe("server-side encryption", () => {
     expect(send.mock.calls[0][0].input.ServerSideEncryption).toBeUndefined();
   });
 });
+
+describe("exists distinguishes absence from not knowing", () => {
+  /**
+   * The caller is the client portal deciding whether to show a buyer their report or tell them it
+   * is unavailable. Reporting a credentials or network failure as `false` would tell every buyer
+   * the report is missing while it sits in the bucket readable — a confident false statement, and
+   * indistinguishable from the legitimate case.
+   */
+  it("is true when the object is there", async () => {
+    const store = await backend();
+    send.mockResolvedValue({});
+    expect(await store.exists("org1/reports/r1.pdf")).toBe(true);
+  });
+
+  it("is false only for a definite not-found", async () => {
+    const store = await backend();
+    send.mockRejectedValueOnce(Object.assign(new Error("nope"), { name: "NotFound" }));
+    expect(await store.exists("org1/reports/r1.pdf")).toBe(false);
+
+    send.mockRejectedValueOnce(Object.assign(new Error("nope"), { $metadata: { httpStatusCode: 404 } }));
+    expect(await store.exists("org1/reports/r1.pdf")).toBe(false);
+  });
+
+  it("throws rather than claiming absence when it cannot tell", async () => {
+    const store = await backend();
+    for (const failure of [
+      Object.assign(new Error("AccessDenied"), { name: "AccessDenied" }),
+      Object.assign(new Error("SlowDown"), { $metadata: { httpStatusCode: 503 } }),
+      new Error("socket hang up"),
+    ]) {
+      send.mockRejectedValueOnce(failure);
+      await expect(store.exists("org1/reports/r1.pdf")).rejects.toThrow();
+    }
+  });
+
+  it("refuses an out-of-prefix key before asking", async () => {
+    const store = await backend();
+    await expect(store.exists("../escape.pdf")).rejects.toThrow(/not a plain relative/);
+    expect(send).not.toHaveBeenCalled();
+  });
+});

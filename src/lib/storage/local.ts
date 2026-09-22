@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 
 /**
@@ -86,6 +86,25 @@ export async function deleteObjectIfPresent(key: string): Promise<"deleted" | "m
     return "deleted";
   } catch (err) {
     if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return "missing";
+    throw err;
+  }
+}
+
+/**
+ * Whether the object is there, without reading it.
+ *
+ * Deliberately narrow about what counts as absence: only ENOENT. A permissions error or an
+ * unreadable mount means "I could not tell", and returning false for those would let a caller
+ * report a document as missing when it is present — which, for the caller this exists for (the
+ * client portal deciding whether to show a buyer their report), is a confident false statement
+ * rather than a visible failure.
+ */
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await stat(resolveWithinRoot(key));
+    return true;
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return false;
     throw err;
   }
 }

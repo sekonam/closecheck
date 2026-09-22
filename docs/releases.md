@@ -128,13 +128,23 @@ this come from" has an answer instead of an assertion.
 - **Processing continuity at close** — a merchant account does not transfer; the buyer
   re-underwrites. Previously invisible in the checklist.
 
-**One threshold is genuinely date-sensitive and cannot be reshaped. Stated here so the maintenance
-commitment is visible rather than implied:** the ICANN 60-day transfer lock. The revision removing
-it was adopted 2026-06-07 (Res. 2026.06.07.04) with **no effective date announced**. "60 days" is
-correct today and will become wrong on a date nobody has published. v4's guidance says to re-verify
-at every audit — but a rule that depends on someone remembering to check is a liability, so this
-one needs an owner and a recurring review, not a note. Every other threshold in the set is either
-reshaped or tied to a dated, citable programme change.
+**One threshold is genuinely date-sensitive and cannot be reshaped:** the ICANN 60-day transfer
+lock. The revision removing it was adopted 2026-06-07 (Res. 2026.06.07.04) with **no effective date
+announced**. "60 days" is correct today and will become wrong on a date nobody has published.
+
+This entry previously said the rule "needs an owner and a recurring review, not a note" — which was
+the right diagnosis and is now built, so it no longer describes a gap. Since v4 the fact is held by
+a policy watch (`src/lib/templates/policyWatch.ts`, `spec.md` §4.6) rather than by template prose:
+it carries a review date, and because the change is adopted-but-undated it is also surfaced on the
+item at audit time, naming the specific revision and what to confirm with the registrar. Where a
+timetable *is* published the product resolves it by audit date without telling anyone.
+
+Two different jobs there, worth keeping distinct. The audit-time surfacing protects the
+**deliverable** — it is what stops a consultant asserting a stale figure to a buyer, and it works
+whether or not anyone maintains anything. The review date protects the **fact**, and only prompts
+the founder to go and re-check it. If one of the two ever has to be dropped, drop the second.
+
+Every other threshold in the set is either reshaped or tied to a dated, citable programme change.
 
 **What v4 deliberately refuses to state**, which belongs in the changelog because silence is the
 decision: VAMP fee amounts and grace periods (Visa does not publish them), registrar redemption
