@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CheckMethod, Severity, Tier } from "@prisma/client";
 import {
@@ -1386,13 +1388,38 @@ describe("the executive summary's risk list represents every tier", () => {
 // to catch the class of defect that started this file: a cell drawn on top of its neighbour is
 // invisible to every string assertion, because both strings are present and correct.
 //
-// Gated on PLAYWRIGHT_CHROMIUM_PATH rather than on `playwright` being importable: the unit suite
-// has to stay runnable on a machine with no browser binary (see vitest.config.mts), and
-// `npx playwright install` does not work in every sandbox. Set it and these run; leave it and they
-// skip, with the declared-width suite above still covering the same invariants one level up.
+// The unit suite has to stay runnable on a machine with no browser binary (see
+// vitest.config.mts), and `npx playwright install` does not work in every sandbox — so these skip
+// rather than fail when no browser can be found, with the declared-width suite above still
+// covering the same invariants one level up.
+//
+// But the browser is resolved from an INSTALLED playwright as well as from the environment
+// variable. Gating on the variable alone meant these skipped everywhere it wasn't set — including
+// CI, which runs `npm test` in a job that never sets it — so the assertions were reported as
+// passing while measuring nothing. A suite that skips silently is indistinguishable from one that
+// passes, which is the failure this file exists to stop shipping.
 // ---------------------------------------------------------------------------
 
-const CHROMIUM_PATH = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+/**
+ * A usable Chromium: the explicit override if it points at something real, otherwise whatever
+ * `playwright install` put on this machine. Undefined only when there genuinely isn't one.
+ */
+function resolveChromium(): string | undefined {
+  const override = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  if (override && existsSync(override)) return override;
+  try {
+    // Resolved synchronously so it can gate `describe.skipIf` at collection time; playwright
+    // itself is imported dynamically further down, after the gate has already decided.
+    const { chromium } = createRequire(import.meta.url)("playwright");
+    const installed = chromium.executablePath();
+    if (installed && existsSync(installed)) return installed;
+  } catch {
+    // playwright throws when no browser is registered for this platform; treat as "none".
+  }
+  return undefined;
+}
+
+const CHROMIUM_PATH = resolveChromium();
 
 /**
  * Measured in the page, as a string rather than a function: vitest compiles this file with esbuild,
