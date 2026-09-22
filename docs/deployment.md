@@ -252,6 +252,24 @@ is the protection against the case no pre-flight can catch, a backend that is pe
 and simply the wrong bucket. An empty bucket answers exactly like the right one; the missing-file
 rule is what stops that becoming data loss.
 
+## Deploying a disclaimer change
+
+`ConsultantOrg.disclaimerAcknowledgedAt` records that a named owner reviewed the disclaimer **as it
+read on that date**. So any migration that changes the disclaimer text also clears that column —
+otherwise the record asserts someone reviewed language they never saw, which is worse than having no
+record at all.
+
+**The consequence on a live deployment: report generation refuses for every firm until that firm's
+owner re-acknowledges on Settings.** That is the gate working rather than breaking (`spec.md` §6
+makes disclaimer review a required step, not silent boilerplate), but it is a visible interruption
+to every customer at once and it happens the moment the migration runs.
+
+So when deploying a release that carries such a migration — `releases.md` §3 flags them as
+legal-content events — tell customers first, deploy outside their working hours if you can, and
+expect support contact from anyone mid-audit. The block is per-firm and clears with one click by an
+owner; a member cannot clear it, and the blocked-report message names the owner rather than
+instructing the reader.
+
 ## Known gaps this runbook does not solve
 
 - **Object storage is still local disk on a persistent volume**, not real S3-compatible storage —

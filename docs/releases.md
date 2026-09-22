@@ -82,6 +82,46 @@ copy a firm's own accumulated readings, because those exist only where the work 
 makes this the first thing here worth positioning against the 12–24 month window, not merely
 listing.
 
+### Legal-content event: report disclaimer rewritten — shipped 2026-09-22
+
+Not a template version. A change to the language every generated report carries, which makes it a
+different kind of release: the only content here a consultant puts their name to and a buyer's
+counsel is likely to read closely. **The founder should read the current text in
+`src/lib/reports/disclaimer.ts` and decide whether it says what they want it to say** — engineering
+corrected a statement that had become false, which is not the same as endorsing the wording.
+
+**Why it had to change.** The paragraph singled out Tier C as "consultant-attested observations,
+not automated verifications" — which invites a reader to take everything else as verified. After v6
+established that most Tier A checks cannot reach the verdict their own rubric describes, that
+sentence was drawing the line in the wrong place. Worse, it was the *last* place in the document
+still implying it: per-finding status already said "In progress" and the summary already counted how
+many ratings were awaiting confirmation, so the one paragraph a lawyer actually reads was the one
+contradicting the rest.
+
+It now adds that a finding shown as in progress carries a rating the consultant has not confirmed,
+and that automated checks read public records and **cannot establish who controls an account**. The
+second clause is the one doing the work: "automated" on its own reads to a buyer as a strength, and
+the limit that matters to them is specific rather than general.
+
+**Every acknowledgement was cleared**, by migration `20260922214500_disclaimer_scope_of_automated_checks`.
+`ConsultantOrg.disclaimerAcknowledgedAt` means "this owner reviewed the text as it read on that
+date" and nothing else, so leaving it set after a wording change would record an acknowledgement of
+language nobody read — worse than no acknowledgement, because the column exists precisely to be able
+to say a named person saw the text that ships. The module's docstring already required this; the
+migration follows an existing decision rather than making a new one.
+
+**Operational consequence, and it is not small: report generation is blocked for every org until an
+owner re-acknowledges.** That gate is deliberate (`spec.md` §6 — required review, not silent
+boilerplate), so the block is the feature working. On a live deployment it means each firm's owner
+must visit Settings once before anyone in that firm can generate a report again. See
+`deployment.md`'s note on deploying this migration.
+
+**Done now because it is free now.** Exactly one organisation had acknowledged the old text and it
+was a development org. The identical change after the first paying firm is a re-acknowledgement
+cycle for all of them — and the text would have been wrong for the whole intervening period. That
+timing argument is why this was corrected rather than filed: a flag would have sat until the
+cheapest moment had passed.
+
 ### Template-version event: v6 — shipped 2026-09-22 (what the automated checks can actually conclude)
 
 **The headline is a corrected rating, not a wording change.** `runEmailAuthPosture` rated Green on

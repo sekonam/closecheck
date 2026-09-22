@@ -153,7 +153,25 @@ The honest summary: the Phase 4 scope that could be built without new evidence o
 *was* built, and is covered by tests and documentation. What remains is gated on things code cannot
 supply.
 
-## 8. SOC 2 posture
+## 8. Read the report disclaimer and decide whether it says what you want
+
+**Gate:** none — this is not blocking anything. It is here because it is the one piece of content
+in the product that carries your consultants' professional exposure, and it was last edited by
+engineering correcting a statement that had become false (`releases.md` §3, 2026-09-22).
+
+Correcting it was right: it claimed Tier C was the only non-automated part, which invited a buyer's
+counsel to read everything else as verified, and template v6 established that most Tier A checks
+cannot reach the verdict their rubric describes. But "no longer false" is a lower bar than "the
+language this firm wants to stand behind", and the second is yours, not ours.
+
+The current text is a single paragraph in `src/lib/reports/disclaimer.ts`. Worth five minutes, and
+worth a lawyer's eye before the first report reaches a real buyer's advisory team rather than after.
+
+Note the cost curve: changing it clears every firm's acknowledgement and blocks report generation
+until each owner re-acknowledges. Today that is one development org. After the first paying
+customers it is a coordinated interruption for all of them — so this is cheapest to settle now.
+
+## 9. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
