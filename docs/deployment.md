@@ -208,6 +208,46 @@ comparison reads it as drift every time. `migrate status` and `migrate deploy` a
 Write the SQL for such migrations by hand rather than accepting the reset — accepting it destroys
 local data to fix a discrepancy that does not exist.
 
+## Object storage
+
+The app writes uploaded evidence, brand logos and generated report PDFs through one storage
+boundary (`src/lib/storage/objectStore.ts`) with two backends. **Local disk is the default and
+needs no configuration.** Naming a bucket switches to object storage; nothing else changes.
+
+Local-on-a-mounted-volume is a supported production configuration — `render.yaml` mounts a
+persistent disk and pins `STORAGE_ROOT_DIR` to it. What a mount cannot give you is encryption at
+rest beyond whatever the volume provides, or any redundancy: the volume is a single copy. The app
+says so once at boot in production, and `STORAGE_ACKNOWLEDGE_LOCAL=true` silences it after you have
+confirmed the mount.
+
+To move to object storage, set on the web service:
+
+```
+STORAGE_S3_BUCKET=closecheck-documents
+STORAGE_S3_REGION=auto                 # the real region on AWS; "auto" suits Cloudflare R2
+STORAGE_S3_ENDPOINT=...                # omit entirely for AWS S3
+STORAGE_S3_ACCESS_KEY_ID=...           # omit both to use an instance role instead
+STORAGE_S3_SECRET_ACCESS_KEY=...
+```
+
+Written against the S3 protocol rather than a named provider, so AWS S3, Cloudflare R2, Backblaze
+B2, DigitalOcean Spaces and MinIO all work. The provider decision is an endpoint and a credential.
+
+**It has not been run against a live bucket.** No credentials exist yet, so the first deployment to
+configure one is also the first exercise of it. Round-trip a single file before trusting it with a
+real engagement — upload a document to an audit, download it back, then set that engagement to a
+terminal stage with a past purge date and run
+`npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete, which
+is the whole surface. The code's own docstring carries the same caveat and should lose it once this
+has been done.
+
+**Two things the purge does that matter more with a bucket than with a directory.** It refuses to
+start unless the backend answers, so a misconfigured one cannot get as far as deleting database
+rows whose files it never found. And a file it cannot find keeps its row and fails the run — which
+is the protection against the case no pre-flight can catch, a backend that is perfectly reachable
+and simply the wrong bucket. An empty bucket answers exactly like the right one; the missing-file
+rule is what stops that becoming data loss.
+
 ## Known gaps this runbook does not solve
 
 - **Object storage is still local disk on a persistent volume**, not real S3-compatible storage —

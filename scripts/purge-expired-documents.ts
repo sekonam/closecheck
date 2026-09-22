@@ -50,8 +50,7 @@
  * Run with: npm run db:purge-expired-documents [-- --engagement=<id>] [-- --force-missing]
  */
 import { DealStage, PrismaClient } from "@prisma/client";
-import { stat } from "node:fs/promises";
-import { deleteObjectIfPresent, storageRoot } from "../src/lib/storage/local";
+import { assertStorageUsable, deleteObjectIfPresent, describeStorage } from "../src/lib/storage/objectStore";
 import { RETENTION_SCOPE } from "../src/lib/retention/policy";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
@@ -76,22 +75,36 @@ const onlyEngagementId = engagementArg ? engagementArg.slice("--engagement=".len
 
 type Totals = { purged: number; missing: number; failed: number; purgedReports: number; revokedLinks: number };
 
-async function assertStorageRootUsable(root: string): Promise<void> {
-  const info = await stat(root).catch(() => null);
-  if (!info || !info.isDirectory()) {
+/**
+ * Refuses to start unless the storage backend is actually usable.
+ *
+ * Generalised from a filesystem check to a backend one when object storage landed. The reason is
+ * unchanged and is the whole point of this script's safety model: against an unusable backend every
+ * delete fails, every failure reads as "already gone", and the only thing this run would destroy is
+ * the database rows pointing at documents that are sitting safely elsewhere.
+ *
+ * What this CANNOT catch, and no pre-flight can: a backend that is perfectly reachable and simply
+ * the wrong one. An empty bucket answers HEAD exactly like the right bucket would. That case is
+ * caught downstream instead — every key comes back "missing", and a missing file keeps its row and
+ * fails the run. The protection is the missing-file rule, not the pre-flight; the pre-flight only
+ * turns a whole class of misconfiguration into a refusal before anything is touched.
+ */
+async function assertStorageBackendUsable(): Promise<void> {
+  try {
+    await assertStorageUsable();
+  } catch (err) {
     throw new Error(
-      `Storage root ${root} does not exist or is not a directory. Refusing to purge: every unlink ` +
-        `would fail and the Evidence rows pointing at those documents would be the only thing ` +
-        `destroyed. Set STORAGE_ROOT_DIR to the volume the app actually writes to, then re-run.`,
+      `Refusing to purge: ${err instanceof Error ? err.message : String(err)}\n` +
+        `Every delete would fail, and the Evidence rows pointing at those documents would be the ` +
+        `only thing destroyed.`,
     );
   }
 }
 
 async function main() {
-  const root = storageRoot();
-  await assertStorageRootUsable(root);
+  await assertStorageBackendUsable();
   console.log(
-    `Storage root: ${root}${forceMissing ? " (--force-missing)" : ""}` +
+    `Storage backend: ${describeStorage()}${forceMissing ? " (--force-missing)" : ""}` +
       (onlyEngagementId ? ` (--engagement=${onlyEngagementId})` : " (all due engagements)"),
   );
 
@@ -150,8 +163,8 @@ async function main() {
         if (outcome === "missing" && !forceMissing) {
           console.error(
             `  MISSING file for evidence ${e.id} (key ${e.storageKey}) — keeping the row. The row is ` +
-              `the only pointer to this document; verify the storage root, then re-run with ` +
-              `--force-missing if the file is genuinely gone.`,
+              `the only pointer to this document; confirm you are pointed at the right storage ` +
+              `backend (${describeStorage()}), then re-run with --force-missing if it is genuinely gone.`,
           );
           perEngagement.missing++;
           continue;
@@ -185,8 +198,8 @@ async function main() {
           // Same rule as evidence, for the same reason: the column is the only pointer to the file.
           console.error(
             `  MISSING report PDF for report ${report.id} (key ${report.pdfStorageKey}) — keeping ` +
-              `the reference. Verify the storage root, then re-run with --force-missing if it is ` +
-              `genuinely gone.`,
+              `the reference. Confirm the storage backend, then re-run with --force-missing if it ` +
+              `is genuinely gone.`,
           );
           perEngagement.missing++;
           continue;

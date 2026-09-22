@@ -1,4 +1,5 @@
 import { recordError } from "@/lib/metrics/record";
+import { warnIfProductionStorageIsLocal } from "@/lib/storage/objectStore";
 
 /**
  * Node-runtime half of src/instrumentation.ts — a separate module, dynamically imported behind the
@@ -10,6 +11,11 @@ export function installProcessHandlers(): void {
   const globalFlag = globalThis as unknown as { __closecheckProcessHandlers?: boolean };
   if (globalFlag.__closecheckProcessHandlers) return;
   globalFlag.__closecheckProcessHandlers = true;
+
+  // Said once at boot rather than per request. Which storage backend a deployment is actually on is
+  // invisible from inside the running app, and the difference between a mounted volume and an
+  // ephemeral container filesystem is every document the firm has uploaded.
+  warnIfProductionStorageIsLocal();
 
   process.on("unhandledRejection", (reason) => {
     // Recording is itself fire-and-forget-safe; the process keeps serving.
