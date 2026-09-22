@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { BillingStatus, type BillingPlan } from "@prisma/client";
+import { BillingPlan, BillingStatus } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { getStripe } from "@/lib/billing/stripe";
 import { planForPriceIds } from "@/lib/billing/config";
@@ -37,12 +37,30 @@ function mapStatus(stripeStatus: Stripe.Subscription.Status): BillingStatus {
 }
 
 /**
- * Reads the plan from EVERY line on the subscription, not just the first. A Team subscription
- * carries two items — the shared base price and the per-seat price (spec.md §9; see
- * basePriceIdForPlan in src/lib/billing/config.ts) — and Stripe does not guarantee item order, so
- * looking only at items.data[0] would classify a Team subscription as Solo roughly half the time.
+ * The plan the org actually bought.
+ *
+ * Prefers the `plan` written into subscription metadata at checkout (src/lib/actions/billing.ts),
+ * because the price lines cannot always answer this. A Team subscription is the shared base price
+ * plus one per-seat line for every seat beyond the first, so a Team org with ONE member has no seat
+ * line and is byte-identical to Solo. Inference alone therefore mislabelled it — and mislabelled it
+ * again, in reverse, whenever a two-person Team dropped to one member and syncSeatQuantity removed
+ * the seat item, silently downgrading a paying firm mid-cycle and re-granting a full year of
+ * credits under the new plan name.
+ *
+ * Metadata is server-set at checkout and arrives inside a signature-verified event, so it is
+ * trusted on exactly the same footing as metadata.orgId. It is validated against the enum rather
+ * than cast, since a value written by an older deploy (or by hand in the dashboard) must not become
+ * an unchecked plan.
+ *
+ * Falls back to reading EVERY price line — not items.data[0], since Stripe does not guarantee item
+ * order — for subscriptions created before the metadata existed.
  */
 function planFromSubscription(subscription: Stripe.Subscription): BillingPlan | null {
+  const declared = subscription.metadata?.plan;
+  if (declared && declared in BillingPlan) {
+    return BillingPlan[declared as keyof typeof BillingPlan];
+  }
+
   const priceIds = subscription.items.data
     .map((item) => item.price?.id)
     .filter((id): id is string => !!id);

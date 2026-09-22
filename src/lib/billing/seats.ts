@@ -93,11 +93,9 @@ export async function syncSeatQuantity(orgId: string): Promise<void> {
     const stripe = getStripe();
     if (!stripe) return;
 
-    const { account, seats } = await withOrgScope(orgId, async (tx) => ({
-      account: await tx.billingAccount.findUnique({ where: { orgId } }),
-      seats: await countSeats(tx, orgId),
-    }));
-
+    const account = await withOrgScope(orgId, (tx) =>
+      tx.billingAccount.findUnique({ where: { orgId } }),
+    );
     if (!account?.stripeSubscriptionId || !account.plan) return;
     if (account.status !== "ACTIVE" && account.status !== "PAST_DUE") return;
 
@@ -106,34 +104,59 @@ export async function syncSeatQuantity(orgId: string): Promise<void> {
     // something to silently start charging per seat for.
     if (!seatPriceId) return;
 
-    const quantity = billableSeatQuantity(seats);
-    const subscription = await stripe.subscriptions.retrieve(account.stripeSubscriptionId);
-    const seatItem = subscription.items.data.find((item) => item.price?.id === seatPriceId);
+    /**
+     * Read, write, then re-read and repeat if the count moved underneath us.
+     *
+     * These calls are deliberately not awaited by their callers, so two can be in flight at once
+     * and their Stripe round trips can complete in either order. Removing a teammate (3 seats to 2)
+     * and immediately re-inviting (2 to 3) meant sync A read 2 and sync B read 3; if B's request
+     * landed first, Stripe applied B then A and settled on 2 billable seats against 3 actual. Both
+     * calls succeeded, nothing retried, and the firm stayed undercharged by a seat indefinitely —
+     * until some unrelated membership change happened to trigger another sync.
+     *
+     * The loop converges without a lock, which matters because the alternative — holding a Postgres
+     * advisory lock across a Stripe round trip — would tie up a pooled connection for the duration
+     * of a network call. In the interleaving above, A re-reads after its own write, sees 3 rather
+     * than the 2 it wrote, and corrects. Whichever sync writes last is guaranteed to observe the
+     * settled count on its re-read, so the final state is always the true one.
+     *
+     * Bounded at three passes: more than that means membership is changing faster than Stripe can
+     * be updated, which is not a real usage pattern and should not become an unbounded loop against
+     * a paid API. The last write still lands, and the next membership change re-syncs.
+     */
+    const MAX_PASSES = 3;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const seats = await withOrgScope(orgId, (tx) => countSeats(tx, orgId));
+      const quantity = billableSeatQuantity(seats);
 
-    if (!seatItem) {
-      if (quantity === 0) return;
-      await stripe.subscriptionItems.create({
-        subscription: subscription.id,
-        price: seatPriceId,
-        quantity,
-        // Seats are added and removed mid-cycle; proration is the honest default — the firm pays for
-        // the part of the period each seat actually existed for.
-        proration_behavior: "create_prorations",
-      });
-      return;
+      const subscription = await stripe.subscriptions.retrieve(account.stripeSubscriptionId);
+      const seatItem = subscription.items.data.find((item) => item.price?.id === seatPriceId);
+
+      if (!seatItem) {
+        if (quantity > 0) {
+          await stripe.subscriptionItems.create({
+            subscription: subscription.id,
+            price: seatPriceId,
+            quantity,
+            // Seats are added and removed mid-cycle; proration is the honest default — the firm
+            // pays for the part of the period each seat actually existed for.
+            proration_behavior: "create_prorations",
+          });
+        }
+      } else if (seatItem.quantity !== quantity) {
+        if (quantity === 0) {
+          await stripe.subscriptionItems.del(seatItem.id, { proration_behavior: "create_prorations" });
+        } else {
+          await stripe.subscriptionItems.update(seatItem.id, {
+            quantity,
+            proration_behavior: "create_prorations",
+          });
+        }
+      }
+
+      const settled = await withOrgScope(orgId, (tx) => countSeats(tx, orgId));
+      if (settled === seats) return;
     }
-
-    if (seatItem.quantity === quantity) return;
-
-    if (quantity === 0) {
-      await stripe.subscriptionItems.del(seatItem.id, { proration_behavior: "create_prorations" });
-      return;
-    }
-
-    await stripe.subscriptionItems.update(seatItem.id, {
-      quantity,
-      proration_behavior: "create_prorations",
-    });
   } catch (err) {
     void recordError("billing-seat-sync", err instanceof Error ? err : new Error(String(err)), { orgId });
   }

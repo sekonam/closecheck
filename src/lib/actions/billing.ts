@@ -126,7 +126,15 @@ export async function startCheckout(formData: FormData): Promise<void> {
     mode: "subscription",
     customer: customerId,
     line_items: lineItems,
-    subscription_data: { metadata: { orgId } },
+    // The plan is recorded explicitly rather than left to be inferred from the price lines.
+    // Inference cannot distinguish a one-person Team subscription from a Solo one: a Team org with
+    // a single member has no seat line at all (there are seats-1 of them), so the subscription
+    // carries only the shared base price and looked exactly like Solo. That mislabelled the org,
+    // sized its credit bundle wrongly, and — with enforcement on — dead-ended it: the seat cap
+    // refused the first invite and told them to switch to a Team plan, while startCheckout refused
+    // that because a subscription already existed. Metadata is server-set and signature-verified on
+    // the way back, exactly like orgId.
+    subscription_data: { metadata: { orgId, plan } },
     metadata: { orgId },
     success_url: appUrl("/settings?billing=success"),
     cancel_url: appUrl("/settings?billing=canceled"),

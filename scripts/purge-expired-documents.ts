@@ -36,7 +36,7 @@
  *
  * Run with: npm run db:purge-expired-documents [-- --force-missing]
  */
-import { PrismaClient } from "@prisma/client";
+import { DealStage, PrismaClient } from "@prisma/client";
 import { stat } from "node:fs/promises";
 import { deleteObjectIfPresent, storageRoot } from "../src/lib/storage/local";
 
@@ -62,9 +62,21 @@ async function main() {
   await assertStorageRootUsable(root);
   console.log(`Storage root: ${root}${forceMissing ? " (--force-missing)" : ""}`);
 
+  // Both conditions, not just the date. A purge date is set when an engagement reaches a terminal
+  // stage, but the date is a stored column and the stage can move on afterwards — a dead deal that
+  // revives, with a form re-submitting its own prefilled date, leaves a live engagement carrying a
+  // purge date nobody typed. Selecting on the date alone would then delete a seller's contracts out
+  // of an active diligence engagement on a schedule set weeks earlier.
+  //
+  // Requiring the stage as well makes that unreachable regardless of how the date got there: if the
+  // engagement is not CLOSED or DEAD right now, nothing about it is eligible for deletion. The
+  // stage is the fact that matters; the date only says when.
   const dueEngagements = await prisma.engagement.findMany({
-    where: { documentPurgeAt: { lte: new Date() } },
-    select: { id: true, businessName: true, orgId: true, documentPurgeAt: true },
+    where: {
+      documentPurgeAt: { lte: new Date() },
+      dealStage: { in: [DealStage.CLOSED, DealStage.DEAD] },
+    },
+    select: { id: true, businessName: true, orgId: true, documentPurgeAt: true, dealStage: true },
   });
 
   if (dueEngagements.length === 0) {
@@ -121,7 +133,7 @@ async function main() {
     totals.failed += perEngagement.failed;
 
     console.log(
-      `"${engagement.businessName}" (org ${engagement.orgId}, due ${engagement.documentPurgeAt?.toISOString()}): ` +
+      `"${engagement.businessName}" (org ${engagement.orgId}, ${engagement.dealStage}, due ${engagement.documentPurgeAt?.toISOString()}): ` +
         `${perEngagement.purged} purged, ${perEngagement.missing} missing, ${perEngagement.failed} failed.`,
     );
   }
