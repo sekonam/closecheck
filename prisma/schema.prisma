@@ -333,6 +333,25 @@ model Report {
   generatedAt             DateTime      @default(now())
   pdfStorageKey           String?
 
+  // Whitelabel brand-kit snapshot, taken at generation time (spec.md §6: a Report is versioned and
+  // exportable "at a point in time", and the PDF already embeds these values permanently). Without
+  // it the Client Portal branded a months-old report with whatever the firm's branding happens to
+  // be today — chrome that contradicts the document inside it — and had to read `consultant_orgs`
+  // on every buyer view to do so. Nullable because Reports generated before this migration have no
+  // snapshot; both readers fall back to the live org row for those (never the other way around).
+  brandSnapshotFirmName   String?
+  brandSnapshotColorHex   String?
+  // A storage key holding a COPY of the logo bytes as they were at generation time, written under
+  // this report's own key — NOT a pointer to `consultant_orgs.brandLogoUrl`.
+  //
+  // Pointing at the org's live key would snapshot nothing: `orgLogoKey` derives the key from the
+  // uploaded filename, and uploadOrgLogo/removeOrgLogo (src/lib/actions/org.ts) delete the previous
+  // object when a firm re-uploads — so the pointer would dangle at exactly the moment a rebrand
+  // makes the snapshot matter. Bytes in the row itself were rejected instead: ConsultantOrg already
+  // states the house rule ("Logo is a URL into object storage, not inline bytes"), and base64 of an
+  // up-to-512KB logo would ride along on every portal view's SELECT of this table.
+  brandSnapshotLogoKey    String?
+
   portalLinks ClientPortalLink[]
 
   @@index([orgId])
