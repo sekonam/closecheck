@@ -292,7 +292,13 @@ describe("the consultant's audit-taking workflow", () => {
       // Asserted specifically rather than as "no buttons", so a future change that adds one has to
       // consciously delete a test that explains why, rather than watch a vague selector quietly
       // stop matching.
-      const panel = page.locator('div:has-text("You audited")').last();
+      // Scoped to the panel's own container, not `div:has-text(...)`. That selector matches every
+      // ancestor div containing the phrase, and `.last()` picks the innermost — a label wrapper
+      // holding no controls — so the assertion passed with a "use this" button sitting in the
+      // panel. Demonstrated: with that button reintroduced, this version goes red and the earlier
+      // version stayed green.
+      const panel = page.locator("div.rounded-md.bg-slate-50", { hasText: "You audited" }).first();
+      expect(await panel.count(), "the recall panel itself was not found").toBe(1);
       const populating = await panel
         .locator('button, input:not([type="hidden"]), select, textarea, [role="button"], a[href]')
         .count();
