@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 import { BillingStatus, type BillingPlan } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { getStripe } from "@/lib/billing/stripe";
-import { planForPriceId } from "@/lib/billing/config";
+import { planForPriceIds } from "@/lib/billing/config";
 import { grantPlanCreditsIfDue } from "@/lib/billing/credits";
 import { sendEmail } from "@/lib/email/send";
 import { receipt } from "@/lib/email/templates";
@@ -36,9 +36,17 @@ function mapStatus(stripeStatus: Stripe.Subscription.Status): BillingStatus {
   }
 }
 
+/**
+ * Reads the plan from EVERY line on the subscription, not just the first. A Team subscription
+ * carries two items — the shared base price and the per-seat price (spec.md §9; see
+ * basePriceIdForPlan in src/lib/billing/config.ts) — and Stripe does not guarantee item order, so
+ * looking only at items.data[0] would classify a Team subscription as Solo roughly half the time.
+ */
 function planFromSubscription(subscription: Stripe.Subscription): BillingPlan | null {
-  const priceId = subscription.items.data[0]?.price?.id;
-  return priceId ? planForPriceId(priceId) : null;
+  const priceIds = subscription.items.data
+    .map((item) => item.price?.id)
+    .filter((id): id is string => !!id);
+  return planForPriceIds(priceIds);
 }
 
 async function orgIdFromCustomer(stripe: Stripe, customerId: string): Promise<string | null> {
@@ -47,15 +55,44 @@ async function orgIdFromCustomer(stripe: Stripe, customerId: string): Promise<st
   return customer.metadata?.orgId || null;
 }
 
-async function applySubscriptionState(orgId: string, subscription: Stripe.Subscription): Promise<void> {
+/**
+ * Applies a Stripe subscription's state to the org's BillingAccount.
+ *
+ * Upserts rather than updates. An update threw P2025 whenever no BillingAccount row existed for the
+ * org, which the handler turned into a 500 and Stripe then retried forever with no path to succeed.
+ * Two real ways to get there: a Stripe customer whose row insert failed after the customer was
+ * created (ensureBillingAccount's non-P2002 path leaves exactly that orphan), and an org whose row
+ * was deleted while its subscription was still live. The upsert makes the first self-heal on the
+ * next webhook instead of wedging.
+ *
+ * Returns false when the org itself no longer exists — the row cannot be created against a missing
+ * foreign key, and no future retry can change that. See the caller for why that answers 200.
+ */
+async function applySubscriptionState(orgId: string, subscription: Stripe.Subscription): Promise<boolean> {
   const plan = planFromSubscription(subscription);
   const status = mapStatus(subscription.status);
   const periodEnd = subscription.items.data[0]?.current_period_end;
+  const customerId =
+    typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
 
-  await withOrgScope(orgId, async (tx) => {
-    await tx.billingAccount.update({
+  return withOrgScope(orgId, async (tx) => {
+    // RLS scopes this to the org resolved from signature-verified Stripe metadata; a deleted org
+    // simply has no row to find, which is the unrecoverable case above.
+    const org = await tx.consultantOrg.findUnique({ where: { id: orgId } });
+    if (!org) return false;
+    if (!customerId) return false;
+
+    await tx.billingAccount.upsert({
       where: { orgId },
-      data: {
+      create: {
+        orgId,
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: subscription.id,
+        plan: plan ?? undefined,
+        status,
+        currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+      },
+      update: {
         stripeSubscriptionId: subscription.id,
         plan: plan ?? undefined,
         status,
@@ -65,7 +102,23 @@ async function applySubscriptionState(orgId: string, subscription: Stripe.Subscr
     if (status === BillingStatus.ACTIVE && plan) {
       await grantPlanCreditsIfDue(tx, orgId, plan);
     }
+    return true;
   });
+}
+
+/**
+ * Stripe retries a 500 with backoff for days. That is right for a transient database failure and
+ * wrong for an event that can never succeed — a subscription belonging to an org that no longer
+ * exists will fail identically on every retry until Stripe gives up, while burning webhook
+ * deliveries and hiding real failures in the dashboard's failed-delivery view. Such events are
+ * recorded to error_events (where scripts/ops-error-triage.ts surfaces them for the founder) and
+ * acknowledged, so the retry queue stays a signal about problems that are actually fixable.
+ */
+async function acknowledgeUnresolvable(eventType: string, orgId: string): Promise<void> {
+  await recordError(
+    "stripe-webhook-unresolvable",
+    new Error(`${eventType}: org ${orgId} no longer exists; acknowledging instead of retrying forever`),
+  );
 }
 
 export async function POST(request: Request) {
@@ -95,7 +148,9 @@ export async function POST(request: Request) {
         const orgId = session.metadata?.orgId;
         if (orgId && typeof session.subscription === "string") {
           const subscription = await stripe.subscriptions.retrieve(session.subscription);
-          await applySubscriptionState(orgId, subscription);
+          if (!(await applySubscriptionState(orgId, subscription))) {
+            await acknowledgeUnresolvable(event.type, orgId);
+          }
         }
         break;
       }
@@ -104,7 +159,9 @@ export async function POST(request: Request) {
         const subscription = event.data.object;
         const orgId = subscription.metadata?.orgId;
         if (orgId) {
-          await applySubscriptionState(orgId, subscription);
+          if (!(await applySubscriptionState(orgId, subscription))) {
+            await acknowledgeUnresolvable(event.type, orgId);
+          }
         }
         break;
       }

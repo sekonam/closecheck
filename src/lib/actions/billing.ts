@@ -6,7 +6,8 @@ import { BillingPlan } from "@prisma/client";
 import { withOrgScope, type ScopedTx } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getStripe } from "@/lib/billing/stripe";
-import { isBillingConfigured, priceIdForPlan } from "@/lib/billing/config";
+import { basePriceIdForPlan, isBillingConfigured, isTeam, seatPriceIdForPlan } from "@/lib/billing/config";
+import { billableSeatQuantity, countSeats } from "@/lib/billing/seats";
 import { recordError } from "@/lib/metrics/record";
 
 /** Owner-only, same reasoning as API keys/webhooks: plan changes bind the org to charges. */
@@ -82,12 +83,16 @@ export async function startCheckout(formData: FormData): Promise<void> {
     throw new Error("Unknown plan.");
   }
   const plan = parsed.data;
-  const priceId = priceIdForPlan(plan);
-  if (!priceId) {
+  const basePriceId = basePriceIdForPlan(plan);
+  if (!basePriceId) {
     throw new Error(`No Stripe price configured for ${plan} — set the matching STRIPE_PRICE_* env var.`);
   }
+  const seatPriceId = seatPriceIdForPlan(plan);
+  if (isTeam(plan) && !seatPriceId) {
+    throw new Error(`No per-seat Stripe price configured for ${plan} — set the matching STRIPE_PRICE_TEAM_* env var.`);
+  }
 
-  const orgName = await withOrgScope(orgId, async (tx) => {
+  const { orgName, seats } = await withOrgScope(orgId, async (tx) => {
     await requireOwner(tx, userId);
     // Refuse a second checkout when a subscription already exists and isn't fully canceled — Stripe
     // does not dedupe, so a PAST_DUE org completing checkout again would end up with two live
@@ -100,17 +105,27 @@ export async function startCheckout(formData: FormData): Promise<void> {
       );
     }
     const org = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
-    return org.name;
+    return { orgName: org.name, seats: await countSeats(tx, orgId) };
   });
 
   const customerId = await ensureBillingAccount(orgId, orgName, email);
   const stripe = getStripe();
   if (!stripe) throw new Error("Billing is not configured.");
 
+  // A Team subscription is the base subscription plus one per-seat line for every seat beyond the
+  // first (spec.md §9, and see basePriceIdForPlan's comment). The seat line is omitted entirely
+  // rather than sent with quantity 0, which Stripe Checkout rejects — syncSeatQuantity adds it the
+  // moment a second teammate is invited.
+  const lineItems: { price: string; quantity: number }[] = [{ price: basePriceId, quantity: 1 }];
+  const seatQuantity = billableSeatQuantity(seats);
+  if (seatPriceId && seatQuantity > 0) {
+    lineItems.push({ price: seatPriceId, quantity: seatQuantity });
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: lineItems,
     subscription_data: { metadata: { orgId } },
     metadata: { orgId },
     success_url: appUrl("/settings?billing=success"),

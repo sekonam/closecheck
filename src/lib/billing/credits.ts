@@ -1,6 +1,7 @@
 import { CreditReason, type BillingPlan } from "@prisma/client";
 import type { ScopedTx } from "@/lib/db/scoped";
 import { includedAuditsPerYear, isEnforcementEnabled, isBillingConfigured } from "./config";
+import { countSeats } from "./seats";
 
 /**
  * The audit-credit ledger (spec.md §9 revised 2026-09-21: base plan includes N full audits per year,
@@ -35,15 +36,34 @@ export async function grantPlanCreditsIfDue(tx: ScopedTx, orgId: string, plan: B
   // visible in the ledger; prorating credits would be more surprising than generous. The note
   // carries the plan so this query can find same-plan grants.
   const planNote = `${plan} yearly included audits`;
+  // startsWith, not equality: the note records the seat count the grant was sized for (below), and
+  // a firm that adds a seat mid-year must NOT look like a different plan and get a second grant.
+  // Idempotency stays keyed on the plan alone; the seat count is recorded for auditability only.
   const recentGrant = await tx.auditCreditEntry.findFirst({
-    where: { orgId, reason: CreditReason.PLAN_GRANT, note: planNote, createdAt: { gt: cutoff } },
+    where: {
+      orgId,
+      reason: CreditReason.PLAN_GRANT,
+      note: { startsWith: planNote },
+      createdAt: { gt: cutoff },
+    },
   });
   if (recentGrant) return false;
 
-  const credits = includedAuditsPerYear(plan);
+  // spec.md §9 gives the Team tier included audits that "scale with seats", so the bundle is sized
+  // at grant time from the org's current seat count. Deliberately a snapshot, not a running
+  // entitlement: seats added later in the year do not retroactively grant more credits, and seats
+  // removed do not claw any back. Anything else would mean recomputing a year's entitlement on
+  // every membership change, and the ledger is append-only precisely so balances are explainable.
+  const seats = await countSeats(tx, orgId);
+  const credits = includedAuditsPerYear(plan, seats);
   if (credits <= 0) return false;
   await tx.auditCreditEntry.create({
-    data: { orgId, delta: credits, reason: CreditReason.PLAN_GRANT, note: planNote },
+    data: {
+      orgId,
+      delta: credits,
+      reason: CreditReason.PLAN_GRANT,
+      note: `${planNote} (${seats} seat${seats === 1 ? "" : "s"})`,
+    },
   });
   return true;
 }
