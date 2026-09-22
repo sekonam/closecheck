@@ -18,6 +18,20 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      # Pinned to the disk's mountPath above rather than left to the default. They currently
+      # coincide — the default is ./.local-storage and the mount is /app/.local-storage, with /app
+      # as the workdir — which means uploaded evidence survives a deploy by luck rather than by
+      # configuration. Change either one without the other and the app silently writes to the
+      # container's ephemeral filesystem, discarding every seller document on the next deploy.
+      # Setting it explicitly makes the two visibly one decision.
+      - key: STORAGE_ROOT_DIR
+        value: /app/.local-storage
+      # Render terminates TLS and forwards one hop, so the client address is the last entry in
+      # X-Forwarded-For. Stated rather than defaulted because getting it wrong in the permissive
+      # direction lets a caller forge the address every rate limit is keyed on — both the API's and
+      # sign-in's — and, worse, aim another user's budget at them. See src/lib/api/rateLimit.ts.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
       # Superuser/owner connection Render provides for the database below — set this first from the
       # database's "Internal Connection String". Everything else here is bootstrapped FROM this one
       # per docs/deployment.md (rotate role passwords, then fill in DATABASE_URL and friends).
