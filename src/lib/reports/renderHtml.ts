@@ -84,7 +84,8 @@ export interface ReportData {
   findings: ReportFinding[];
   overallRatingOverride?: Severity | null;
   overallRatingOverrideNote?: string | null;
-  // spec.md §6: "appendix (raw uploaded documents, if the consultant opts to include them)." Omitted
+  // spec.md §6's appendix: a listing of the documents relied on, never the documents themselves
+  // (see the decision recorded there, and appendixSection below for the reasoning). Omitted
   // or empty means no appendix section is rendered at all.
   appendixDocuments?: AppendixDocument[];
 }
@@ -895,8 +896,8 @@ function findingRow(f: ReportFinding, accent: string): string {
 /**
  * The appendix: what documents this audit was built on, listed rather than reproduced.
  *
- * spec.md §6's wording is "appendix (raw uploaded documents, if the consultant opts to include
- * them)", and this deliberately lists them instead. Embedding a seller's executed contracts and
+ * spec.md §6 used to read "appendix (raw uploaded documents, if the consultant opts to include
+ * them)"; the decision recorded there now matches what this has always done, and lists them. Embedding a seller's executed contracts and
  * merchant statements into a PDF the buyer can forward anywhere is a confidentiality decision
  * nobody made, it would multiply the deliverable's size, and the documents are already retained
  * and access-controlled under the firm's retention policy. A buyer who needs a specific document

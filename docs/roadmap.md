@@ -128,7 +128,8 @@ paid" cannot happen until Phase 2.5 below lands. Note the template-proliferation
 materialized in the way it predicted: all four templates now exist without design-partner deal-flow
 evidence for their sequencing.
 
-**Update (2026-09-22):** all four templates are published at **v3** (`spec.md` §5). Every manual
+**Update (2026-09-22):** all four templates are published at **v4** (`spec.md` §5) — v3 added
+structured capture and per-item guidance, v4 put sources behind the severity thresholds. Every manual
 item now carries a verification procedure and severity thresholds — twelve had neither, which meant
 one consultant's Yellow was another's Red on the same evidence — and three methodology defects were
 fixed: the franchise and e-commerce templates silently had no platform-transferability item, the

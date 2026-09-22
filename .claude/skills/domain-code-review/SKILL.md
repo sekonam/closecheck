@@ -28,6 +28,11 @@ otherwise report directly to the user as plain findings with file/line and concr
   never a blanket cross-org view?
 
 **Any change touching document upload/storage (Tier B contracts/statements)** (`spec.md` §4, §8):
+- **Evidence outlives the person who uploaded it.** `Evidence.uploadedById` is `ON DELETE SET
+  NULL` deliberately: `removeMember` hard-deletes the User row, so a cascade would take every
+  Tier B contract that teammate attached with it — silently, at exactly the moment a firm
+  reorganises. Any new deletion path involving User has to preserve that; the document belongs to
+  the engagement, not to the person.
 - Is the file encrypted at rest / access-controlled per Engagement, consistent with §8?
 - Does retention behavior match the Engagement-lifecycle-tied policy in §8, or does the change
   introduce indefinite retention by omission (e.g., a new upload path that forgets to attach the
@@ -45,6 +50,11 @@ otherwise report directly to the user as plain findings with file/line and concr
   don't just review it as if it were an approved feature being implemented imperfectly.
 
 **Any change touching Report generation or severity roll-up** (`spec.md` §6):
+- **The appendix lists documents; it does not contain them.** Embedding a seller's executed
+  contracts or merchant statements into the PDF would put confidential material inside a file the
+  buyer can forward anywhere — a trust decision (`spec.md` §6, §8) rather than a rendering choice,
+  and one that looks like a small improvement from inside the renderer. Treat any change that
+  inlines document bytes into a report as needing a spec-level decision, not review.
 - Does the roll-up logic still correctly implement "any single Red item makes its tier Red regardless
   of surrounding Greens," and "overall rating = worst tier rating"? This is easy to accidentally
   average instead of worst-case — check the actual aggregation, don't trust a variable name like
@@ -68,6 +78,10 @@ otherwise report directly to the user as plain findings with file/line and concr
   invalidates a value they chose. It must ship as a new Template version like any other checklist
   edit. Watch specifically for an edit to the frozen v1/v2 content arrays in
   `src/lib/templates/content.ts`, which look like ordinary data and are not.
+- **A template revision layers, it never edits.** v3 and v4 are separate modules applied over the
+  frozen content rather than changes to it, and each carries a coverage assertion that fails the
+  build when an item is neither revised nor explicitly recorded as unchanged-with-a-reason. A diff
+  that edits an existing revision in place, or that adds an item without a decision, defeats both.
 - **Does a client-facing string stay client-facing?** `TemplateItem.description` renders verbatim
   into the whitelabeled PDF a consultant hands to a buyer; `guidance` and `severityGuidance` are
   internal and must never reach the report. A methodology note written into the wrong field puts

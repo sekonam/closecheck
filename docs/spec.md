@@ -113,7 +113,7 @@ Runnable pre-LOI, even pre-offer, from public information only.
 
 | Item | Method |
 |---|---|
-| Domain/registrar ownership and expiration | automated (WHOIS) |
+| Domain/registrar ownership, expiration, last transfer, and registration status | automated (RDAP, with legacy WHOIS as fallback) |
 | DNS provider and hosting fingerprint | automated |
 | SSL/TLS certificate validity, issuer, expiration | automated |
 | CMS identification and version/patch status (e.g. outdated WordPress plugin) | automated, best-effort |
