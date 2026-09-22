@@ -109,8 +109,14 @@ export async function consumeCreditForAudit(
   if (isEnforcementEnabled() && !hasActiveSubscription) {
     return {
       outcome: "blocked",
+      // Names WHO can resolve this rather than instructing the reader to do it. Choosing a plan is
+      // an owner-only action, so telling a teammate to "choose a plan on the Settings page" sends
+      // them to a control they cannot use and makes a billing limit look like a permissions bug
+      // they have done something wrong to hit. This wording reads correctly to an owner too, and
+      // needs no role passed down into the ledger to get right.
       reason:
-        "No audit credits remaining and no active subscription. Choose a plan on the Settings page to run full audits.",
+        "This account has no audit credits remaining and no active subscription. The account owner " +
+        "can choose a plan on the Settings page to run full audits.",
     };
   }
 
