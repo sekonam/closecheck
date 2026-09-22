@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { withPortalScope } from "@/lib/portal/db";
+import type { ReportBrandSnapshot } from "./branding";
 
 /**
  * Shared token resolution for the two halves of the public Client Portal (spec.md §7): the page a
@@ -18,6 +19,10 @@ export interface PortalAccess {
   reportId: string;
   orgId: string;
   pdfStorageKey: string | null;
+  /** The brand kit as of this Report's generation — see branding.ts. Carried on the access result
+   * because it rides along on the `reports` row this function already reads; null firmName means a
+   * Report generated before the snapshot columns existed. */
+  brandSnapshot: ReportBrandSnapshot;
 }
 
 /**
@@ -58,6 +63,11 @@ export async function resolvePortalAccess(
       reportId: report.id,
       orgId: link.orgId,
       pdfStorageKey: report.pdfStorageKey,
+      brandSnapshot: {
+        firmName: report.brandSnapshotFirmName,
+        colorHex: report.brandSnapshotColorHex,
+        logoKey: report.brandSnapshotLogoKey,
+      },
     };
   });
 }

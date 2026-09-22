@@ -54,7 +54,9 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
   // the portal role — carries only ids, and failure never affects the buyer's view.
   void recordMetric("portal.viewed", { orgId: access.orgId, data: { reportId: access.reportId } });
 
-  const branding = await loadPortalBranding(access.orgId);
+  // Snapshot first: this report's own branding, as generated. The orgId is only consulted for
+  // reports predating the snapshot columns (see loadPortalBranding).
+  const branding = await loadPortalBranding(access.orgId, access.brandSnapshot);
   const accent = safeAccent(branding?.accentHex);
 
   if (!access.pdfStorageKey || !(await reportFileExists(access.pdfStorageKey))) {
