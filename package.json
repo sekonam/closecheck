@@ -20,6 +20,9 @@
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "metrics:report": "tsx -r dotenv/config scripts/metrics-report.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
+    "ops:dashboard": "tsx -r dotenv/config scripts/ops-dashboard.ts",
+    "ops:errors": "tsx -r dotenv/config scripts/ops-error-triage.ts",
+    "ops:backup-drill": "tsx -r dotenv/config scripts/ops-backup-drill.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.mts"
   },
