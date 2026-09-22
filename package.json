@@ -24,7 +24,8 @@
     "ops:errors": "tsx -r dotenv/config scripts/ops-error-triage.ts",
     "ops:backup-drill": "tsx -r dotenv/config scripts/ops-backup-drill.ts",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.mts"
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "db:publish-evidence-depth": "tsx -r dotenv/config scripts/publish-evidence-depth.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

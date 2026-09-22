@@ -7,7 +7,8 @@ import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { runTierAAutomation, updateFinding, updateAuditOverride, markAuditComplete, reopenAudit } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
-import { isContractItem } from "@/lib/audit/contractItem";
+import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSchema";
+import { StructuredFields } from "./StructuredFields";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
@@ -405,12 +406,14 @@ export default async function AuditPage({
           </div>
           <div className="mt-3 space-y-3">
             {byTier[tier].map((finding) => {
-              const contractFields = isContractItem(finding.templateItem.title);
-              const structured = (finding.structuredData ?? {}) as {
-                transferable?: string | null;
-                penaltyAmount?: string | null;
-                penaltyBasis?: string | null;
-              };
+              // A fieldSchema is honoured only on MANUAL items: structuredData doubles as the Tier A
+              // automated runner's output store, and rendering a form over it would let a save
+              // overwrite check results. Mirrors the same guard in updateFinding.
+              const schema =
+                finding.templateItem.method === "MANUAL"
+                  ? parseFieldSchema(finding.templateItem.fieldSchema)
+                  : null;
+              const structured = schema ? readPersistedValues(schema, finding.structuredData) : {};
 
               return (
                 <div key={finding.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -469,41 +472,8 @@ export default async function AuditPage({
                       Save
                     </button>
 
-                    {contractFields && (
-                      <div className="col-span-full grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 sm:grid-cols-3">
-                        <label className="text-xs text-slate-500">
-                          Transferable to new owner
-                          <select
-                            name="transferable"
-                            defaultValue={structured.transferable ?? ""}
-                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900"
-                          >
-                            <option value="">Not recorded</option>
-                            <option value="yes">Yes</option>
-                            <option value="no">No</option>
-                            <option value="unclear">Unclear</option>
-                          </select>
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          Early-termination penalty amount
-                          <input
-                            name="penaltyAmount"
-                            defaultValue={structured.penaltyAmount ?? ""}
-                            placeholder="e.g. $12,000 or 3 months' fees"
-                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          Penalty basis
-                          <input
-                            name="penaltyBasis"
-                            defaultValue={structured.penaltyBasis ?? ""}
-                            placeholder="e.g. flat fee, % of remaining term"
-                            className="mt-0.5 block w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
-                          />
-                        </label>
-                      </div>
-                    )}
+                    {schema && <StructuredFields schema={schema} values={structured} />}
+
                   </form>
 
                   <div className="mt-3 border-t border-slate-100 pt-3">

@@ -13,7 +13,7 @@ import { consumeCreditForAudit } from "@/lib/billing/credits";
 import { getStripe } from "@/lib/billing/stripe";
 import { overagePriceId } from "@/lib/billing/config";
 import { recordMetric, recordError } from "@/lib/metrics/record";
-import { isContractItem } from "@/lib/audit/contractItem";
+import { parseFieldSchema, readFieldValues } from "@/lib/templates/fieldSchema";
 
 /**
  * Creates an Audit pinned to the currently-active version of the given Template slug
@@ -194,12 +194,6 @@ const updateFindingSchema = z.object({
   status: z.nativeEnum(FindingStatus),
   severity: z.nativeEnum(Severity).optional(),
   note: z.string().optional(),
-  // Contract-specific structured fields (docs/spec.md §4, Tier B) — only rendered in the UI for the
-  // POS/online-ordering contract items, but accepted generically here rather than gated by title so
-  // this action doesn't need to know which items are "contract-shaped."
-  transferable: z.enum(["yes", "no", "unclear"]).optional(),
-  penaltyAmount: z.string().optional(),
-  penaltyBasis: z.string().optional(),
 });
 
 export async function updateFinding(formData: FormData) {
@@ -209,24 +203,22 @@ export async function updateFinding(formData: FormData) {
     status: formData.get("status"),
     severity: formData.get("severity") || undefined,
     note: formData.get("note") || undefined,
-    transferable: formData.get("transferable") || undefined,
-    penaltyAmount: formData.get("penaltyAmount") || undefined,
-    penaltyBasis: formData.get("penaltyBasis") || undefined,
   });
   if (!result.success) {
     throw new Error(result.error.issues[0]?.message ?? "Invalid finding update.");
   }
   const parsed = result.data;
 
+  // spec.md §4's severity model: "Red items require a note, Yellow items recommend one, Green
+  // items don't need one." Enforced here rather than only in the UI because this is a claim that
+  // ends up in a client deliverable — an unexplained Red is the one finding a buyer will push back
+  // on hardest, and the consultant has to be able to answer. Yellow stays a recommendation, per
+  // the spec; the audit page nudges for it without blocking.
+  if (parsed.severity === Severity.RED && !parsed.note?.trim()) {
+    throw new Error("A Red finding needs a note explaining it — spec §4 requires one.");
+  }
+
   const updated = await withOrgScope(orgId, async (tx) => {
-    // Whether this submit is allowed to touch structuredData is decided from the finding's own
-    // templateItem title — the same check the UI uses to decide whether to render the contract
-    // fields at all (src/lib/audit/contractItem.ts) — never from whether the posted values happen
-    // to be non-empty. Gating on posted-value truthiness meant a consultant clearing all three
-    // fields back to blank (a legitimate correction) silently left the stale structuredData in
-    // place, since an all-empty submission looked identical to "this form doesn't have these
-    // fields." Gating on the finding's actual shape also closes off writing contract-shaped
-    // structuredData onto an unrelated (e.g. Tier A automated) finding via a crafted submission.
     // findUnique, not findUniqueOrThrow: a findingId for another org resolves to zero rows under
     // RLS (not a Postgres policy error, just an empty result), so findUniqueOrThrow's raw
     // PrismaClientKnownRequestError (P2025) would crash to Next's default 500 page instead of a
@@ -238,7 +230,37 @@ export async function updateFinding(formData: FormData) {
     if (!existing) {
       throw new Error("Finding not found.");
     }
-    const isContractFinding = isContractItem(existing.templateItem.title);
+
+    // Whether this submit may touch structuredData is decided from the finding's own pinned
+    // TemplateItem — never from whether the posted values happen to be non-empty. Gating on
+    // posted-value truthiness meant a consultant clearing every field back to blank (a legitimate
+    // correction) silently left stale structuredData in place, since an all-empty submission looks
+    // identical to "this form doesn't carry these fields." Reading the item's declared schema also
+    // means a crafted submission cannot write fields onto an item that doesn't declare them: the
+    // schema is the allowlist, checked server-side against the row, not against the form.
+    //
+    // MANUAL only. structuredData does double duty as the Tier A automated runner's output store
+    // (see runTierAChecks above), and an automated item's check output must never be clobbered by
+    // a form submission. Template content is asserted to never declare a fieldSchema on an
+    // AUTOMATED item (src/lib/templates/content.ts); this is the runtime half of that invariant.
+    const schema =
+      existing.templateItem.method === "MANUAL"
+        ? parseFieldSchema(existing.templateItem.fieldSchema)
+        : null;
+
+    let structuredUpdate: { structuredData: Prisma.InputJsonValue } | Record<string, never> = {};
+    if (schema) {
+      const values = readFieldValues(schema, (name) => {
+        const raw = formData.get(name);
+        return typeof raw === "string" ? raw : null;
+      });
+      if (!values.ok) {
+        throw new Error(
+          values.errors.map((error) => `${error.label} ${error.message}`).join("; "),
+        );
+      }
+      structuredUpdate = { structuredData: values.values as Prisma.InputJsonValue };
+    }
 
     return tx.finding.update({
       where: { id: parsed.findingId },
@@ -246,18 +268,10 @@ export async function updateFinding(formData: FormData) {
         status: parsed.status,
         severity: parsed.severity ? parsed.severity : null,
         note: parsed.note ?? null,
-        // Omitting the key here (rather than writing null/{}) leaves Tier A's automated check
-        // output on other findings untouched, since this same action is shared by every finding's
-        // form regardless of tier or method.
-        ...(isContractFinding
-          ? {
-              structuredData: {
-                transferable: parsed.transferable ?? null,
-                penaltyAmount: parsed.penaltyAmount ?? null,
-                penaltyBasis: parsed.penaltyBasis ?? null,
-              } satisfies Prisma.InputJsonValue,
-            }
-          : {}),
+        // Omitting the key entirely (rather than writing null/{}) leaves Tier A's automated check
+        // output untouched on findings this form has no structured fields for, since the same
+        // action is shared by every finding's form regardless of tier or method.
+        ...structuredUpdate,
       },
       include: { audit: true },
     });
