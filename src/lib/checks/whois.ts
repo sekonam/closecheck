@@ -1,5 +1,7 @@
 import { connect } from "node:net";
 
+import { lookupRdap } from "./rdap";
+
 export interface WhoisResult {
   registrar: string | null;
   createdDate: string | null;
@@ -38,13 +40,32 @@ function extractField(raw: string, labels: string[]): string | null {
 }
 
 /**
- * Two-hop WHOIS: ask IANA which registry server handles this TLD, then query that server directly.
- * Covers the common gTLDs/ccTLDs without a hardcoded server table; some registries (notably .io,
- * a few ccTLDs) redirect again or return thin/no data over port 43 — those surface as a null field
- * with `raw` populated, for the consultant to read directly, rather than a hard failure. This is a
- * Tier A item (spec.md §4): best-effort automation, human reviews the result either way.
+ * Domain registration lookup: RDAP first, legacy port-43 WHOIS as fallback.
+ *
+ * RDAP is the primary path because ICANN sunset legacy WHOIS in January 2025 and hundreds of
+ * gTLDs no longer answer on port 43 at all (spec.md §10, roadmap.md Phase 2.5). The legacy
+ * two-hop path below is kept only as a fallback for ccTLDs still absent from IANA's RDAP
+ * bootstrap registry. This is a Tier A item (spec.md §4): best-effort automation, human reviews
+ * the result either way — so both paths degrade to a populated `error`, never a throw.
  */
 export async function lookupWhois(domain: string): Promise<WhoisResult> {
+  const rdap = await lookupRdap(domain);
+  if (!rdap.error) return rdap;
+
+  const legacy = await legacyWhoisLookup(domain);
+  if (legacy.error) {
+    return { ...legacy, error: `RDAP: ${rdap.error}; legacy WHOIS: ${legacy.error}` };
+  }
+  return legacy;
+}
+
+/**
+ * Two-hop legacy WHOIS: ask IANA which registry server handles this TLD, then query that server
+ * directly. Covers TLDs without a hardcoded server table; some registries redirect again or return
+ * thin/no data over port 43 — those surface as a null field with `raw` populated, for the
+ * consultant to read directly, rather than a hard failure.
+ */
+async function legacyWhoisLookup(domain: string): Promise<WhoisResult> {
   const tld = domain.split(".").pop();
   if (!tld) {
     return {
