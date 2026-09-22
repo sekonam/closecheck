@@ -9,6 +9,9 @@ import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { parseFieldSchema, readPersistedValues } from "@/lib/templates/fieldSchema";
 import { StructuredFields } from "./StructuredFields";
+import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
+import { unavailableReason } from "@/lib/audit/blocking";
+import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
@@ -139,6 +142,10 @@ export default async function AuditPage({
   const byTier: Record<Tier, typeof audit.findings> = { A: [], B: [], C: [] };
   for (const f of audit.findings) byTier[f.templateItem.tier].push(f);
   const overallStatus = coverageStatus(rollup.overallCoverage.rated, rollup.overallCoverage.total);
+  // How much of the audit has evidence behind it, not just a rating on it. A Tier B item can be
+  // marked Green with no contract attached and every field blank; without this the audit page
+  // presents that identically to one backed by an executed agreement.
+  const evidenceCoverage = computeEvidenceCoverage(audit.findings);
 
   return (
     <div>
@@ -167,10 +174,24 @@ export default async function AuditPage({
             </>
           )}
           <span className="text-xs text-slate-400">
-            ({rollup.overallCoverage.rated}/{rollup.overallCoverage.total} rated)
+            ({rollup.overallCoverage.rated}/{rollup.overallCoverage.total} rated
+            {evidenceCoverage.overall.expected > 0 &&
+              ` · ${evidenceCoverage.overall.supported}/${evidenceCoverage.overall.expected} evidenced`}
+            )
           </span>
         </div>
       </div>
+
+      {evidenceCoverage.unsupportedRatedCount > 0 && (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {evidenceCoverage.unsupportedRatedCount}{" "}
+          {evidenceCoverage.unsupportedRatedCount === 1 ? "finding is" : "findings are"} rated with no
+          document or attestation behind{" "}
+          {evidenceCoverage.unsupportedRatedCount === 1 ? "it" : "them"}. They will still appear in
+          the report — this is a prompt, not a block, since a seller who won&rsquo;t produce a
+          document is itself a finding.
+        </p>
+      )}
 
       {error && (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -401,7 +422,10 @@ export default async function AuditPage({
               <span className={`h-2.5 w-2.5 rounded-full ${SEVERITY_DOT[rollup.perTier[tier]]}`} />
             )}
             <span className="text-xs text-slate-400">
-              ({rollup.perTierCoverage[tier].rated}/{rollup.perTierCoverage[tier].total} rated)
+              ({rollup.perTierCoverage[tier].rated}/{rollup.perTierCoverage[tier].total} rated
+              {evidenceCoverage.perTier[tier].expected > 0 &&
+                ` · ${evidenceCoverage.perTier[tier].supported}/${evidenceCoverage.perTier[tier].expected} evidenced`}
+              )
             </span>
           </div>
           <div className="mt-3 space-y-3">
@@ -414,6 +438,13 @@ export default async function AuditPage({
                   ? parseFieldSchema(finding.templateItem.fieldSchema)
                   : null;
               const structured = schema ? readPersistedValues(schema, finding.structuredData) : {};
+              // Advisory only — spec.md §2.3's pre-LOI/post-LOI distinction made visible. A
+              // cooperative broker hands over documents earlier than the tidy model expects, so
+              // this labels and never disables.
+              const unavailable = unavailableReason(
+                finding.templateItem.blockingDependency,
+                audit.engagement.dealStage,
+              );
 
               return (
                 <div key={finding.id} className="rounded-lg border border-slate-200 bg-white p-4">
@@ -423,9 +454,25 @@ export default async function AuditPage({
                       {finding.templateItem.description && (
                         <div className="mt-0.5 text-xs text-slate-500">{finding.templateItem.description}</div>
                       )}
-                      <div className="mt-1 text-xs text-slate-400">
-                        {finding.templateItem.method === "AUTOMATED" ? "Automated" : "Manual"}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                          {finding.templateItem.method === "AUTOMATED" ? "Automated" : "Manual"}
+                        </span>
+                        <BlockingChip
+                          dependency={finding.templateItem.blockingDependency}
+                          reason={unavailable}
+                        />
+                        <EvidenceChip
+                          expectation={finding.templateItem.evidenceExpectation}
+                          satisfied={isEvidenceSatisfied(finding)}
+                          rated={finding.severity !== null}
+                        />
                       </div>
+                      <FindingGuidance
+                        guidance={finding.templateItem.guidance}
+                        severityGuidance={finding.templateItem.severityGuidance}
+                        unavailable={unavailable}
+                      />
                     </div>
                     {finding.severity && (
                       <span className={`h-3 w-3 shrink-0 rounded-full ${SEVERITY_DOT[finding.severity]}`} />
