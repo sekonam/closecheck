@@ -1,5 +1,8 @@
 # CloseCheck — promotion & channel research
 
+> **Link correction (2026-09-22):** `selffundedsearchconference.com` now redirects to an unrelated site; the conference's working domain is `selffundedsearch.org`.
+
+
 **Date: 2026-09-21. Scope: concrete, current (2025–2026) promotion channels for launch — where the
 two target populations (tech-DD providers on marketplaces; QoE generalists / IT consultants who
 could add a tech-diligence line) actually congregate, what each channel costs, and what the first
