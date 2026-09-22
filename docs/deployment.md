@@ -61,11 +61,24 @@ first "Apply Blueprint" click are yours.
 
    This is small and load-bearing. Every rate limit — the read-only API's, and both of sign-in's —
    keys on the client address, read from `X-Forwarded-For` counting this many hops from the right.
-   Set too high, and legitimate callers collapse into one shared bucket. Set too low, and the value
-   a caller supplies in that header is trusted: they can evade their own budget, and can present
-   someone else's address to burn that person's sign-in budget and lock them out of their own
-   account. That was a real vulnerability in this codebase (fixed 2026-09-22), and the fix depends
-   entirely on this number matching the deployment.
+   Set too low, and the value a caller supplies in that header is trusted: they can evade their own
+   budget, and can present someone else's address to burn that person's sign-in budget and lock
+   them out of their own account. That was a real vulnerability here (fixed 2026-09-22), and the fix
+   depends entirely on this number matching the deployment.
+
+   Set too high — or set to `0` when a proxy *is* present — and every caller collapses into one
+   shared bucket. Worth being blunt about what that does, because the two limiters fail in opposite
+   directions from the same mistake and only one of them is benign:
+
+   - For the **API** limiter, a shared bucket is an inconvenience. Anonymous callers exhaust one
+     budget and get 429s; authenticated callers are keyed on their API key and are unaffected.
+   - For **sign-in**, it is an outage. That budget hard-rejects *before the password is checked*, so
+     one host sending 30 requests a minute would make sign-in fail for every user on the
+     deployment. The code special-cases an unknown address for exactly this reason and skips the
+     address budget entirely rather than sharing one — but that means anti-spray protection is
+     genuinely absent in that configuration, not merely degraded.
+
+   "It degrades safely" was true of one limiter and catastrophic for the other. Set the number.
 
 8. **Set `NEXTAUTH_URL`** to the `*.onrender.com` URL Render assigned the service (or your custom
    domain, once attached).
