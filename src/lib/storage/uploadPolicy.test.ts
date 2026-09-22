@@ -106,10 +106,32 @@ describe("content check", () => {
     expect(checkEvidenceContent("image/png", new Uint8Array()).ok).toBe(false);
   });
 
-  it("checks HEIC's brand at its real offset, not the start", () => {
+  it("checks HEIC's box type at its real offset, not the start", () => {
     const heic = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]);
     expect(checkEvidenceContent("image/heic", heic).ok).toBe(true);
     expect(checkEvidenceContent("image/heic", PNG).ok).toBe(false);
+  });
+
+  it("refuses a container that matches the prefix but is another media type", () => {
+    // RIFF is shared with WAV and AVI; "ftyp" is shared with MP4 and QuickTime. Checking only the
+    // container prefix accepts an audio file as a WebP and a video as a HEIC.
+    const riffWave = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]);
+    expect(checkEvidenceContent("image/webp", riffWave).ok).toBe(false);
+    const riffWebp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    expect(checkEvidenceContent("image/webp", riffWebp).ok).toBe(true);
+
+    const mp4 = new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    expect(checkEvidenceContent("image/heic", mp4).ok).toBe(false);
+  });
+
+  it("accepts every still-image brand HEIC actually uses", () => {
+    for (const brand of ["heic", "heix", "hevc", "mif1", "msf1"]) {
+      const bytes = new Uint8Array([
+        0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70,
+        ...[...brand].map((c) => c.charCodeAt(0)),
+      ]);
+      expect(checkEvidenceContent("image/heic", bytes).ok, brand).toBe(true);
+    }
   });
 
   it("accepts formats that have no signature to check", () => {

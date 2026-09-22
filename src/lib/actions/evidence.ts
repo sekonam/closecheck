@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { EvidenceKind } from "@prisma/client";
+import { EvidenceKind, Tier } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { putObject, evidenceKey } from "@/lib/storage/local";
@@ -62,7 +62,7 @@ export async function attachEvidence(formData: FormData): Promise<void> {
     // cleanly — same class of bug found live via cross-tenant isolation testing on updateFinding.
     const finding = await tx.finding.findUnique({
       where: { id: findingId },
-      include: { audit: true },
+      include: { audit: true, templateItem: true },
     });
     if (!finding) {
       throw new Error("Finding not found.");
@@ -74,11 +74,20 @@ export async function attachEvidence(formData: FormData): Promise<void> {
         orgId,
         findingId,
         // SCREENSHOT has existed in the schema since the first migration and nothing ever wrote
-        // it — every upload was recorded as DOCUMENT regardless. The distinction is not cosmetic:
-        // a screenshot is the natural artifact of a Tier C live-access check (spec.md §4's
-        // consultant-attested model), and it is the one kind of evidence that should be embedded
-        // in a report rather than merely listed, since looking at it IS reading it.
-        kind: verdict.isImage ? EvidenceKind.SCREENSHOT : EvidenceKind.DOCUMENT,
+        // it — every upload was recorded as DOCUMENT regardless. A screenshot is the natural
+        // artifact of a Tier C live-access check (spec.md §4's consultant-attested model).
+        //
+        // Classified from the item's TIER as well as the file being an image, not from the image
+        // format alone. A consultant photographing an executed POS agreement with their phone
+        // uploads an image too, and calling that a screenshot would be wrong in the way that
+        // matters: the difference decides whether a report embeds the file inline or merely lists
+        // it, and inlining a seller's contract into a document the buyer can forward is not a
+        // decision this classification should make by accident. Tier C is the only tier whose
+        // evidence is an observation of a screen.
+        kind:
+          verdict.isImage && finding.templateItem.tier === Tier.C
+            ? EvidenceKind.SCREENSHOT
+            : EvidenceKind.DOCUMENT,
         storageKey: key,
         text: file.name,
       },

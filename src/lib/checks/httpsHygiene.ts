@@ -1,3 +1,5 @@
+import { followSafely, safeFetch } from "@/lib/net/safeFetch";
+
 export interface HttpsHygiene {
   /** Whether http://<domain> answered at all (any status, including redirects). */
   httpReachable: boolean;
@@ -13,20 +15,6 @@ export interface HttpsHygiene {
   error: string | null;
 }
 
-const FETCH_HEADERS = { "User-Agent": "CloseCheck-TierA-Scanner/0.1 (+https://closecheck.example)" };
-
-async function fetchManual(url: string, timeoutMs: number): Promise<Response | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { signal: controller.signal, redirect: "manual", headers: FETCH_HEADERS });
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 /**
  * Observes HTTP→HTTPS redirect behavior and the HSTS header from a single unauthenticated request to
  * each scheme (spec.md §4, §13.1: Tier A, automated, observation only — the runner in
@@ -34,40 +22,44 @@ async function fetchManual(url: string, timeoutMs: number): Promise<Response | n
  */
 const MAX_REDIRECT_HOPS = 3;
 
-/** Follows the redirect chain from http://<domain> while it stays on http://, up to
+/**
+ * Follows the redirect chain from http://<domain> while it stays on http://, up to
  * MAX_REDIRECT_HOPS — many sites hop http://x → http://www.x → https://www.x, and judging only the
- * first hop would mislabel them as not reaching HTTPS. */
+ * first hop would mislabel them as not reaching HTTPS.
+ *
+ * Every hop's host is resolved and checked before it is fetched (src/lib/net/safeFetch.ts). A
+ * redirect is a request to a host nobody validated, so following one automatically would let a
+ * domain that passed validation hand the server an internal address — and this check writes the
+ * resolved chain into the Finding, so that would carry a read channel with it.
+ */
 async function followHttpChain(
   domain: string,
   timeoutMs: number,
-): Promise<{ reachable: boolean; reachesHttps: boolean; chain: string[] }> {
-  let url = `http://${domain}`;
-  const chain: string[] = [];
+): Promise<{ reachable: boolean; reachesHttps: boolean; chain: string[]; refused: string | null }> {
+  const result = await followSafely(`http://${domain}`, {
+    timeoutMs,
+    maxHops: MAX_REDIRECT_HOPS,
+    // Stop as soon as the chain reaches HTTPS: that is the answer this check wants, and there is
+    // no reason to make a further request once we have it.
+    stopAt: (url) => /^https:\/\//i.test(url),
+  });
 
-  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-    const res = await fetchManual(url, timeoutMs);
-    if (res === null) {
-      return { reachable: hop > 0, reachesHttps: false, chain };
-    }
-    const location = res.headers.get("location");
-    if (res.status < 300 || res.status >= 400 || !location) {
-      return { reachable: true, reachesHttps: false, chain };
-    }
-    const next = new URL(location, url).toString();
-    chain.push(next);
-    if (/^https:\/\//i.test(next)) {
-      return { reachable: true, reachesHttps: true, chain };
-    }
-    url = next;
-  }
-  return { reachable: true, reachesHttps: false, chain };
+  const chain = result.chain.map((hop) => hop.url);
+  const reachesHttps = chain.length > 0 && /^https:\/\//i.test(chain[chain.length - 1]);
+  return { reachable: result.reachable, reachesHttps, chain, refused: result.refused };
 }
 
 export async function checkHttpsHygiene(domain: string, timeoutMs = 8000): Promise<HttpsHygiene> {
-  const [http, httpsRes] = await Promise.all([
+  const [http, httpsOutcome] = await Promise.all([
     followHttpChain(domain, timeoutMs),
-    fetchManual(`https://${domain}`, timeoutMs),
+    safeFetch(`https://${domain}`, timeoutMs),
   ]);
+
+  const httpsRes = httpsOutcome.kind === "response" ? httpsOutcome.response : null;
+  // A refused host is not the same as an unreachable one, and saying so keeps the finding honest:
+  // "we declined to fetch this" must never read as "the site does not respond".
+  const refused =
+    http.refused ?? (httpsOutcome.kind === "refused" ? httpsOutcome.reason : null);
 
   return {
     httpReachable: http.reachable,
@@ -75,6 +67,10 @@ export async function checkHttpsHygiene(domain: string, timeoutMs = 8000): Promi
     httpRedirectChain: http.chain,
     httpsReachable: httpsRes !== null,
     hstsHeader: httpsRes?.headers.get("strict-transport-security") ?? null,
-    error: !http.reachable && httpsRes === null ? "Neither http:// nor https:// responded" : null,
+    error: refused
+      ? `Not checked: ${refused}`
+      : !http.reachable && httpsRes === null
+        ? "Neither http:// nor https:// responded"
+        : null,
   };
 }

@@ -142,3 +142,30 @@ describe("allowed hosts", () => {
     expect(isPublicHostLiteral("100.128.0.1")).toEqual({ safe: true });
   });
 });
+
+describe("IPv6 forms that embed an IPv4 address", () => {
+  it("unwraps the deprecated IPv4-compatible form", () => {
+    // ::a.b.c.d parses and still names the address, so a guard that only knows ::ffff:a.b.c.d
+    // lets it straight through. Both of these previously returned safe.
+    expect(reasonFor("::127.0.0.1")).toMatch(/loopback/);
+    expect(reasonFor("::169.254.169.254")).toMatch(/link-local/);
+    expect(reasonFor("::10.0.0.1")).toMatch(/private/);
+  });
+
+  it("unwraps the IPv4-translated form", () => {
+    expect(reasonFor("::ffff:0:127.0.0.1")).toMatch(/loopback/);
+    expect(reasonFor("::ffff:0:169.254.169.254")).toMatch(/link-local/);
+  });
+
+  it("still names ::1 and :: correctly rather than as embedded IPv4", () => {
+    // Both sit numerically inside ::/96 but are not IPv4-compatible addresses. Getting the reason
+    // wrong isn't a security hole, but a guard that misdescribes what it blocked is one to distrust.
+    expect(reasonFor("::1")).toMatch(/loopback/);
+    expect(reasonFor("::")).toMatch(/unspecified/);
+  });
+
+  it("does not misread a genuine public IPv6 address as embedded IPv4", () => {
+    expect(isPublicHostLiteral("2001:4860:4860::8888")).toEqual({ safe: true });
+    expect(isPublicHostLiteral("2606:4700::1111")).toEqual({ safe: true });
+  });
+});

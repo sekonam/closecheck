@@ -201,11 +201,28 @@ export function parseIPv6(input: string): Uint8Array | null {
 function ipv6Verdict(bytes: Uint8Array): HostVerdict {
   const isZeroPrefix = (length: number) => bytes.slice(0, length).every((b) => b === 0);
 
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible — unwrap and judge as IPv4, otherwise
-  // ::ffff:169.254.169.254 walks straight past every v6 range check below.
-  if (isZeroPrefix(10) && bytes[10] === 0xff && bytes[11] === 0xff) {
-    return ipv4Verdict(((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0);
+  // ::1 and :: sit numerically inside ::/96 but are not IPv4-compatible addresses — they are
+  // loopback and the unspecified address. They have to be recognised before the embedding branches
+  // below, or ::1 reads as "embeds 0.0.0.1" and gets blocked for the wrong stated reason.
+  if (bytes.every((b) => b === 0)) return { safe: false, reason: "is the unspecified address (::)" };
+  if (isZeroPrefix(15) && bytes[15] === 1) return { safe: false, reason: "is IPv6 loopback (::1)" };
+
+  const embeddedIPv4 = () =>
+    ipv4Verdict(((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0);
+
+  // Every form that carries an IPv4 address in the low 32 bits gets unwrapped and judged as IPv4,
+  // otherwise ::ffff:169.254.169.254 walks straight past every v6 range check below:
+  //   ::ffff:a.b.c.d    IPv4-mapped
+  //   ::a.b.c.d         IPv4-compatible (deprecated, but still parses and still names the address)
+  //   ::ffff:0:a.b.c.d  IPv4-translated
+  // The deprecated and translated forms were previously described here as handled and were not —
+  // ::127.0.0.1 and ::169.254.169.254 both returned safe.
+  if (isZeroPrefix(10) && bytes[10] === 0xff && bytes[11] === 0xff) return embeddedIPv4();
+  if (isZeroPrefix(8) && bytes[8] === 0xff && bytes[9] === 0xff && bytes[10] === 0 && bytes[11] === 0) {
+    return embeddedIPv4();
   }
+  // Anything else in ::/96 is an IPv4-compatible address.
+  if (isZeroPrefix(12)) return embeddedIPv4();
   // NAT64 well-known prefix 64:ff9b::/96.
   if (bytes[0] === 0x00 && bytes[1] === 0x64 && bytes[2] === 0xff && bytes[3] === 0x9b && isZeroPrefix(1)) {
     return ipv4Verdict(((bytes[12] << 24) | (bytes[13] << 16) | (bytes[14] << 8) | bytes[15]) >>> 0);
@@ -215,8 +232,6 @@ function ipv6Verdict(bytes: Uint8Array): HostVerdict {
     return ipv4Verdict(((bytes[2] << 24) | (bytes[3] << 16) | (bytes[4] << 8) | bytes[5]) >>> 0);
   }
 
-  if (bytes.every((b) => b === 0)) return { safe: false, reason: "is the unspecified address (::)" };
-  if (isZeroPrefix(15) && bytes[15] === 1) return { safe: false, reason: "is IPv6 loopback (::1)" };
   if ((bytes[0] & 0xfe) === 0xfc) return { safe: false, reason: "is in fc00::/7 (unique local)" };
   if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return { safe: false, reason: "is in fe80::/10 (link-local)" };
   if (bytes[0] === 0xff) return { safe: false, reason: "is IPv6 multicast (ff00::/8)" };

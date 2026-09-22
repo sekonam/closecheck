@@ -1,3 +1,5 @@
+import { followSafely } from "@/lib/net/safeFetch";
+
 export interface CmsFingerprint {
   cms: string | null;
   version: string | null;
@@ -17,6 +19,8 @@ const CMS_SIGNATURES: Array<{ name: string; test: (html: string, headers: Header
   { name: "Clover", test: (html) => /clover\.com/i.test(html) },
 ];
 
+const MAX_REDIRECT_HOPS = 3;
+
 /**
  * Best-effort CMS/platform fingerprint via a single unauthenticated GET (spec.md §4: Tier A,
  * "automated, best-effort" — a consultant reviews this, it is not asserted as certain). Looks at the
@@ -25,13 +29,25 @@ const CMS_SIGNATURES: Array<{ name: string; test: (html: string, headers: Header
  */
 export async function fingerprintCms(url: string, timeoutMs = 8000): Promise<CmsFingerprint> {
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "CloseCheck-TierA-Scanner/0.1 (+https://closecheck.example)" },
-    });
-    clearTimeout(timeout);
+    // Redirects are followed manually with each hop's host resolved and checked first
+    // (src/lib/net/safeFetch.ts). undici's default `redirect: "follow"` would fetch whatever a
+    // Location header named, unvalidated — and this check reads the response body and puts the
+    // generator tag straight into the Finding, so an unchecked hop is a request-forgery path with
+    // the response handed back to whoever asked for it.
+    const result = await followSafely(url, { timeoutMs, maxHops: MAX_REDIRECT_HOPS });
+
+    if (result.refused) {
+      return { cms: null, version: null, signals: [], error: `Not checked: ${result.refused}` };
+    }
+    const res = result.response;
+    if (!res) {
+      return {
+        cms: null,
+        version: null,
+        signals: [],
+        error: result.reachable ? "Redirect chain did not resolve" : "Fetch failed",
+      };
+    }
 
     const html = await res.text();
     const signals: string[] = [];

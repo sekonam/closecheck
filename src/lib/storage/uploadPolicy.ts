@@ -117,7 +117,13 @@ export function checkEvidenceUpload(file: { type: string; size: number; name: st
  * are absent here and are accepted on their declared type alone; there is nothing to check, and
  * the download path serves everything as an attachment with nosniff regardless.
  */
-const MAGIC_BYTES: Array<{ mimeTypes: string[]; prefixes: number[][]; offset?: number }> = [
+const MAGIC_BYTES: Array<{
+  mimeTypes: string[];
+  prefixes: number[][];
+  offset?: number;
+  /** A second marker that must also match — for container formats shared across media types. */
+  also?: { offset: number; bytes: number[][] };
+}> = [
   { mimeTypes: ["application/pdf"], prefixes: [[0x25, 0x50, 0x44, 0x46]] }, // %PDF
   { mimeTypes: ["image/jpeg"], prefixes: [[0xff, 0xd8, 0xff]] },
   { mimeTypes: ["image/png"], prefixes: [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]] },
@@ -128,9 +134,32 @@ const MAGIC_BYTES: Array<{ mimeTypes: string[]; prefixes: number[][]; offset?: n
       [0x47, 0x49, 0x46, 0x38, 0x39, 0x61], // GIF89a
     ],
   },
-  { mimeTypes: ["image/webp"], prefixes: [[0x52, 0x49, 0x46, 0x46]] }, // RIFF container
-  // HEIC/HEIF are ISO base-media files: the brand lives at offset 4, after the box size.
-  { mimeTypes: ["image/heic", "image/heif"], prefixes: [[0x66, 0x74, 0x79, 0x70]], offset: 4 },
+  // RIFF is a container shared with WAV and AVI, so the prefix alone accepts an audio file as an
+  // image. The format marker at offset 8 is what makes it a WebP.
+  {
+    mimeTypes: ["image/webp"],
+    prefixes: [[0x52, 0x49, 0x46, 0x46]],
+    also: { offset: 8, bytes: [[0x57, 0x45, 0x42, 0x50]] }, // "WEBP"
+  },
+  // HEIC/HEIF are ISO base-media files: "ftyp" at offset 4, after the box size. That box is shared
+  // with MP4 and QuickTime, so the brand at offset 8 has to be one of the still-image brands —
+  // otherwise an .mp4 renamed to .heic is accepted as an image.
+  {
+    mimeTypes: ["image/heic", "image/heif"],
+    prefixes: [[0x66, 0x74, 0x79, 0x70]],
+    offset: 4,
+    also: {
+      offset: 8,
+      bytes: [
+        [0x68, 0x65, 0x69, 0x63], // heic
+        [0x68, 0x65, 0x69, 0x78], // heix
+        [0x68, 0x65, 0x76, 0x63], // hevc
+        [0x68, 0x65, 0x76, 0x78], // hevx
+        [0x6d, 0x69, 0x66, 0x31], // mif1
+        [0x6d, 0x73, 0x66, 0x31], // msf1
+      ],
+    },
+  },
   {
     // Every OOXML and OpenDocument file is a zip underneath.
     mimeTypes: [
@@ -161,12 +190,16 @@ export function checkEvidenceContent(mimeType: string, bytes: Uint8Array): Uploa
   const rule = MAGIC_BYTES.find((entry) => entry.mimeTypes.includes(mimeType));
   if (!rule) return { ok: true, mimeType, isImage: mimeType.startsWith("image/") };
 
-  const offset = rule.offset ?? 0;
-  const matches = rule.prefixes.some(
-    (prefix) =>
-      bytes.length >= offset + prefix.length &&
-      prefix.every((byte, index) => bytes[offset + index] === byte),
-  );
+  const matchesAt = (offset: number, candidates: number[][]) =>
+    candidates.some(
+      (candidate) =>
+        bytes.length >= offset + candidate.length &&
+        candidate.every((byte, index) => bytes[offset + index] === byte),
+    );
+
+  const matches =
+    matchesAt(rule.offset ?? 0, rule.prefixes) &&
+    (!rule.also || matchesAt(rule.also.offset, rule.also.bytes));
 
   if (!matches) {
     return {
