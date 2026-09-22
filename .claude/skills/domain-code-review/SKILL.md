@@ -61,6 +61,32 @@ otherwise report directly to the user as plain findings with file/line and concr
   customer-impact, not just a data-modeling nicety.
 - Is a checklist-content change shipping as a new version, or as an in-place mutation of a version
   that may already have Audits running against it (`releases.md` §3's explicit rule)?
+- **A change to an item's `fieldSchema` is a content change, not a config change.** `Finding.
+  structuredData` is stored against the field keys the item declared at the time, so editing a
+  published version's schema retroactively changes what every recorded finding *means* — a renamed
+  key silently empties a field a consultant filled in, and a changed enum option silently
+  invalidates a value they chose. It must ship as a new Template version like any other checklist
+  edit. Watch specifically for an edit to the frozen v1/v2 content arrays in
+  `src/lib/templates/content.ts`, which look like ordinary data and are not.
+- **Does a client-facing string stay client-facing?** `TemplateItem.description` renders verbatim
+  into the whitelabeled PDF a consultant hands to a buyer; `guidance` and `severityGuidance` are
+  internal and must never reach the report. A methodology note written into the wrong field puts
+  this product's internal cross-references into someone else's client deliverable — which has
+  already happened once. `assertClientFacingDescriptions` catches the obvious shapes; a reviewer
+  should catch the rest.
+
+**Any change that makes an outbound network request from tenant-supplied input** (`spec.md` §8):
+- Does the host go through `src/lib/net/hostSafety.ts` before anything connects? Two paths already
+  take a user-controlled host and connect to it — the Tier A check runner
+  (`Engagement.primaryDomain`) and webhook delivery — and a third would be a server-side request
+  forgery primitive by default, not by mistake.
+- Is the *response* reflected back to the user? Tier A persists redirect chains, response headers
+  and certificate subjects into a Finding, which turns a request-forgery bug into one with a read
+  channel. A new check that echoes response content deserves more scrutiny than one that doesn't.
+- Do not accept a hand-rolled private-range regex in place of the shared guard. The addresses that
+  matter are reachable in forms a regex misses — decimal and hex IPv4 (`2852039166`,
+  `0xA9FEA9FE`), IPv4-mapped and NAT64 IPv6 (`::ffff:169.254.169.254`, `64:ff9b::a9fe:a9fe`) — and
+  a guard that disagrees with the resolver about which address a string names is worse than none.
 
 ## Output
 
