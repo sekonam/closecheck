@@ -77,10 +77,9 @@ describe("what v5 leaves alone", () => {
 
   it("touches nothing but severityGuidance", () => {
     expect(v5).toHaveLength(v4.length);
+    const withoutGuidance = (item: (typeof v4)[number]) => ({ ...item, severityGuidance: null });
     for (let i = 0; i < v5.length; i++) {
-      const { severityGuidance: _a, ...restAfter } = v5[i];
-      const { severityGuidance: _b, ...restBefore } = v4[i];
-      expect(restAfter, v4[i].title).toEqual(restBefore);
+      expect(withoutGuidance(v5[i]), v4[i].title).toEqual(withoutGuidance(v4[i]));
     }
   });
 
