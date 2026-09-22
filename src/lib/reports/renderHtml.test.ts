@@ -546,3 +546,65 @@ describe("renderReportHtml", () => {
     expect(html).toContain("Not applicable");
   });
 });
+
+describe("appendix", () => {
+  const document = {
+    findingTitle: "Primary business-system contract terms",
+    tier: Tier.B,
+    filename: "scan_0043.pdf",
+    label: "Toast MSA, executed" as string | null,
+    mimeType: "application/pdf" as string | null,
+    sizeBytes: 2_411_724 as number | null,
+    attributedTo: "J. Smith" as string | null,
+    attachedAt: new Date("2026-09-14T09:30:00Z"),
+  };
+
+  it("is omitted entirely when the consultant did not opt in", () => {
+    expect(renderReportHtml(report())).not.toContain("Appendix");
+    expect(renderReportHtml(report({ appendixDocuments: [] }))).not.toContain("Appendix");
+  });
+
+  it("gives a buyer's advisor something they can check", () => {
+    // A bare filename is not checkable. What the document was, how big, who attached it and when
+    // are — that is the difference between a listing and a decoration.
+    const html = renderReportHtml(report({ appendixDocuments: [document] }));
+    expect(html).toContain("Toast MSA, executed");
+    expect(html).toContain("scan_0043.pdf"); // real filename kept alongside the label
+    expect(html).toContain("PDF");
+    expect(html).toContain("2.3 MB");
+    expect(html).toContain("J. Smith, 2026-09-14");
+    expect(html).toContain("Primary business-system contract terms");
+  });
+
+  it("does not reproduce the documents themselves", () => {
+    // Embedding a seller's executed contracts into a PDF the buyer can forward anywhere is a
+    // confidentiality decision nobody made. The appendix says the firm can provide them.
+    const html = renderReportHtml(report({ appendixDocuments: [document] }));
+    expect(html).toContain("not reproduced here");
+    expect(html).toContain("on request");
+  });
+
+  it("degrades for rows attached before provenance was recorded", () => {
+    const html = renderReportHtml(
+      report({
+        appendixDocuments: [
+          { ...document, label: null, mimeType: null, sizeBytes: null, attributedTo: null },
+        ],
+      }),
+    );
+    expect(html).toContain("scan_0043.pdf");
+    expect(html).toContain("2026-09-14");
+    expect(html).not.toContain("undefined");
+    expect(html).not.toContain("null");
+  });
+
+  it("escapes a hostile filename", () => {
+    const html = renderReportHtml(
+      report({
+        appendixDocuments: [{ ...document, label: null, filename: `<img src=x onerror=alert(1)>` }],
+      }),
+    );
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x");
+  });
+});

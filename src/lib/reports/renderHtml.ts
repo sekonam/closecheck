@@ -1,4 +1,6 @@
 import { CheckMethod, Severity, Tier } from "@prisma/client";
+import { formatFileSize } from "@/lib/storage/describeEvidence";
+import { describeMimeType } from "@/lib/storage/uploadPolicy";
 import {
   formatFieldValue,
   hasAnyFieldValue,
@@ -43,6 +45,13 @@ export interface AppendixDocument {
   findingTitle: string;
   tier: Tier;
   filename: string;
+  /** The consultant's own name for the document, where they gave one. */
+  label: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  /** The named professional who attached it — spec.md §4's attestation model needs a person. */
+  attributedTo: string | null;
+  attachedAt: Date;
 }
 
 export interface ReportData {
@@ -855,11 +864,19 @@ function findingRow(f: ReportFinding, accent: string): string {
 }
 
 /**
- * Lists the raw uploaded documents referenced by the audit's findings (spec.md §6's appendix), only
- * when the consultant opted in via the "Include uploaded documents" checkbox on generateReport. A
- * listed reference (filename, which finding/tier it's evidence for) rather than embedding file
- * contents inline — most uploaded documents are contracts/PDFs, not images, and the report itself is
- * the deliverable, not a document viewer.
+ * The appendix: what documents this audit was built on, listed rather than reproduced.
+ *
+ * spec.md §6's wording is "appendix (raw uploaded documents, if the consultant opts to include
+ * them)", and this deliberately lists them instead. Embedding a seller's executed contracts and
+ * merchant statements into a PDF the buyer can forward anywhere is a confidentiality decision
+ * nobody made, it would multiply the deliverable's size, and the documents are already retained
+ * and access-controlled under the firm's retention policy. A buyer who needs a specific document
+ * asks the consultant for it, which is the same way every other diligence work product handles it.
+ *
+ * What makes a listing defensible rather than decorative is that each entry can be checked: what
+ * the document was, how large, who attached it and when. A bare filename gives a buyer's advisor
+ * nothing to verify against, which is the bar spec.md §2.1 sets for anything reaching the client.
+ * Rows predating provenance capture degrade to what is known rather than printing unknowns.
  */
 function appendixSection(
   documents: AppendixDocument[] | undefined,
@@ -869,26 +886,41 @@ function appendixSection(
   if (!documents || documents.length === 0) return "";
 
   const rows = documents
-    .map(
-      (d) => `
+    .map((d) => {
+      const descriptors = [
+        d.mimeType ? describeMimeType(d.mimeType) : null,
+        d.sizeBytes != null ? formatFileSize(d.sizeBytes) : null,
+      ].filter(Boolean);
+      const provenance = d.attributedTo
+        ? `${d.attributedTo}, ${d.attachedAt.toISOString().slice(0, 10)}`
+        : d.attachedAt.toISOString().slice(0, 10);
+
+      return `
     <tr class="keep-together" style="border-bottom:1px solid #e2e8f0">
-      <td style="padding:6px 12px;font-size:12.5px">${escapeHtml(d.filename)}</td>
+      <td style="padding:6px 12px;font-size:12.5px">
+        ${escapeHtml(d.label ?? d.filename)}
+        ${d.label ? `<div style="font-size:11px;color:${NEUTRAL_TEXT}">${escapeHtml(d.filename)}</div>` : ""}
+      </td>
+      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${escapeHtml(descriptors.join(" · "))}</td>
       <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT}">${escapeHtml(d.findingTitle)}</td>
       <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">Tier ${d.tier}</td>
-    </tr>`,
-    )
+      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${escapeHtml(provenance)}</td>
+    </tr>`;
+    })
     .join("");
 
   return `
   <section style="margin-top:26px">
-    <h3 style="font-size:16px;margin:0 0 10px 0;padding-left:10px;border-left:4px solid ${accent}">Appendix — Uploaded documents</h3>
-    <p style="font-size:12px;color:${NEUTRAL_TEXT};margin:0 0 10px 0">Raw documents provided as evidence during this audit, listed for reference. Retained and access-controlled per the firm's document retention policy — not reproduced inline here.</p>
+    <h3 style="font-size:16px;margin:0 0 10px 0;padding-left:10px;border-left:4px solid ${accent}">Appendix — Documents relied on</h3>
+    <p style="font-size:12px;color:${NEUTRAL_TEXT};margin:0 0 10px 0">Documents provided as evidence during this audit, listed for reference. They are retained and access-controlled under the firm's document retention policy and are not reproduced here; the firm can provide any of them on request.</p>
     <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
       <thead>
         <tr style="background:${accent};color:${accentText}">
           <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Document</th>
+          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Type</th>
           <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Evidence for</th>
           <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
+          <th style="text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Provided by</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>

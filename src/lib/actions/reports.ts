@@ -9,6 +9,7 @@ import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtml";
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
 import { putObject, getObject, deleteObject, reportPdfKey } from "@/lib/storage/local";
+import { attributionFor } from "@/lib/storage/describeEvidence";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { recordMetric } from "@/lib/metrics/record";
 
@@ -108,7 +109,12 @@ export async function generateReport(formData: FormData): Promise<void> {
       include: {
         engagement: true,
         template: true,
-        findings: { include: { templateItem: true, evidence: true } },
+        findings: {
+          include: {
+            templateItem: true,
+            evidence: { include: { uploadedBy: { select: { name: true, email: true } } } },
+          },
+        },
       },
     });
     if (!audit) {
@@ -149,7 +155,18 @@ export async function generateReport(formData: FormData): Promise<void> {
       ? audit.findings.flatMap((f) =>
           f.evidence
             .filter((e) => e.storageKey && e.text)
-            .map((e) => ({ findingTitle: f.templateItem.title, tier: f.templateItem.tier, filename: e.text! })),
+            .map((e) => ({
+              findingTitle: f.templateItem.title,
+              tier: f.templateItem.tier,
+              filename: e.text!,
+              label: e.label,
+              mimeType: e.mimeType,
+              sizeBytes: e.sizeBytes,
+              // A named professional, not "the consultant" — spec.md §4's attestation model rests
+              // on the name. Null for rows attached before provenance was recorded.
+              attributedTo: attributionFor(e.uploadedBy),
+              attachedAt: e.createdAt,
+            })),
         )
       : [];
 
