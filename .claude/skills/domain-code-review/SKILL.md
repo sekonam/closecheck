@@ -179,6 +179,29 @@ controls):
   test is measuring that the code runs at all rather than the property it claims.
 - A suite that skips when its dependency is absent reports success having asserted nothing. Fail
   loudly instead: an unavailable browser, server or database is a result, not a non-event.
+- **Did a shared fixture's arbitrary default just become a silent assertion?** When production code
+  starts reading a field that fixtures have been filling with a throwaway value, every existing
+  case begins asserting something about it — and nothing warns you, because those tests did not
+  change. `rollup.test.ts`'s helper defaulted to `status: "IN_PROGRESS"`, which was filler until a
+  coverage count started reading the status; from then on every case silently claimed "this rating
+  is unconfirmed". Harder to spot than a vacuous test, because a vacuous test asserts nothing while
+  this one asserts something real and wrong, and still looks like it is doing work. When a field
+  gains meaning, re-read what the fixtures have been saying about it.
+
+**Anything a consultant reads next to something the product computed**:
+- **Do the rubric and the runner state the same rule?** For an item rated automatically, the
+  template's `severityGuidance` and the Tier A runner are two statements of one rule, kept in two
+  places, in two languages. When they disagree the consultant follows the rubric and overrides a
+  correct rating — the product correcting itself towards the wrong answer. Template v4 told
+  consultants to rate certificates on proportion of lifetime while the runner applied the shorter
+  of a proportion and a day cap, and put Yellow at 132 days on a real certificate the runner rated
+  Green (`spec.md` §5, template v5).
+- A rubric may legitimately describe a judgement the runner cannot make — but it has to SAY so.
+  v4's domain-expiry threshold was written relative to an expected close date that does not exist
+  in the data model, so the runner measured from the audit date instead and said nothing. Stating
+  the gap is a valid answer; silence is not.
+- Check this whenever either side changes. A threshold edited in code and not in the template, or
+  in the template and not in code, is the same defect from either direction.
 
 ## Output
 

@@ -346,11 +346,12 @@ const CERT_OVERDUE_FRACTION = 1 / 6;
  * v4's rubric says); on a one-year certificate the day count governs (thirty days out is fine,
  * as every commercial renewal process assumes). Both ends behave.
  *
- * NOTE FOR THE NEXT TEMPLATE REVISION: v4's severityGuidance for this item says to rate on
- * proportion of lifetime and calls a day count "vendor folklore". That is right for short-lived
- * automated certificates and wrong for long-lived manual ones, so the guidance now understates
- * what the runner does. It should be corrected in the next revision rather than the code being
- * bent back to match it.
+ * The template said otherwise until v5. v4's severityGuidance told the consultant to rate on
+ * proportion of lifetime and called a day count "vendor folklore" — right for short-lived
+ * automated certificates, wrong for long-lived manual ones, and a description of something the
+ * runner does not do. Corrected in template v5 (src/lib/templates/runnerAlignedThresholds.ts)
+ * rather than by bending the code back to match it. Audits started on v4 stay on v4's rule, which
+ * is what the version pin is for.
  */
 const CERT_RENEWAL_MAX_DAYS = 30;
 const CERT_OVERDUE_MAX_DAYS = 14;

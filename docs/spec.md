@@ -187,7 +187,20 @@ one traced to a published rule — and several written from domain knowledge tur
 not merely unsourced (§5). Every threshold therefore names the publication it comes from and the date
 it was read, and where the underlying rule is revised periodically — the card-network monitoring
 programs, the ICANN Transfer Policy, the CA/Browser Forum validity schedule — the item tells the
-consultant to re-verify at the audit date and to state which version was applied. The harder half of
+consultant to re-verify at the audit date and to state which version was applied — which §4.6 has
+since turned from an instruction into a mechanism, because telling the consultant to carry it was
+the wrong half of the answer.
+
+**A rubric must describe what the product actually computes (decision, template v5).** Where an item
+is rated automatically, the rubric and the runner are two statements of one rule, and a consultant
+reading a rubric that contradicts the rating will correct the product towards the wrong answer.
+Two of v4's rubrics did: the certificate threshold said to rate on proportion of lifetime when the
+runner applies the shorter of a proportion and a day cap, and the domain-expiry threshold was
+written relative to an expected close date that does not exist in the data model. Both are corrected
+in v5. The general obligation this creates: **an automated item's rubric either matches the runner
+or says explicitly what the automated rating could not see.** The second is a legitimate answer —
+the close-date gap is stated rather than closed, because closing it would mean inventing a date the
+consultant never gave us — but silence is not. The harder half of
 the same rule, and the one that makes this content defensible: **where no authoritative source
 exists, the item says so and gives the consultant the reasoning and the retrieval method instead of a
 number.** The domain-expiry threshold is stated as *this firm's* basis, with the derivation shown and
@@ -375,7 +388,7 @@ type-specific items:
 vertical in the source research) fully built, and the base tier structure factored so the remaining
 three are additive, not rewrites. See `roadmap.md` Phase 2 for sequencing.
 
-**Status:** all four Templates now exist, published at **v4**, ahead of the design-partner deal-flow
+**Status:** all four Templates now exist, published at **v5**, ahead of the design-partner deal-flow
 evidence the MVP-scope decision above called for (`roadmap.md` Phase 2's matching note). That
 decision's reasoning is kept rather than deleted, per this project's convention: it was the right
 call on the evidence available, and the risk it was managing — templates built without observed deal
