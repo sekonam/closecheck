@@ -37,7 +37,7 @@ export async function recordMetric(
   try {
     await client.$executeRaw`
       INSERT INTO "metric_events" (id, "orgId", type, data, "createdAt")
-      VALUES (${randomUUID()}, ${orgId ?? null}, ${type}, ${data ? JSON.stringify(data) : null}::jsonb, now())
+      VALUES (${randomUUID()}, ${orgId ?? null}, ${type}, ${data ? JSON.stringify(data) : null}::jsonb, (now() AT TIME ZONE 'utc'))
     `;
   } catch (err) {
     // Telemetry loss is logged but never surfaced — see the module comment.
@@ -57,7 +57,7 @@ export async function recordError(
   try {
     await client.$executeRaw`
       INSERT INTO "error_events" (id, "orgId", source, message, stack, "createdAt")
-      VALUES (${randomUUID()}, ${orgId ?? null}, ${source}, ${message.slice(0, 2000)}, ${stack}, now())
+      VALUES (${randomUUID()}, ${orgId ?? null}, ${source}, ${message.slice(0, 2000)}, ${stack}, (now() AT TIME ZONE 'utc'))
     `;
   } catch (insertErr) {
     console.error("recordError insert failed:", insertErr);

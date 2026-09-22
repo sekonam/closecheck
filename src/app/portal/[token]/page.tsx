@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { withPortalScope } from "@/lib/portal/db";
+import { recordMetric } from "@/lib/metrics/record";
 import { getObject } from "@/lib/storage/local";
 
 /**
@@ -34,14 +35,18 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
       : null;
     await tx.$executeRaw`
       INSERT INTO "portal_access_log" (id, "linkId", "viewedAt", "ipHash")
-      VALUES (${randomUUID()}, ${link.id}, now(), ${ipHash})
+      VALUES (${randomUUID()}, ${link.id}, (now() AT TIME ZONE 'utc'), ${ipHash})
     `;
 
-    return { report };
+    return { report, orgId: link.orgId };
   });
 
   if (!result) notFound();
   const { report } = result;
+
+  // Telemetry (spec.md §11 report-usage signal). Via the app-role client's INSERT-only grant, not
+  // the portal role — carries only ids, and failure never affects the buyer's view.
+  void recordMetric("portal.viewed", { orgId: result.orgId, data: { reportId: report.id } });
 
   if (!report.pdfStorageKey) {
     return (

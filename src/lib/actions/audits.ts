@@ -9,6 +9,10 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
 import { isAutomatable, runTierACheck } from "@/lib/audit/tierA";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
+import { consumeCreditForAudit } from "@/lib/billing/credits";
+import { getStripe } from "@/lib/billing/stripe";
+import { overagePriceId } from "@/lib/billing/config";
+import { recordMetric, recordError } from "@/lib/metrics/record";
 import { isContractItem } from "@/lib/audit/contractItem";
 
 /**
@@ -36,7 +40,7 @@ export async function createAudit(formData: FormData) {
   });
   if (!template) throw new Error(`No active template found for slug "${templateSlug}"`);
 
-  const audit = await withOrgScope(orgId, async (tx) => {
+  const { audit, consume } = await withOrgScope(orgId, async (tx) => {
     // Confirm the engagement belongs to this org before creating anything under it — withOrgScope's
     // RLS policy would reject a cross-org write anyway, but failing with a clear error here beats a
     // raw crash surfacing to a user. findUnique, not findUniqueOrThrow: a foreign-org engagementId
@@ -47,7 +51,7 @@ export async function createAudit(formData: FormData) {
       throw new Error("Engagement not found.");
     }
 
-    return tx.audit.create({
+    const created = await tx.audit.create({
       data: {
         orgId,
         engagementId: engagement.id,
@@ -61,10 +65,49 @@ export async function createAudit(formData: FormData) {
         },
       },
     });
+
+    // Credit consequence in the SAME transaction (spec.md §9: a full Audit is the metered unit;
+    // Tier A alone is never metered) — "blocked" throws here, so the Audit row above rolls back
+    // with it and enforcement can't be raced past by committing first.
+    const consumeResult = await consumeCreditForAudit(tx, orgId, created.id);
+    if (consumeResult.outcome === "blocked") {
+      throw new Error(consumeResult.reason);
+    }
+    return { audit: created, consume: consumeResult };
   });
+
+  // Billable overage becomes a Stripe invoice item AFTER commit (external API call, never inside a
+  // DB transaction) — Stripe sweeps pending invoice items into the subscription's next monthly
+  // invoice, which is exactly the batched-rollup billing the roadmap specifies (never per-audit
+  // charges). Best-effort: a failure here loses one overage line item, not the audit.
+  if (consume.outcome === "overage" && consume.billable) {
+    void recordOverageInvoiceItem(orgId, audit.id).catch((err) => {
+      // Billable revenue — a lost invoice item must be recoverable, not silently dropped. The
+      // OVERAGE ledger row already exists (note: "invoice item on next rollup"); this error_events
+      // row is how a reconciliation job or the founder finds the ones that never reached Stripe.
+      void recordError("billing-overage", err instanceof Error ? err : new Error(String(err)), { orgId });
+    });
+  }
+
+  void recordMetric("audit.created", { orgId, data: { auditId: audit.id, templateId: template.id } });
 
   revalidatePath(`/engagements/${engagementId}`);
   redirect(`/engagements/${engagementId}/audits/${audit.id}`);
+}
+
+/** Attaches one overage invoice item to the org's Stripe customer (batched onto the next rollup
+ * invoice by Stripe). Module-private: only createAudit's post-commit hook calls it. */
+async function recordOverageInvoiceItem(orgId: string, auditId: string): Promise<void> {
+  const stripe = getStripe();
+  const priceId = overagePriceId();
+  if (!stripe || !priceId) return;
+  const account = await withOrgScope(orgId, (tx) => tx.billingAccount.findUnique({ where: { orgId } }));
+  if (!account) return;
+  await stripe.invoiceItems.create({
+    customer: account.stripeCustomerId,
+    pricing: { price: priceId },
+    description: `Audit overage (audit ${auditId})`,
+  });
 }
 
 /**
@@ -310,6 +353,7 @@ export async function markAuditComplete(formData: FormData): Promise<void> {
       event: "audit.completed",
       data: { auditId: updated.id, engagementId: updated.engagementId, status: updated.status },
     });
+    void recordMetric("audit.completed", { orgId, data: { auditId: updated.id } });
   }
 
   revalidatePath(`/engagements/${updated.engagementId}/audits/${updated.id}`);

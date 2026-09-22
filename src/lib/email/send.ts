@@ -61,18 +61,21 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   try {
     if (!apiKey || !from) {
-      // Dev fallback — the console preview is the developer's "inbox".
-      console.log(
-        [
-          "─".repeat(60),
-          `[email:LOGGED] no RESEND_API_KEY/EMAIL_FROM configured`,
-          `To:       ${input.to}`,
-          `Subject:  ${input.subject}`,
-          `Template: ${input.template}`,
-          input.text,
-          "─".repeat(60),
-        ].join("\n"),
-      );
+      // Dev fallback — the console preview is the developer's "inbox". The body is echoed ONLY
+      // outside production: it can contain invite temp passwords and live portal URLs, and a prod
+      // deployment running without a key (which docs/deployment.md permits) would otherwise leak
+      // those into Render's retained logs. The RLS'd EmailMessage row below is the durable audit
+      // trail either way; in prod it's the *only* record.
+      const lines = [
+        "─".repeat(60),
+        `[email:LOGGED] no RESEND_API_KEY/EMAIL_FROM configured`,
+        `To:       ${input.to}`,
+        `Subject:  ${input.subject}`,
+        `Template: ${input.template}`,
+      ];
+      if (process.env.NODE_ENV !== "production") lines.push(input.text);
+      lines.push("─".repeat(60));
+      console.log(lines.join("\n"));
       await recordEmail(input, { status: EmailStatus.LOGGED });
       return { status: EmailStatus.LOGGED };
     }

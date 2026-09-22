@@ -9,6 +9,7 @@ import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtm
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
 import { putObject, getObject, reportPdfKey } from "@/lib/storage/local";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
+import { recordMetric } from "@/lib/metrics/record";
 
 // No svg — see the matching comment in src/app/api/branding/logo/route.ts. Embedded as a data URI
 // inside an <img> src here, which doesn't execute SVG scripts, but keeping the two maps in sync
@@ -151,6 +152,7 @@ export async function generateReport(formData: FormData): Promise<void> {
       event: "report.generated",
       data: { reportId, auditId, engagementId, generatedAt: reportData.generatedAt.toISOString() },
     });
+    void recordMetric("report.generated", { orgId, data: { reportId, auditId } });
   } catch (err) {
     // The Report row committed but rendering/storing the PDF didn't — remove the row rather than
     // leave a Report with no downloadable PDF behind (same compensating-delete pattern as

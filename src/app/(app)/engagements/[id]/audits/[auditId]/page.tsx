@@ -8,7 +8,7 @@ import { runTierAAutomation, updateFinding, updateAuditOverride, markAuditComple
 import { generateReport } from "@/lib/actions/reports";
 import { attachEvidence, deleteEvidence } from "@/lib/actions/evidence";
 import { isContractItem } from "@/lib/audit/contractItem";
-import { createPortalLink, revokePortalLink } from "@/lib/actions/portal";
+import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
 
 const TIER_LABEL: Record<Tier, string> = {
@@ -76,6 +76,10 @@ export default async function AuditPage({
   async function revokePortalLinkAction(formData: FormData) {
     "use server";
     await runOrRedirect(() => revokePortalLink(formData), backPath);
+  }
+  async function emailPortalLinkAction(formData: FormData) {
+    "use server";
+    await runOrRedirect(() => emailPortalLink(formData), backPath);
   }
   async function updateFindingAction(formData: FormData) {
     "use server";
@@ -352,6 +356,24 @@ export default async function AuditPage({
                               ? "never viewed"
                               : `viewed ${link.accessLog.length} time${link.accessLog.length === 1 ? "" : "s"}, last ${link.accessLog[0].viewedAt.toISOString().slice(0, 19).replace("T", " ")}`}
                           </p>
+                          {isLive && (
+                            <form action={emailPortalLinkAction} className="mt-1.5 flex items-center gap-2">
+                              <input type="hidden" name="linkId" value={link.id} />
+                              <input
+                                name="recipientEmail"
+                                type="email"
+                                required
+                                placeholder="buyer@example.com"
+                                className="w-48 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+                              />
+                              <button
+                                type="submit"
+                                className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1 font-medium text-slate-600 hover:bg-slate-50"
+                              >
+                                Email link
+                              </button>
+                            </form>
+                          )}
                         </li>
                       );
                     })}

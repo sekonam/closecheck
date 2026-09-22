@@ -57,11 +57,11 @@ export async function signUp(formData: FormData): Promise<void> {
     await signupPrisma.$transaction([
       signupPrisma.$executeRaw`
         INSERT INTO "consultant_orgs" (id, name, "createdAt", "updatedAt")
-        VALUES (${orgId}, ${orgName}, now(), now())
+        VALUES (${orgId}, ${orgName}, (now() AT TIME ZONE 'utc'), (now() AT TIME ZONE 'utc'))
       `,
       signupPrisma.$executeRaw`
         INSERT INTO "users" (id, "orgId", email, "passwordHash", role, "createdAt")
-        VALUES (${userId}, ${orgId}, ${email}, ${passwordHash}, 'OWNER', now())
+        VALUES (${userId}, ${orgId}, ${email}, ${passwordHash}, 'OWNER', (now() AT TIME ZONE 'utc'))
       `,
     ]);
   } catch (err) {
