@@ -18,7 +18,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ evi
 
   let bytes: Buffer;
   try {
-    bytes = await getObject(evidence.storageKey);
+    bytes = await getObject(orgId, evidence.storageKey);
   } catch {
     // Row exists but the file behind it doesn't (e.g. a partial purge/upload failure) — a clean
     // 404 beats letting the ENOENT throw out of the route handler as an unhandled 500.

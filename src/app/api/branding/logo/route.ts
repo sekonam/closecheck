@@ -24,7 +24,7 @@ export async function GET() {
 
   let bytes: Buffer;
   try {
-    bytes = await getObject(org.brandLogoUrl);
+    bytes = await getObject(orgId, org.brandLogoUrl);
   } catch {
     return NextResponse.json({ error: "Logo file not found" }, { status: 404 });
   }

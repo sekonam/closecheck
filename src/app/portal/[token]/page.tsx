@@ -58,7 +58,7 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
   const branding = await loadPortalBranding(access.orgId, access.brandSnapshot);
   const accent = safeAccent(branding?.accentHex);
 
-  if (!access.pdfStorageKey || !(await reportFileExists(access.pdfStorageKey))) {
+  if (!access.pdfStorageKey || !(await reportFileExists(access.orgId, access.pdfStorageKey))) {
     return (
       <PortalShell branding={branding} accent={accent}>
         <Unavailable />
@@ -139,9 +139,9 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
  * — so the buyer has no reason to doubt it and the consultant may never hear. That is the same
  * failure as an appendix promising documents that had already been deleted.
  */
-async function reportFileExists(key: string): Promise<boolean> {
+async function reportFileExists(orgId: string, key: string): Promise<boolean> {
   try {
-    return await objectExists(key);
+    return await objectExists(orgId, key);
   } catch (err) {
     // Recorded, not swallowed: a storage backend that cannot answer is an operator problem, and
     // the buyer is the last person who should be the one to notice it.

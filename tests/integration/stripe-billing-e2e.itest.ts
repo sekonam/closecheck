@@ -257,6 +257,55 @@ describe.skipIf(!canRun)("Phase 2.5 — billing end-to-end (real Stripe test mod
     expect(refreshed.amount_received - (refund.amount ?? 0)).toBe(0);
   });
 
+  it("refuses when the subscription and its customer name different orgs", async () => {
+    /**
+     * Two independent statements of ownership disagreeing describes a corrupt state, and guessing
+     * which is right risks moving money between firms: `stripeCustomerId` is unique per billing
+     * account, so writing it either repoints one firm's account at another firm's Stripe customer
+     * — after which invoice.paid for that customer resolves back to the other org — or trips the
+     * unique constraint into the retry-forever wedge fixed earlier in this file.
+     *
+     * Same shape as the portal link that named one firm while its report belonged to another,
+     * found in the same review pass. Latent in both cases because the application only ever writes
+     * matching values; reachable by a dashboard edit, which is precisely what someone does during
+     * a support action.
+     */
+    const other = await createOrgFixture("billing-mismatch");
+    const otherCustomer = await stripe!.customers.create({
+      name: other.orgName,
+      metadata: { orgId: other.orgId },
+    });
+    createdCustomers.push(otherCustomer.id);
+
+    try {
+      const res = await deliverWebhook("customer.subscription.updated", {
+        id: "sub_itest_mismatch",
+        object: "subscription",
+        // The customer says `other`; the subscription metadata says this suite's org.
+        customer: otherCustomer.id,
+        status: "active",
+        metadata: { orgId: org.orgId },
+        items: { object: "list", data: [] },
+      });
+      // Acknowledged rather than 500: a mismatch cannot be fixed by retrying.
+      expect(res.status).toBe(200);
+
+      // Neither org's billing account may have been touched.
+      const mine = await withOrgScope(org.orgId, (tx) =>
+        tx.billingAccount.findUnique({ where: { orgId: org.orgId } }),
+      );
+      expect(mine?.stripeCustomerId, "this org was repointed at another org's customer").not.toBe(
+        otherCustomer.id,
+      );
+      const theirs = await withOrgScope(other.orgId, (tx) =>
+        tx.billingAccount.findUnique({ where: { orgId: other.orgId } }),
+      );
+      expect(theirs, "a billing account was created for the other org").toBeNull();
+    } finally {
+      await destroyOrgFixture(other.orgId);
+    }
+  });
+
   it("acknowledges rather than retries forever when the org no longer exists", async () => {
     const doomed = await createOrgFixture("billing-doomed");
     const customer = await stripe!.customers.create({

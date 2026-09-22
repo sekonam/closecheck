@@ -68,7 +68,11 @@ export async function GET(
 
   let bytes: Buffer;
   try {
-    bytes = await getObject(access.pdfStorageKey);
+    // access.orgId comes from the resolved link, never from the request — and the link and its
+    // report are now checked to name the same org before this point. The key must belong to that
+    // org too: a report row carrying another firm's key would otherwise hand a buyer the wrong
+    // firm's document, which is the same disclosure one layer further out.
+    bytes = await getObject(access.orgId, access.pdfStorageKey);
   } catch {
     // The row points at a file that is not there (database restored onto a fresh volume, file
     // removed by hand). A clean 404 the page can degrade against, not a 500.

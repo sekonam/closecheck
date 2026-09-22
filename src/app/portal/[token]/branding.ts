@@ -67,7 +67,9 @@ export async function loadPortalBranding(
     return {
       orgName: snapshot.firmName,
       accentHex: snapshot.colorHex,
-      logoDataUri: await loadLogoDataUri(snapshot.logoKey),
+      // The snapshot's own key, still checked against the org the token resolved to — a snapshot
+      // is a copy of what the report looked like, not a licence to read outside the firm.
+      logoDataUri: await loadLogoDataUri(orgId, snapshot.logoKey),
     };
   }
 
@@ -83,7 +85,7 @@ export async function loadPortalBranding(
     return {
       orgName: org.name,
       accentHex: org.brandColorHex,
-      logoDataUri: await loadLogoDataUri(org.brandLogoUrl),
+      logoDataUri: await loadLogoDataUri(orgId, org.brandLogoUrl),
     };
   } catch (err) {
     console.error("loadPortalBranding failed:", err);
@@ -91,7 +93,7 @@ export async function loadPortalBranding(
   }
 }
 
-async function loadLogoDataUri(storageKey: string | null): Promise<string | null> {
+async function loadLogoDataUri(orgId: string, storageKey: string | null): Promise<string | null> {
   if (!storageKey) return null;
   // Deliberately excludes svg: an uploaded file's extension is not trustworthy, and an SVG inlined
   // into this page could carry script. Anything unrecognised renders no logo at all.
@@ -99,7 +101,7 @@ async function loadLogoDataUri(storageKey: string | null): Promise<string | null
   if (!contentType) return null;
 
   try {
-    const bytes = await getObject(storageKey);
+    const bytes = await getObject(orgId, storageKey);
     if (bytes.length > MAX_INLINE_LOGO_BYTES) return null;
     return `data:${contentType};base64,${bytes.toString("base64")}`;
   } catch {

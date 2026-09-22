@@ -38,10 +38,10 @@ interface ResolvedLogo {
 
 /** Best-effort: a missing/unreadable logo file should never block report generation, just render
  * without one — same reasoning as the ENOENT-tolerant reads elsewhere in the storage layer. */
-async function resolveLogo(storageKey: string | null): Promise<ResolvedLogo | null> {
+async function resolveLogo(orgId: string, storageKey: string | null): Promise<ResolvedLogo | null> {
   if (!storageKey) return null;
   try {
-    const bytes = await getObject(storageKey);
+    const bytes = await getObject(orgId, storageKey);
     // No logo rather than a guess. This previously fell back to image/png for an unrecognised
     // extension while the portal and the authenticated route both refused the same key — so one
     // logo could appear in the PDF and be absent from the portal chrome around it, which is the
@@ -222,7 +222,7 @@ export async function generateReport(formData: FormData): Promise<void> {
   let brandLogoKey: string | null = null;
 
   try {
-    const logo = await resolveLogo(reportData.brandLogoStorageKey);
+    const logo = await resolveLogo(reportOrgId, reportData.brandLogoStorageKey);
 
     // The snapshot copy: the same bytes that are about to be baked into this PDF, stored under the
     // Report's own key so the portal can keep branding this document the way it was generated even
@@ -232,7 +232,7 @@ export async function generateReport(formData: FormData): Promise<void> {
     if (logo) {
       const candidateKey = reportBrandLogoKey(reportOrgId, reportId, logo.extension);
       try {
-        await putObject(candidateKey, logo.bytes, logoContentTypeFor(candidateKey) ?? undefined);
+        await putObject(reportOrgId, candidateKey, logo.bytes, logoContentTypeFor(candidateKey) ?? undefined);
         brandLogoKey = candidateKey;
       } catch {
         brandLogoKey = null;
@@ -260,7 +260,7 @@ export async function generateReport(formData: FormData): Promise<void> {
     const pdf = await renderHtmlToPdf(html);
     const key = reportPdfKey(reportOrgId, reportId);
     // This one the product authored, so the type is a fact rather than a claim.
-    await putObject(key, pdf, "application/pdf");
+    await putObject(reportOrgId, key, pdf, "application/pdf");
 
     await withOrgScope(orgId, (tx) =>
       tx.report.update({
@@ -283,7 +283,7 @@ export async function generateReport(formData: FormData): Promise<void> {
     // src/lib/actions/evidence.ts's attachEvidence), and surface the failure to the caller.
     await withOrgScope(orgId, (tx) => tx.report.delete({ where: { id: reportId } })).catch(() => {});
     // …and the logo copy taken for it, which nothing points at any more.
-    if (brandLogoKey) await deleteObject(brandLogoKey).catch(() => {});
+    if (brandLogoKey) await deleteObject(reportOrgId, brandLogoKey).catch(() => {});
     throw err;
   }
 

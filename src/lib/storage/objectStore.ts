@@ -118,20 +118,79 @@ export function resetStorageBackend(): void {
   cached = null;
 }
 
-export function putObject(key: string, data: Buffer, contentType?: string): Promise<void> {
+/**
+ * Refuses a key that does not belong to this org.
+ *
+ * Every key this product generates begins with an orgId segment — `evidenceKey`, `reportPdfKey`
+ * and `orgLogoKey` all build `${orgId}/...`. That prefix was a convention, and a convention is
+ * something the code hopes for rather than something it enforces.
+ *
+ * It failed exactly as conventions do. `GET /api/evidence/[id]` read the Evidence row under
+ * withOrgScope — the ROW was correctly scoped, and the route's comment said so — and then fetched
+ * `evidence.storageKey` with nothing checking whose prefix it carried. A key is a bare string read
+ * back out of the database; the containment guard refuses keys leaving the storage ROOT, and a key
+ * under another tenant's prefix is comfortably inside it. Demonstrated against the running app: a
+ * signed-in user of one firm received another firm's seller document, 200 and the bytes. That is
+ * the failure spec.md §8 names as this product's core reputational risk.
+ *
+ * Latent, because the key builders always use the session's org, so the application cannot write a
+ * crossed key today. "Unreachable through the application" is an argument that failed three times
+ * in one day — a traversing storage key, a portal link naming one firm while its report belonged to
+ * another, and this — and this is the one where it costs the most.
+ *
+ * Refuses rather than reconciles, like the containment guard: a key that disagrees with the org
+ * asking for it describes a corrupt row, and the only safe reading of a corrupt row is that there
+ * is nothing to serve.
+ */
+export function assertKeyBelongsToOrg(orgId: string, key: string): void {
+  if (!orgId) throw new Error("Refusing a storage operation with no org scope.");
+  if (key !== `${orgId}` && !key.startsWith(`${orgId}/`)) {
+    throw new Error(
+      `Refusing a storage key that does not belong to this org: ${key} is not under ${orgId}/`,
+    );
+  }
+}
+
+/**
+ * The tenant-scoped storage API. The org is a required argument, deliberately — there is no
+ * unscoped read or write to reach for by accident, which is the difference between a guard and an
+ * alternative. `scripts/purge-expired-documents.ts` is the one legitimate cross-tenant caller and
+ * uses the explicitly-named function at the bottom of this file, the same shape as
+ * src/lib/db/scoped.ts naming that script as RLS's single documented exception.
+ */
+export function putObject(
+  orgId: string,
+  key: string,
+  data: Buffer,
+  contentType?: string,
+): Promise<void> {
+  assertKeyBelongsToOrg(orgId, key);
   return storageBackend().put(key, data, contentType);
 }
-export function getObject(key: string): Promise<Buffer> {
+export function getObject(orgId: string, key: string): Promise<Buffer> {
+  assertKeyBelongsToOrg(orgId, key);
   return storageBackend().get(key);
 }
-export function deleteObject(key: string): Promise<void> {
+export function deleteObject(orgId: string, key: string): Promise<void> {
+  assertKeyBelongsToOrg(orgId, key);
   return storageBackend().delete(key);
 }
-export function deleteObjectIfPresent(key: string): Promise<"deleted" | "missing"> {
-  return storageBackend().deleteIfPresent(key);
-}
-export function objectExists(key: string): Promise<boolean> {
+export function objectExists(orgId: string, key: string): Promise<boolean> {
+  assertKeyBelongsToOrg(orgId, key);
   return storageBackend().exists(key);
+}
+
+/**
+ * Deletes without an org scope. The retention purge is the ONLY caller and the only legitimate one:
+ * it walks every engagement whose documents are due across every org, so there is no single org to
+ * scope it to, and it already runs on the superuser database role for exactly the same reason.
+ *
+ * Named so it cannot be reached for absent-mindedly. Anything serving a document to a person wants
+ * getObject and its required org; if a new caller seems to want this, the question to ask is which
+ * org it is acting for, not how to bypass the argument.
+ */
+export function deleteObjectIfPresentAcrossOrgs(key: string): Promise<"deleted" | "missing"> {
+  return storageBackend().deleteIfPresent(key);
 }
 export function assertStorageUsable(): Promise<void> {
   return storageBackend().assertUsable();

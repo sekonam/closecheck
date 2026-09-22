@@ -21,7 +21,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
 
   let pdf: Buffer;
   try {
-    pdf = await getObject(report.pdfStorageKey);
+    pdf = await getObject(orgId, report.pdfStorageKey);
   } catch {
     // The row points at a file that is gone (database restored onto a fresh volume, file removed by
     // hand). Same treatment as /api/evidence/[evidenceId] and /api/branding/logo: a 404, not an

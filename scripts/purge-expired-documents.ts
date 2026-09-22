@@ -50,7 +50,11 @@
  * Run with: npm run db:purge-expired-documents [-- --engagement=<id>] [-- --force-missing]
  */
 import { DealStage, PrismaClient } from "@prisma/client";
-import { assertStorageUsable, deleteObjectIfPresent, describeStorage } from "../src/lib/storage/objectStore";
+import {
+  assertStorageUsable,
+  deleteObjectIfPresentAcrossOrgs,
+  describeStorage,
+} from "../src/lib/storage/objectStore";
 import { RETENTION_SCOPE } from "../src/lib/retention/policy";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL });
@@ -153,7 +157,7 @@ async function main() {
       if (e.storageKey) {
         let outcome: "deleted" | "missing";
         try {
-          outcome = await deleteObjectIfPresent(e.storageKey);
+          outcome = await deleteObjectIfPresentAcrossOrgs(e.storageKey);
         } catch (err) {
           console.error(`  FAILED to unlink ${e.storageKey}, keeping its row for a future run:`, err);
           perEngagement.failed++;
@@ -187,7 +191,7 @@ async function main() {
         if (!report.pdfStorageKey) continue;
         let outcome: "deleted" | "missing";
         try {
-          outcome = await deleteObjectIfPresent(report.pdfStorageKey);
+          outcome = await deleteObjectIfPresentAcrossOrgs(report.pdfStorageKey);
         } catch (err) {
           console.error(`  FAILED to unlink report PDF ${report.pdfStorageKey}:`, err);
           perEngagement.failed++;

@@ -116,7 +116,7 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   // (src/lib/branding/logoContentType.ts), and the declared type is an unverified claim — storing
   // it would put the uploader's assertion on the object, which matters the moment a backend serves
   // the stored Content-Type directly rather than one this application chose.
-  await putObject(key, bytes, logoContentTypeFor(key) ?? undefined);
+  await putObject(orgId, key, bytes, logoContentTypeFor(key) ?? undefined);
 
   const previousKey = await withOrgScope(orgId, async (tx) => {
     const previous = await tx.consultantOrg.findUniqueOrThrow({ where: { id: orgId }, select: { brandLogoUrl: true } });
@@ -127,7 +127,7 @@ export async function uploadOrgLogo(formData: FormData): Promise<void> {
   // Best-effort: the new logo is already live either way, so a cleanup failure here shouldn't
   // surface as an error to the consultant — it just leaves one stale file behind.
   if (previousKey && previousKey !== key) {
-    await deleteObject(previousKey).catch(() => {});
+    await deleteObject(orgId, previousKey).catch(() => {});
   }
 
   revalidatePath("/settings");
@@ -168,7 +168,7 @@ export async function removeOrgLogo(): Promise<void> {
   });
 
   if (previousKey) {
-    await deleteObject(previousKey).catch(() => {});
+    await deleteObject(orgId, previousKey).catch(() => {});
   }
 
   revalidatePath("/settings");

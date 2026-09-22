@@ -81,19 +81,56 @@ async function orgIdFromCustomer(stripe: Stripe, customerId: string): Promise<st
  * Returns false when the org itself no longer exists — the row cannot be created against a missing
  * foreign key, and no future retry can change that. See the caller for why that answers 200.
  */
-async function applySubscriptionState(orgId: string, subscription: Stripe.Subscription): Promise<boolean> {
+async function applySubscriptionState(
+  stripe: Stripe,
+  orgId: string,
+  subscription: Stripe.Subscription,
+): Promise<boolean> {
   const plan = planFromSubscription(subscription);
   const status = mapStatus(subscription.status);
   const periodEnd = subscription.items.data[0]?.current_period_end;
   const customerId =
     typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
+  if (!customerId) return false;
+
+  /**
+   * Two independent statements of who owns this subscription — the org named in its own metadata,
+   * and the org named on the customer it belongs to — must agree before either is written.
+   *
+   * Nothing compared them before. This is the same shape as the portal serving a report resolved
+   * against one firm's link and another firm's identity, found in the same review pass, and it is
+   * latent for the same reason: both values are written by this application and it always writes
+   * the same one. What makes it worth closing anyway is that the consequence is not a failed
+   * request. `stripeCustomerId` is unique per BillingAccount, so a mismatch resolves one of two
+   * ways, and both are bad in a way nobody would notice. Updating an existing row repoints a firm's
+   * billing account at another firm's Stripe customer, after which `invoice.paid` for that customer
+   * resolves back to the other org — payments and credit grants split across two firms. Or the
+   * unique constraint rejects it, producing the 500-and-retry-forever wedge already fixed once in
+   * this file.
+   *
+   * Dashboard edits are the realistic source: metadata is editable by hand, and a support action on
+   * a customer is exactly the moment someone would touch it.
+   *
+   * Refusing is the only safe reading, as with the portal — two sources disagreeing about ownership
+   * describe a corrupt state, and guessing which one is right risks moving money between firms.
+   */
+  const customerOrgId = await orgIdFromCustomer(stripe, customerId);
+  if (customerOrgId && customerOrgId !== orgId) {
+    await recordError(
+      "stripe-webhook-org-mismatch",
+      new Error(
+        `Subscription ${subscription.id} names org ${orgId} while customer ${customerId} names ` +
+          `org ${customerOrgId}. Refusing to write either.`,
+      ),
+    );
+    return false;
+  }
 
   return withOrgScope(orgId, async (tx) => {
     // RLS scopes this to the org resolved from signature-verified Stripe metadata; a deleted org
     // simply has no row to find, which is the unrecoverable case above.
     const org = await tx.consultantOrg.findUnique({ where: { id: orgId } });
     if (!org) return false;
-    if (!customerId) return false;
 
     await tx.billingAccount.upsert({
       where: { orgId },
@@ -161,7 +198,7 @@ export async function POST(request: Request) {
         const orgId = session.metadata?.orgId;
         if (orgId && typeof session.subscription === "string") {
           const subscription = await stripe.subscriptions.retrieve(session.subscription);
-          if (!(await applySubscriptionState(orgId, subscription))) {
+          if (!(await applySubscriptionState(stripe, orgId, subscription))) {
             await acknowledgeUnresolvable(event.type, orgId);
           }
         }
@@ -172,7 +209,7 @@ export async function POST(request: Request) {
         const subscription = event.data.object;
         const orgId = subscription.metadata?.orgId;
         if (orgId) {
-          if (!(await applySubscriptionState(orgId, subscription))) {
+          if (!(await applySubscriptionState(stripe, orgId, subscription))) {
             await acknowledgeUnresolvable(event.type, orgId);
           }
         }
