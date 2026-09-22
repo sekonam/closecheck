@@ -4,13 +4,6 @@ import { certificateLifetimeRemaining, __domainStatusInternals } from "./tierA";
 
 const { isCertificateVerdict } = __domainStatusInternals;
 
-/** A certificate issued `lifetimeDays` ago-to-now such that `remainingDays` are left. */
-function cert(lifetimeDays: number, remainingDays: number) {
-  const to = new Date(Date.now() + remainingDays * 86_400_000);
-  const from = new Date(to.getTime() - lifetimeDays * 86_400_000);
-  return certificateLifetimeRemaining(from.toISOString(), to.toISOString());
-}
-
 describe("telling a certificate verdict from a transport failure", () => {
   it("treats validation failures as verdicts", () => {
     // These come back with the same null certificate fields as a DNS failure, so the reason is the
