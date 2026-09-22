@@ -86,16 +86,25 @@ describe("read-only API pagination and rate-limit headers", () => {
     const other = await createOrgFixture("paging-other");
     try {
       const res = await apiGet(`/api/v1/engagements?cursor=${other.engagementId}`, org.apiToken);
-      // RLS makes the foreign cursor resolve to nothing; Prisma reports that as a failed query
-      // rather than silently returning page one. Either way the requirement is the same: no data
-      // from the other org, and no 200 that includes it.
+
+      // Two outcomes are legitimate: RLS makes the foreign cursor resolve to nothing, which Prisma
+      // may surface as a failed query (500) or which may yield an empty page (200). The bad
+      // outcomes are specific and must be named rather than covered by a >= 400 catch-all — that
+      // would also pass on 401, 403 and 429, so this test would stay green if the route started
+      // rejecting every cursored request or if the rate limiter tripped.
+      expect([200, 500]).toContain(res.status);
       if (res.status === 200) {
         const body = await res.json();
-        const ids = body.engagements.map((e: { id: string }) => e.id);
+        const ids: string[] = body.engagements.map((e: { id: string }) => e.id);
         expect(ids).not.toContain(other.engagementId);
-      } else {
-        expect(res.status).toBeGreaterThanOrEqual(400);
+        // And nothing else of theirs came back either.
+        expect(ids.every((id) => id !== other.engagementId)).toBe(true);
       }
+
+      // Whatever happened above, the endpoint must still be working for this caller — the point is
+      // that a foreign cursor is inert, not that it breaks the API.
+      const after = await apiGet("/api/v1/engagements?limit=1", org.apiToken);
+      expect(after.status).toBe(200);
     } finally {
       await destroyOrgFixture(other.orgId);
     }

@@ -113,13 +113,21 @@ jobs:
         # The integration suite drives a real server over HTTP — the §5 launch gate for the API
         # explicitly refuses to be satisfied by calling route handlers directly.
         #
-        # Readiness is an unauthenticated request to the API returning 401. A plain 200 on / is a
-        # weaker signal: Next answers static routes before the database client is usable, so a
-        # 200 there can precede the app actually being able to serve a request.
+        # Readiness sends a well-formed but bogus bearer token, NOT a tokenless request.
+        #
+        # A tokenless request returns 401 from authenticateApiRequest before apiPrisma is ever
+        # touched, so it proves only that Next is listening — exactly as database-blind as the
+        # "200 on /" it was supposed to improve on. A token with the right prefix forces the
+        # api_keys lookup, so a 401 here means the app really can reach Postgres. If the database
+        # were unreachable the probe would otherwise go green in a second and the integration
+        # suite would fail later with a connection error that reads like a test bug.
         run: |
           npm start > app.log 2>&1 &
+          probe_token="cc_live_$(printf 'A%.0s' $(seq 1 43))"
           for i in $(seq 1 90); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/engagements || true)
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $probe_token" \
+              http://localhost:3000/api/v1/engagements || true)
             if [ "$code" = "401" ]; then
               echo "App ready after ${i}s"
               exit 0
@@ -131,9 +139,13 @@ jobs:
           exit 1
 
       - name: Integration suite
-        # The Stripe billing E2E skips itself when STRIPE_SECRET_KEY is absent, which it is here —
-        # those tests create real test-mode objects against a real account and have no business
-        # running on every push. Everything else runs.
+        # The Stripe billing E2E is skipped here by EXPLICIT opt-out, not by the absence of a key.
+        # It creates real test-mode objects against a real Stripe account, which has no business
+        # happening on every push — but a suite that skips itself whenever a key is missing is a
+        # suite that reports green having asserted nothing, and docs/releases.md §5 cites that file
+        # as evidence for a closed launch gate. Opting out on purpose keeps the default loud.
+        env:
+          CLOSECHECK_SKIP_STRIPE_E2E: "true"
         run: npm run test:integration
 
       - name: Server log

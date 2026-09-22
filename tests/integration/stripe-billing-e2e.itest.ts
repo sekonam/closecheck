@@ -24,7 +24,22 @@ import { BASE_URL, serverIsReachable } from "./helpers/http";
  */
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-const canRun = !!stripeKey?.startsWith("sk_test_") && !!webhookSecret;
+
+/**
+ * Skipping is OPT-IN, not automatic.
+ *
+ * This file previously skipped itself whenever STRIPE_SECRET_KEY was absent — so on CI, and on any
+ * machine without the key, it reported green having executed zero assertions, including the
+ * signature-rejection and double-grant checks. docs/releases.md §5 cites this file as the evidence
+ * closing a launch gate, which makes a silent skip worse than no test: the gate looks verified on
+ * every run while nothing is verified at all.
+ *
+ * So an unconfigured environment now FAILS unless it says out loud that it means to skip, the same
+ * reasoning api-tenant-isolation.itest.ts already applies to an unreachable server.
+ */
+const optedOut = process.env.CLOSECHECK_SKIP_STRIPE_E2E === "true";
+const configured = !!stripeKey?.startsWith("sk_test_") && !!webhookSecret;
+const canRun = configured && !optedOut;
 
 /**
  * Refuses to run against anything but a test-mode key. A live key here would create real customers
@@ -57,7 +72,18 @@ async function deliverWebhook(type: string, object: unknown): Promise<Response> 
   });
 }
 
-describe.skipIf(!canRun)("Phase 2.5 — billing works end to end against real Stripe test-mode objects", () => {
+describe("Phase 2.5 — billing works end to end against real Stripe test-mode objects", () => {
+  it("is either configured to run or explicitly opted out", () => {
+    expect(
+      configured || optedOut,
+      "STRIPE_SECRET_KEY (sk_test_) and STRIPE_WEBHOOK_SECRET are not set, and CLOSECHECK_SKIP_STRIPE_E2E " +
+        "is not 'true'. This suite is the evidence behind a docs/releases.md §5 launch gate, so it " +
+        "refuses to skip quietly — either configure it or opt out deliberately.",
+    ).toBe(true);
+  });
+});
+
+describe.skipIf(!canRun)("Phase 2.5 — billing end-to-end (real Stripe test mode)", () => {
   let org: OrgFixture;
   let customerId: string;
   let subscriptionId: string;

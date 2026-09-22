@@ -140,6 +140,10 @@ One audit with its findings, in template order.
     "status": "COMPLETE",
     "overallRatingOverride": null,
     "overallRatingOverrideNote": null,
+    "computedOverallSeverity": "RED",
+    "computedPerTierSeverity": { "A": "RED", "B": "YELLOW", "C": "GREEN" },
+    "coverage": { "rated": 18, "total": 23 },
+    "perTierCoverage": { "A": { "rated": 7, "total": 7 }, "B": { "rated": 8, "total": 11 }, "C": { "rated": 3, "total": 5 } },
     "createdAt": "2026-09-22T09:20:41.004Z",
     "updatedAt": "2026-09-22T10:02:18.771Z",
     "template": { "slug": "restaurant-online-ordering", "version": 3, "name": "Restaurant with online ordering" },
@@ -161,9 +165,17 @@ One audit with its findings, in template order.
 after version 3 is published (`spec.md` §5) — so a finding's meaning is stable, and an integration
 comparing audits across time should key on `(slug, version)`, not `slug` alone.
 
-`overallRatingOverride` is the consultant's explicit override of the computed rating, and is
-separate from it by design: the computed value is never overwritten. A null override means the
-report shows the computed rating.
+`overallRatingOverride` is the consultant's explicit override of the computed rating, and the
+computed value is always returned beside it. That is a guarantee, not a convenience: `spec.md` §6
+requires the computation to stay visible wherever an override is shown, because an override
+annotates the evidence rather than replacing it. A null override means the report shows
+`computedOverallSeverity`.
+
+`coverage` is why you should not read a severity on its own. An audit where nothing has been rated
+yet rolls up to `GREEN` — the worst of an empty set — so `{"rated": 0, "total": 23}` beside it is
+the difference between "checked and clean" and "not checked". Items marked `NOT_APPLICABLE` are
+excluded from both the rating and the denominator, since a check that does not apply is a
+resolution rather than outstanding work.
 
 ### `GET /api/v1/reports/{id}`
 

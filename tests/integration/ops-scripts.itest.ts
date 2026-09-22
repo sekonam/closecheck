@@ -61,8 +61,16 @@ describe("ops-dashboard.ts", () => {
     expect(html).toContain("No orgs yet.");
     expect(html).toContain("No billing accounts yet.");
     expect(html).toContain("No errors recorded.");
-    // The funnel's first conversion cell has no previous step, so it must render blank, not "—%"
-    // or a divide-by-zero artifact — pct() is only invoked from the second row onward.
+    // The funnel's first row has no previous step to convert from, so its conversion cell must be
+    // empty — not "—", which pct() correctly returns for a zero denominator but which would read
+    // on screen as "we measured this and it was undefined" rather than "this question does not
+    // apply to the first step". Asserted against the rendered cell, since that distinction lives in
+    // renderFunnel rather than in pct.
+    expect(html).toContain('<div class="funnel-conv"></div>');
+    // Exactly one such cell: the first row. Later rows on an empty database legitimately show
+    // "— of previous step" — 0 of 0 really is undefined, and saying so is better than printing
+    // "0.0%", which would assert a measured drop-off that was never measured.
+    expect(html.split('<div class="funnel-conv"></div>')).toHaveLength(2);
     expect(html).toContain("Generated 2026-09-22T12:00:00.000Z (UTC)");
   });
 

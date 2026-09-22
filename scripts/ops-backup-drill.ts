@@ -157,6 +157,18 @@ async function tableAcls(prisma: PrismaClient): Promise<Map<string, string>> {
 // Entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Aborts the drill early WITHOUT discarding the results table.
+ *
+ * The early-exit paths used to throw a plain Error saying "see check detail above" — but the
+ * checks table is printed after the try/finally that the throw escapes, so the operator got a
+ * message pointing at output that was never produced, and the captured stderr (the only thing that
+ * explains *why* pg_dump or the restore failed) was lost with it. Aborting with this type instead
+ * lets the catch below swallow it, run cleanup, and still print every check including the failed
+ * one and its detail.
+ */
+class DrillAborted extends Error {}
+
 async function main() {
   const force = process.argv.includes("--force");
   const directUrl = process.env.DIRECT_DATABASE_URL;
@@ -184,12 +196,12 @@ async function main() {
     console.log(`Dumping "${sourceDb}" (source, read-only) to ${dumpFile} ...`);
     const dump = runPg(pgDump, [...connArgs(sourceUrl, sourceDb), "-f", dumpFile], sourceUrl);
     checks.push({ label: "pg_dump completed", pass: dump.ok, detail: dump.ok ? undefined : dump.stderr.trim() });
-    if (!dump.ok) throw new Error("pg_dump failed — see check detail above.");
+    if (!dump.ok) throw new DrillAborted("pg_dump failed");
 
     console.log(`Creating scratch database "${scratchDb}" ...`);
     const create = runPg(createdb, [...connArgs(sourceUrl, "postgres").slice(0, 6), scratchDb], sourceUrl);
     checks.push({ label: "createdb completed", pass: create.ok, detail: create.ok ? undefined : create.stderr.trim() });
-    if (!create.ok) throw new Error("createdb failed — see check detail above.");
+    if (!create.ok) throw new DrillAborted("createdb failed");
     scratchCreated = true;
 
     console.log(`Restoring dump into "${scratchDb}" ...`);
@@ -199,7 +211,7 @@ async function main() {
       sourceUrl,
     );
     checks.push({ label: "psql restore completed with no error", pass: restore.ok, detail: restore.ok ? undefined : restore.stderr.trim() });
-    if (!restore.ok) throw new Error("Restore failed — see check detail above.");
+    if (!restore.ok) throw new DrillAborted("restore failed");
 
     const scratchUrl = new URL(sourceUrl.toString());
     scratchUrl.pathname = `/${scratchDb}`;
@@ -269,6 +281,11 @@ async function main() {
       pass: aclMismatches.length === 0,
       detail: aclMismatches.length ? aclMismatches.join("; ") : undefined,
     });
+  } catch (err) {
+    // An abort is a reported failure, not an unexpected one: fall through so the checks table —
+    // which already holds the failing check and its stderr — actually gets printed. Anything else
+    // is a genuine crash and must keep propagating.
+    if (!(err instanceof DrillAborted)) throw err;
   } finally {
     // Cleanup must run even if an assertion threw above — a failed drill that leaves a scratch
     // database behind on every failed run would foul the next run's `createdb` and slowly litter the
