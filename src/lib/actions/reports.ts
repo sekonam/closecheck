@@ -2,12 +2,13 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import type { DealStage } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { renderReportHtml, type AppendixDocument } from "@/lib/reports/renderHtml";
 import { renderHtmlToPdf } from "@/lib/reports/pdf";
-import { putObject, getObject, reportPdfKey } from "@/lib/storage/local";
+import { putObject, getObject, deleteObject, reportPdfKey } from "@/lib/storage/local";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
 import { recordMetric } from "@/lib/metrics/record";
 
@@ -22,18 +23,57 @@ const LOGO_EXTENSION_MIME: Record<string, string> = {
   webp: "image/webp",
 };
 
+/** "Pre-LOI" / "Post-LOI" / … for the report cover (spec.md §6). Mirrors the label map the
+ * engagements list uses, so a consultant sees the same words in the app and in the deliverable;
+ * duplicated rather than imported because that one lives in a page component. */
+const DEAL_STAGE_LABEL: Record<DealStage, string> = {
+  PRE_LOI: "Pre-LOI",
+  POST_LOI: "Post-LOI",
+  CLOSING: "Closing",
+  CLOSED: "Closed",
+  DEAD: "Dead",
+};
+
+interface ResolvedLogo {
+  /** For the PDF: Chromium has no session to fetch an app route with, so the bytes ride inline. */
+  dataUri: string;
+  /** The same bytes, kept so the brand snapshot below stores exactly what this PDF was built from. */
+  bytes: Buffer;
+  extension: string;
+}
+
 /** Best-effort: a missing/unreadable logo file should never block report generation, just render
  * without one — same reasoning as the ENOENT-tolerant reads elsewhere in the storage layer. */
-async function resolveLogoDataUri(storageKey: string | null): Promise<string | null> {
+async function resolveLogo(storageKey: string | null): Promise<ResolvedLogo | null> {
   if (!storageKey) return null;
   try {
     const bytes = await getObject(storageKey);
     const extension = storageKey.split(".").pop()?.toLowerCase() ?? "";
     const mime = LOGO_EXTENSION_MIME[extension] ?? "image/png";
-    return `data:${mime};base64,${bytes.toString("base64")}`;
+    return { dataUri: `data:${mime};base64,${bytes.toString("base64")}`, bytes, extension };
   } catch {
     return null;
   }
+}
+
+/**
+ * Where a Report's own copy of the firm's logo lives — beside its PDF, under the same per-tenant
+ * prefix `reportPdfKey` uses (src/lib/storage/local.ts), so a future move to object storage carries
+ * both across unchanged.
+ *
+ * WHY A COPY, RATHER THAN POINTING AT THE ORG'S LIVE LOGO KEY
+ * A Report is a point-in-time document (spec.md §6) and the PDF has these bytes baked in for good.
+ * `orgLogoKey` derives its key from the uploaded filename, and uploadOrgLogo/removeOrgLogo delete
+ * the previous object on re-upload — so a stored pointer to the org's key would dangle exactly when
+ * a firm rebrands, i.e. the only case the snapshot exists for, and the portal would then show a
+ * months-old report under a logo the PDF inside it contradicts. Bytes in the database row were the
+ * other option and were rejected: `consultant_orgs` already sets the house rule ("Logo is a URL
+ * into object storage, not inline bytes"), and base64 of a logo on every portal view's SELECT is a
+ * cost paid on the buyer-facing path.
+ */
+function reportBrandLogoKey(orgId: string, reportId: string, extension: string): string {
+  const safeExtension = /^[a-z0-9]{1,5}$/.test(extension) ? extension : "png";
+  return `${orgId}/reports/${reportId}-logo.${safeExtension}`;
 }
 
 /**
@@ -94,6 +134,12 @@ export async function generateReport(formData: FormData): Promise<void> {
         computedOverallSeverity: rollup.overall,
         overallCoveredCount: rollup.overallCoverage.rated,
         overallTotalCount: rollup.overallCoverage.total,
+        // Brand-kit snapshot (spec.md §6). The firm name and accent are captured here, in the same
+        // transaction that fixes the severity roll-up, because they are the same kind of fact: what
+        // was true when this version of the document was produced. The logo key is filled in by the
+        // update below, once its bytes have actually been copied outside the transaction.
+        brandSnapshotFirmName: org.name,
+        brandSnapshotColorHex: org.brandColorHex,
       },
     });
 
@@ -115,8 +161,16 @@ export async function generateReport(formData: FormData): Promise<void> {
         businessName: audit.engagement.businessName,
         templateName: audit.template.name,
         generatedAt: report.generatedAt,
-        orgName: org.name,
-        brandColorHex: org.brandColorHex,
+        // spec.md §6's cover asks for the engagement date, and the Engagement has no column by that
+        // name — its createdAt is when the deal was opened for diligence, which is the fact meant,
+        // and a different one from generatedAt (when this Report version was produced).
+        engagementDate: audit.engagement.createdAt,
+        dealStage: DEAL_STAGE_LABEL[audit.engagement.dealStage] ?? null,
+        // Read back off the Report row rather than from `org` again: these are now snapshot values,
+        // and the PDF must be built from the same bytes the row records — otherwise a report could
+        // be branded one way and its stored snapshot another.
+        orgName: report.brandSnapshotFirmName ?? org.name,
+        brandColorHex: report.brandSnapshotColorHex,
         brandLogoStorageKey: org.brandLogoUrl,
         findings: audit.findings.map((f) => ({ ...f, evidenceCount: f.evidence.length })),
         overallRatingOverride: audit.overallRatingOverride,
@@ -126,13 +180,39 @@ export async function generateReport(formData: FormData): Promise<void> {
     };
   });
 
+  // Declared out here so the compensating delete below can clean up a copied logo whose Report row
+  // is about to be removed.
+  let brandLogoKey: string | null = null;
+
   try {
-    const brandLogoDataUri = await resolveLogoDataUri(reportData.brandLogoStorageKey);
+    const logo = await resolveLogo(reportData.brandLogoStorageKey);
+
+    // The snapshot copy: the same bytes that are about to be baked into this PDF, stored under the
+    // Report's own key so the portal can keep branding this document the way it was generated even
+    // after the firm re-uploads or removes its logo. Best-effort, like resolving the logo itself —
+    // a storage hiccup here leaves brandSnapshotLogoKey null and the portal falls back to the live
+    // org logo, which is exactly the pre-snapshot behaviour, not a failure worth losing a report to.
+    if (logo) {
+      const candidateKey = reportBrandLogoKey(reportOrgId, reportId, logo.extension);
+      try {
+        await putObject(candidateKey, logo.bytes);
+        brandLogoKey = candidateKey;
+      } catch {
+        brandLogoKey = null;
+      }
+    }
+
     const html = renderReportHtml({
       businessName: reportData.businessName,
       templateName: reportData.templateName,
       generatedAt: reportData.generatedAt,
-      org: { name: reportData.orgName, brandColorHex: reportData.brandColorHex, brandLogoDataUri },
+      engagementDate: reportData.engagementDate,
+      dealStage: reportData.dealStage,
+      org: {
+        name: reportData.orgName,
+        brandColorHex: reportData.brandColorHex,
+        brandLogoDataUri: logo?.dataUri ?? null,
+      },
       findings: reportData.findings,
       overallRatingOverride: reportData.overallRatingOverride,
       overallRatingOverrideNote: reportData.overallRatingOverrideNote,
@@ -143,7 +223,12 @@ export async function generateReport(formData: FormData): Promise<void> {
     const key = reportPdfKey(reportOrgId, reportId);
     await putObject(key, pdf);
 
-    await withOrgScope(orgId, (tx) => tx.report.update({ where: { id: reportId }, data: { pdfStorageKey: key } }));
+    await withOrgScope(orgId, (tx) =>
+      tx.report.update({
+        where: { id: reportId },
+        data: { pdfStorageKey: key, brandSnapshotLogoKey: brandLogoKey },
+      }),
+    );
 
     // Fires only after the PDF is stored — a report.generated event pointing at a Report the
     // compensating delete below is about to remove would be worse than no event. Not awaited:
@@ -158,6 +243,8 @@ export async function generateReport(formData: FormData): Promise<void> {
     // leave a Report with no downloadable PDF behind (same compensating-delete pattern as
     // src/lib/actions/evidence.ts's attachEvidence), and surface the failure to the caller.
     await withOrgScope(orgId, (tx) => tx.report.delete({ where: { id: reportId } })).catch(() => {});
+    // …and the logo copy taken for it, which nothing points at any more.
+    if (brandLogoKey) await deleteObject(brandLogoKey).catch(() => {});
     throw err;
   }
 
