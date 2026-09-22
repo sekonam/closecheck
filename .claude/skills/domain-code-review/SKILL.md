@@ -112,6 +112,13 @@ otherwise report directly to the user as plain findings with file/line and concr
   in a shared map — so a flood of them would evict every paying tenant's API budget instead. A
   failed sign-in mints a bucket keyed on any email string, so that flood is free. Partition the
   map; do not tune the policy.
+- **A fix that exempts or reprioritises one participant in a shared mechanism has, by
+  construction, moved every other participant** — and the finding that prompted it only ever names
+  one of them. This has now produced two defects in a day, both invisible to reading and obvious
+  the moment the scenario was executed: correcting insertion-order eviction made the long-lived
+  buckets the privileged ones, and exempting the unknown-address case from a sign-in budget
+  collapsed a two-key budget to per-email, reinstating the victim-lockout weapon the second key
+  existed to prevent. Before accepting such a fix, enumerate who else the change moves.
 - Does a limiter hard-reject before doing the work it is protecting? Then its degraded state is an
   outage, not a restriction. The same config value that safely over-restricts an API limiter made
   sign-in return null for every user on the deployment.
