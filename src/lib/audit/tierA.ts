@@ -786,12 +786,31 @@ const RUNNERS: Record<string, (domain: string) => Promise<TierAResult>> = {
   https_hygiene: runHttpsHygiene,
 };
 
+/**
+ * The registered runner for a key, or undefined.
+ *
+ * `Object.hasOwn`, not `in` and not a bare index. RUNNERS is a plain object literal, so `in` walks
+ * the prototype chain: `"constructor" in RUNNERS` was true, the index then returned
+ * `Object.prototype.constructor`, and because that is a function the "no runner registered" guard
+ * below let it through and CALLED it — `runTierACheck("constructor", "example.com")` returned a
+ * String object where a TierAResult belongs, which runTierAAutomation would have written onto a
+ * Finding with an undefined status and severity.
+ *
+ * `automationKey` is product-owned template content rather than anything a consultant supplies, so
+ * firing this needed a template-authoring mistake. It is closed anyway because the cost is one
+ * lookup, and because the same footgun is already recorded in the review checklist for Prisma's
+ * generated enums — a rule the codebase was carrying while breaking it here.
+ */
+function runnerFor(automationKey: string): ((domain: string) => Promise<TierAResult>) | undefined {
+  return Object.hasOwn(RUNNERS, automationKey) ? RUNNERS[automationKey] : undefined;
+}
+
 export function isAutomatable(automationKey: string | null): boolean {
-  return !!automationKey && automationKey in RUNNERS;
+  return !!automationKey && runnerFor(automationKey) !== undefined;
 }
 
 export async function runTierACheck(automationKey: string, domain: string): Promise<TierAResult> {
-  const runner = RUNNERS[automationKey];
+  const runner = runnerFor(automationKey);
   if (!runner) {
     throw new Error(`No Tier A runner registered for automationKey "${automationKey}"`);
   }
