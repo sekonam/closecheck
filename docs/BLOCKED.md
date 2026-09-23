@@ -75,32 +75,59 @@ Everything after the first "Apply Blueprint" click is scripted.
 
 ---
 
-## 4. Object storage — a provider decision, then credentials
+## 4. Object storage — the R2 bucket and its credentials
+
+**The provider decision is made: Cloudflare R2.** What is left is a bucket and a credential. The
+code needed one change to suit it, already landed — see "what R2 changed" below.
 
 **State.** Built and tested, not yet run against a real bucket. `src/lib/storage/objectStore.ts`
 has two backends: local disk (the default, unchanged, needs no configuration) and an S3-compatible
 one that activates the moment `STORAGE_S3_BUCKET` is set. Written against the S3 protocol rather
-than a provider, so AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces and MinIO all work.
+than a provider, so R2, AWS S3, Backblaze B2, DigitalOcean Spaces and MinIO all work — the R2
+choice is reversible.
 
 **This is a different kind of blocker from the rest of this file, and worth separating.** Everything
 else here waits on evidence you have to go and find — a design partner, a paying customer. This
-waits on a decision you could make in an afternoon, and then a credential. No effort will unblock
-the others; a choice unblocks this one.
+waits only on a credential now.
 
-**What only you can do:** pick a provider, create a bucket, and set `STORAGE_S3_BUCKET` plus its
-credentials (see `.env.example`).
+**What only you can do**, concretely:
 
-Then prove it works, in two passes. `npm run verify:deployment` does the first in a few seconds: it
-writes a real object through the configured backend, reads it back, compares the bytes and deletes
-it. If that fails, nothing below is worth attempting — and it tells you so, with the bucket,
-credentials, region and endpoint named as the things to check.
+1. In the Cloudflare dashboard, **create an R2 bucket**. Note your account ID.
+2. **R2 → Manage API Tokens → Create token.** Permission **"Object Read & Write"**, scoped to that
+   one bucket — not an Admin token, which is account-wide and can create and delete buckets. The
+   app only ever reads, writes and deletes objects.
+3. Copy the **Access Key ID** and **Secret Access Key** it shows you. The secret is shown once and
+   cannot be retrieved afterwards; a lost one is replaced by issuing a new token.
+4. Set on the web service:
+   ```
+   STORAGE_S3_BUCKET=<bucket name>
+   STORAGE_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
+   STORAGE_S3_REGION=auto
+   STORAGE_S3_ACCESS_KEY_ID=<access key id>
+   STORAGE_S3_SECRET_ACCESS_KEY=<secret access key>
+   ```
+   Leave `STORAGE_S3_SSE` unset, and `STORAGE_S3_FORCE_PATH_STYLE` unset — R2 needs neither.
+   An EU-jurisdiction bucket uses `https://<account id>.eu.r2.cloudflarestorage.com` instead.
+5. Run `npm run verify:deployment`.
 
-Once it passes, do the second pass through the product, because the script exercises the storage
-seam and not the application path that uses it: upload a document to an audit, download it back, set
-that engagement to a terminal stage with a past purge date, and run
-`npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete through
-the real callers, which is the whole surface — and it is what lets the "not yet exercised against a
-real endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and
+Step 5 is what turns this from configured into proven, and it checks the thing most likely to be
+wrong: it **deletes** the object it wrote, so a token issued with read and write but not delete
+fails there rather than silently, months later, on the first retention purge that cannot remove a
+seller's contract it has already dropped the database row for.
+
+**What R2 changed in the code** (done, 2026-09-23, commit a9c9e4e): the backend used to send
+`x-amz-server-side-encryption: AES256` on every write. R2 does not implement that header and
+refuses the request, so the first upload would have failed. It is now off by default, which costs
+nothing: R2 encrypts every object at rest with AES-256-GCM unconditionally, and AWS S3 has done the
+same automatically since 2023-01-05. See `docs/security-posture.md` §4 for the accurate statement
+of what that does and does not buy.
+
+Once step 5 is green, do a second pass **through the product**, because the script exercises the
+storage seam and not the application paths that use it: upload a document to an audit, download it
+back, set that engagement to a terminal stage with a past purge date, and run
+`npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete
+through the real callers, which is the whole surface — and it is what lets the "not yet exercised
+against a real endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and
 `docs/security-posture.md` §4**.
 
 That last one is the one to not forget. The other three are internal; the posture document is what
