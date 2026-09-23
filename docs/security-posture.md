@@ -13,7 +13,7 @@ gaps into the open.
 **Every "not yet" below is deliberate and stated.** A posture document that lists only strengths is
 worse than none: the first reader who finds an omission stops believing the rest of it.
 
-Last reviewed: 2026-09-22. This document is only true on the date at the top — re-check it against
+Last reviewed: 2026-09-23. This document is only true on the date at the top — re-check it against
 the code before sending it to anyone.
 
 ---
@@ -144,10 +144,21 @@ choosing one is a decision the firm running this has not made.
   missing object is distinguishable from an unreadable one — and it has never stored a real byte.
   That is a claim and not yet a fact, and this sentence stays here until someone uploads, reads and
   purges a document through it.
-- **On S3, objects are written with server-side encryption on by default.** This is *provider*-managed:
-  the provider holds the key, so it protects against disk theft and the disposal of physical media,
-  and protects nothing against anyone who obtains our credentials. It does not close the
-  application-managed-encryption gap below, which needs a key-management decision nobody has made.
+- **On object storage, encryption at rest is the provider's and is not requested per object.** The
+  application does not send an encryption header, and does not need to: Cloudflare R2 encrypts every
+  object with AES-256-GCM automatically, with no configuration and no documented opt-out, and Amazon
+  S3 has applied SSE-S3 (AES-256) to every new upload on every bucket since 5 January 2023. The
+  header is in fact *refused* by R2, which lists it as unsupported — so requesting it was both
+  unnecessary and, on the provider actually chosen, a guaranteed failure on the first upload. Caught
+  before any credential existed, by reading the provider's documentation rather than discovering it
+  live.
+
+  What that buys is worth stating precisely, because "encrypted at rest" is the phrase most likely to
+  be over-read. It is *provider*-managed: the provider holds the key and can decrypt. It protects
+  against theft of a disk and against the disposal of physical media, and protects nothing whatever
+  against someone who obtains our credentials. It does not close the application-managed-encryption
+  gap in §8, which needs a key-management decision nobody has made. The one improvement over
+  requesting it per object is that an unconditional property cannot be forgotten by a future writer.
 - **On local storage, encryption at rest is whatever the volume provides.** In the currently
   documented production setup that is a mounted persistent disk: documents survive deploys, there is
   no redundancy, and the encryption is the substrate's. Running production on local storage without
