@@ -234,7 +234,11 @@ at a plausible compile time.
 Either way the conclusions are the same, and both are worth keeping:
 
 - **Do not run `npm run build` while a dev server is serving tests.** It is not isolated from the
-  dev server; they share `.next`.
+  dev server; they share `.next`. When two people (or two agent sessions) work one tree, that needs
+  a convention rather than care, because the damage lands in the *other* person's run and looks
+  like a bug in whatever they just wrote: whoever needs a production build says so, the other stops
+  their dev server, and it is taken in turns. Nothing shares `.next` safely, so there is no
+  cleverer arrangement than that.
 - **Do not raise the transaction timeout to make this go away.** Five seconds is a reasonable alarm
   for transactions that should take milliseconds, and what it is reporting is an artifact of the
   environment rather than anything the production path does. CI has never seen it, because CI runs
