@@ -94,6 +94,24 @@ otherwise report directly to the user as plain findings with file/line and concr
 - Put the check before any write the request causes. A refused request must not leave a view in an
   access trail a consultant reads.
 
+**Any change to what is visible outside the firm — a repository going public, a document leaving
+`docs/`, a bucket policy, a shared link**:
+- **Read what is IN it, not what patterns it contains.** "Is this safe to publish" has at least three
+  answers — credentials, personal data about third parties, and strategy — and only the first is a
+  regex. This repository was made public for about two minutes on 2026-09-23 after a secret scan of
+  every tracked file and the full history came back clean, which it was: `.env` never tracked, no
+  key or token anywhere. What the scan could not see was `docs/gtm/prospects.md` — some 48 named
+  firms and individuals with phone numbers, emails and candid assessments — plus drafted pitches to
+  named people and a teardown of a real business listing. Thirty seconds reading the directory
+  listing would have caught it; a correct and complete check for the wrong category did not.
+- The harm here lands on people who never agreed to be in the repository, and on the founder's first
+  outreach to each of them. It cannot be un-indexed. So the order is fixed: read, then move or purge
+  anything that fails the three questions, *then* change visibility — never the reverse, because
+  "after" is after indexing.
+- A visibility change chosen as a workaround for something else — an access grant, a connector, a
+  convenience — deserves the question "what is the ordinary path, and how long does it actually
+  take?" asked out loud before proceeding. Here the ordinary path was a one-minute GitHub App grant.
+
 **Any change touching credentials, live logins, or anything that looks like Tier C automation**
 (`spec.md` §4):
 - The product decision is **no live credential storage or proxying in v1**. Any code that accepts,
