@@ -30,11 +30,24 @@ import {
   storageBackend,
 } from "../src/lib/storage/objectStore";
 
-type Result = { ok: boolean; label: string; detail?: string };
+/**
+ * A failure's remedy, and where it sits in the dependency chain.
+ *
+ * A flat list of failures is the wrong output here, because these failures are not independent.
+ * Four of them (docs/BLOCKED.md items 1-4) are a chain: the Stripe webhook secret cannot exist
+ * before there is a public URL to register an endpoint against, and neither can the email domain
+ * test. An operator reading eight FAILs has to reconstruct that ordering from the runbook, and the
+ * obvious reading — work down the list — starts with the one that cannot be finished yet.
+ *
+ * Lower `priority` means "do this one first". The numbers are gaps of ten so a later check can be
+ * slotted between two without renumbering.
+ */
+type Next = { priority: number; action: string };
+type Result = { ok: boolean; label: string; detail?: string; next?: Next };
 const results: Result[] = [];
 
-function record(ok: boolean, label: string, detail?: string) {
-  results.push({ ok, label, detail });
+function record(ok: boolean, label: string, detail?: string, next?: Next) {
+  results.push({ ok, label, detail, next });
   const mark = ok ? "PASS" : "FAIL";
   console.log(`  ${mark}  ${label}${detail ? `\n          ${detail}` : ""}`);
 }
@@ -122,6 +135,12 @@ async function checkDatabaseRoles() {
         usesDevPassword
           ? `${role} still uses the password prisma/migrations creates it with, which is in the repository. Run scripts/rotate-production-role-passwords.ts.`
           : undefined,
+        {
+          priority: 20,
+          action:
+            "Run npm run db:rotate-production-role-passwords, then update the connection strings " +
+            "on the service. Until then the database is reachable by anyone who has read this repo.",
+        },
       );
     }
 
@@ -143,7 +162,10 @@ async function checkSchemaAndIsolation(direct: PrismaClient) {
   const pending = await direct.$queryRaw<{ n: bigint }[]>`
     SELECT COUNT(*) AS n FROM "_prisma_migrations" WHERE finished_at IS NULL
   `.catch(() => null);
-  record(pending !== null && Number(pending[0]?.n ?? 0) === 0, "No unfinished migrations");
+  record(pending !== null && Number(pending[0]?.n ?? 0) === 0, "No unfinished migrations", undefined, {
+    priority: 10,
+    action: "Run npx prisma migrate deploy. Schema the code expects may not be there yet.",
+  });
 
   /**
    * Every org-owned table must be isolated, and there are TWO legitimate ways to do it.
@@ -177,6 +199,13 @@ async function checkSchemaAndIsolation(direct: PrismaClient) {
     unprotected.length
       ? `Neither: ${unprotected.map((r) => r.relname).join(", ")}. These are readable across tenants.`
       : undefined,
+    {
+      priority: 1,
+      action:
+        "Do not serve traffic. A table listed there returns other firms' rows to any signed-in " +
+        "user. Add its RLS policy to a migration (copy the shape from an existing table in " +
+        "prisma/migrations), or revoke SELECT from the app role if it is write-only telemetry.",
+    },
   );
 }
 
@@ -219,7 +248,26 @@ async function checkStorage() {
     await assertStorageUsable();
     record(true, "Storage backend is reachable");
   } catch (err) {
-    record(false, "Storage backend is reachable", err instanceof Error ? err.message : String(err));
+    /**
+     * The remedy belongs HERE as well as on the round trip below, not only there.
+     *
+     * This branch returns, so when the backend is unreachable the round-trip check never runs and
+     * never records its remedy. The first run of this tool against a bad bucket proved what that
+     * costs: storage failed, carried no remedy, was skipped by the ordering, and the summary told
+     * the operator to start with the Stripe webhook secret — the one item on the list they cannot
+     * obtain yet. A check that fails without saying what to do is invisible to anything that tries
+     * to sequence the failures.
+     */
+    record(false, "Storage backend is reachable", err instanceof Error ? err.message : String(err), {
+      priority: 40,
+      action:
+        storageBackend().kind === "s3"
+          ? 'docs/BLOCKED.md item 4 ("Object storage"). Check STORAGE_S3_BUCKET, the credentials, the ' +
+            "region and the " +
+            "endpoint. Nothing can be uploaded or read back until this answers."
+          : "Check that the local storage directory exists and is writable by the service user. In " +
+            "production it must be a mounted persistent volume, or documents vanish on redeploy.",
+    });
     return;
   }
 
@@ -228,6 +276,13 @@ async function checkStorage() {
       false,
       "Production storage has been acknowledged",
       "Running on local disk. Supported only if that path is a mounted persistent volume; it gives no encryption at rest and no redundancy. Set STORAGE_ACKNOWLEDGE_LOCAL=true once you have confirmed the mount, or configure STORAGE_S3_BUCKET.",
+      {
+        priority: 45,
+        action:
+          'docs/BLOCKED.md item 4 ("Object storage") — decide the provider. Either configure ' +
+          "STORAGE_S3_BUCKET, or " +
+          "confirm the local path is a mounted volume and set STORAGE_ACKNOWLEDGE_LOCAL=true.",
+      },
     );
   }
 
@@ -250,7 +305,18 @@ async function checkStorage() {
     const outcome = await deleteObjectIfPresentAcrossOrgs(key);
     record(outcome === "deleted", "Deleted it again", outcome === "deleted" ? undefined : `Delete reported "${outcome}".`);
   } catch (err) {
-    record(false, "Storage round trip (write, read, delete)", err instanceof Error ? err.message : String(err));
+    record(
+      false,
+      "Storage round trip (write, read, delete)",
+      err instanceof Error ? err.message : String(err),
+      {
+        priority: 40,
+        action:
+          'docs/BLOCKED.md item 4 ("Object storage"). Check STORAGE_S3_BUCKET, the credentials and the ' +
+          "endpoint. " +
+          "A backend that accepts writes but fails this has documents going somewhere nobody can read them.",
+      },
+    );
   }
 }
 
@@ -264,7 +330,14 @@ async function checkBilling() {
   }
 
   record(!!process.env.STRIPE_WEBHOOK_SECRET, "STRIPE_WEBHOOK_SECRET is set",
-    process.env.STRIPE_WEBHOOK_SECRET ? undefined : "Without it the webhook route returns 503 and no subscription state is ever recorded.");
+    process.env.STRIPE_WEBHOOK_SECRET ? undefined : "Without it the webhook route returns 503 and no subscription state is ever recorded.",
+    {
+      priority: 50,
+      action:
+        'docs/BLOCKED.md item 1 ("Live-mode Stripe"). Register the endpoint at ' +
+        "https://<host>/api/stripe/webhook in the Stripe dashboard and copy its signing secret. " +
+        'Needs a deployed public URL first (item 3, "Production deployment").',
+    });
 
   if (isProduction) {
     record(key.startsWith("sk_live_"), "Stripe key is live-mode in production",
@@ -319,7 +392,13 @@ async function checkEmail() {
   const verified = (body.data ?? []).filter((d) => d.status === "verified");
   record(verified.length > 0, "At least one sending domain is verified",
     verified.length ? verified.map((d) => d.name).join(", ")
-      : "Until a domain is verified, Resend delivers only to the account owner's own address — so a stranger never receives an invite, which is exactly the Phase 2.5 exit criterion.");
+      : "Until a domain is verified, Resend delivers only to the account owner's own address — so a stranger never receives an invite, which is exactly the Phase 2.5 exit criterion.",
+    {
+      priority: 60,
+      action:
+        'docs/BLOCKED.md item 2 ("Resend"). Add Resend\'s DNS records for a domain you control, then set ' +
+        "EMAIL_FROM to an address on it. Needs a domain, which usually means item 3 first.",
+    });
 }
 
 async function main() {
@@ -347,6 +426,34 @@ async function main() {
   if (failed.length) {
     console.log("\nFailed:");
     for (const f of failed) console.log(`  - ${f.label}`);
+
+    // The failures that have a known remedy, hardest-blocking first. Working down the printed list
+    // instead would start an operator on the Stripe webhook secret, which cannot be obtained until
+    // the deployment they have not made yet exists.
+    const actionable = failed
+      .filter((f): f is Result & { next: Next } => f.next !== undefined)
+      .sort((a, b) => a.next.priority - b.next.priority);
+    if (actionable.length) {
+      console.log("\nStart here:");
+      console.log(`  ${actionable[0].label}`);
+      console.log(`  ${actionable[0].next.action}`);
+      if (actionable.length > 1) {
+        console.log(`\nThen: ${actionable.slice(1).map((f) => f.label).join("; ")}`);
+      }
+    }
+
+    // A failure nobody wrote a remedy for must still be visible. Printing "Start here" over a list
+    // that quietly omits some failures is worse than printing no guidance at all, because it reads
+    // as a complete ordering.
+    const unscripted = failed.filter((f) => f.next === undefined);
+    if (unscripted.length) {
+      console.log(
+        `\nAlso failing, with no scripted remedy — read the detail above: ${unscripted
+          .map((f) => f.label)
+          .join("; ")}`,
+      );
+    }
+
     console.log("\nThis does not check the launch gates in docs/releases.md §5 — those need evidence a");
     console.log("human produces (a real charge, a real refund, a stranger receiving an invite).");
     process.exitCode = 1;

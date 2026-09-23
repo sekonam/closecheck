@@ -139,7 +139,32 @@ first "Apply Blueprint" click are yours.
     before the retention default existed keep their documents indefinitely — nobody would ever
     re-save them, so nothing else would set a date (`docs/spec.md` §8).
 
-12. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
+12. **Verify the deployment** — one command, from an environment holding the production
+    variables:
+    ```
+    npm run verify:deployment
+    ```
+    It re-checks the steps above by exercising them rather than reading configuration: connects as
+    all five narrow roles, confirms every org-owned table is actually isolated, checks the published
+    template version against the newest one, writes and reads back and deletes a real object through
+    the storage backend, retrieves every `STRIPE_PRICE_*` id from the Stripe account the key belongs
+    to, and calls Resend.
+
+    Most of what it catches is silent on a running server — a role left on the password the
+    migrations put in this repository, a template published two versions behind, a bucket that
+    accepts writes nobody can read back, a test-mode price id left behind after switching to live.
+    The app boots and serves in every one of those states.
+
+    It exits non-zero on failure and prints a **Start here** line naming which failure to fix first,
+    because these failures are not independent — the Stripe webhook secret cannot be obtained before
+    there is a public URL to register an endpoint against.
+
+    It is safe to re-run against production at any time. It reads, and writes one object under a
+    reserved prefix which it deletes. It prints no secrets — only whether each one is present and
+    whether it works. It does **not** check the launch gates in `docs/releases.md` §5, which need
+    evidence a person produces.
+
+13. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
     create an engagement, start an audit, run Tier A checks, generate a report.
 
 ## Ongoing deploys
@@ -148,6 +173,11 @@ Every subsequent push runs `preDeployCommand` (`prisma migrate deploy`) automati
 version takes traffic — no manual steps needed unless a migration adds a new narrow-privilege role
 (rare; five roles exist today — app/auth/signup/portal/api), which would need step 6 repeated for
 the new role.
+
+`npm run verify:deployment` (step 12) is worth re-running after any deploy that adds a model, a
+role, or a template version — those are the three changes whose deployment step is easy to skip and
+whose omission the running app does not report. It takes a few seconds and is safe against
+production.
 
 ## Local development: restart the dev server after a schema change
 

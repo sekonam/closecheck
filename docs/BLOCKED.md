@@ -8,7 +8,7 @@ complete in `docs/roadmap.md` or checked off in `docs/releases.md` §5 on the st
 existing — several of these gates are specifically worded to refuse that (`releases.md` §5:
 "demonstrated by an actual cross-org request test, not code inspection alone").
 
-Last reviewed: 2026-09-22.
+Last reviewed: 2026-09-23.
 
 ---
 
@@ -29,7 +29,8 @@ zero. The chain works.
   amounts currently configured are Solo $35/mo + $348/yr and per-additional-seat $25/mo + $249/yr —
   see `src/lib/billing/config.ts` for why the Team vars are per-seat, not per-plan.
 - Register the production webhook endpoint (`https://<host>/api/stripe/webhook`) and set
-  `STRIPE_WEBHOOK_SECRET` from it. **This needs a deployed public URL first — see item 3.**
+  `STRIPE_WEBHOOK_SECRET` from it. **This needs a deployed public URL first — see item 3
+  ("Production deployment").**
 - Run one real charge and one real refund, in live mode, and confirm the receipt email arrives.
 
 **One thing to check in the Stripe dashboard while you are there:** the customer billing portal's
@@ -69,8 +70,8 @@ this is a real blocker and not a formality.
 (`deployment.md` says plainly that this should not be automated on anyone's behalf, and that stands).
 Everything after the first "Apply Blueprint" click is scripted.
 
-**Blocks:** item 1's webhook endpoint, item 2's end-to-end email test, and any GTM step that needs a
-URL to point at.
+**Blocks:** item 1's webhook endpoint ("Live-mode Stripe"), item 2's end-to-end email test
+("Resend"), and any GTM step that needs a URL to point at.
 
 ---
 
@@ -87,12 +88,20 @@ waits on a decision you could make in an afternoon, and then a credential. No ef
 the others; a choice unblocks this one.
 
 **What only you can do:** pick a provider, create a bucket, and set `STORAGE_S3_BUCKET` plus its
-credentials (see `.env.example`). Then run the five-minute exercise in `deployment.md`: upload a
-document to an audit, download it back, set that engagement to a terminal stage with a past purge
-date, and run `npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and
-delete, which is the whole surface — and it is what lets the "not yet exercised against a real
-endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and `docs/security-posture.md`
-§4**.
+credentials (see `.env.example`).
+
+Then prove it works, in two passes. `npm run verify:deployment` does the first in a few seconds: it
+writes a real object through the configured backend, reads it back, compares the bytes and deletes
+it. If that fails, nothing below is worth attempting — and it tells you so, with the bucket,
+credentials, region and endpoint named as the things to check.
+
+Once it passes, do the second pass through the product, because the script exercises the storage
+seam and not the application path that uses it: upload a document to an audit, download it back, set
+that engagement to a terminal stage with a past purge date, and run
+`npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete through
+the real callers, which is the whole surface — and it is what lets the "not yet exercised against a
+real endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and
+`docs/security-posture.md` §4**.
 
 That last one is the one to not forget. The other three are internal; the posture document is what
 gets sent to a firm's security reviewer. A caveat left standing there after it stopped being true
@@ -130,8 +139,10 @@ free-sample-audit offer.
 
 **What only the founder can do:** decide between a DueDilio-style marketplace listing, continued
 direct outreach, and the ranked alternatives in `research/promotion.md`. The gate explicitly requires
-this be decided *from evidence about where design partners actually came from*, which means item 4
-comes first. Not a code task and not one to default into.
+this be decided *from evidence about where design partners actually came from*, which means item 5
+("Design partners") comes first. It said item 4 until 2026-09-23, which was correct until object
+storage was inserted above it and moved design partners down by one — hence the titles alongside
+the numbers here and below. Not a code task and not one to default into.
 
 ---
 
