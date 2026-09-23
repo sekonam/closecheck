@@ -54,18 +54,54 @@ export function s3BackendDescription(): string {
 }
 
 /**
- * Server-side encryption, on by default.
+ * Whether to send `x-amz-server-side-encryption: AES256`. OFF unless explicitly asked for.
  *
- * This is PROVIDER-managed, not application-managed: the provider holds the key and can therefore
- * decrypt. It closes the "documents sit in plaintext on a volume" hole and does NOT close
- * docs/security-posture.md §4's "no application-managed encryption at rest", which needs a
- * key-management decision nobody has made. Recorded precisely rather than generously, because
- * overstating a control in a posture document is worse than omitting one.
+ * It defaulted to ON, which was wrong in a way that took a real provider choice to expose.
  *
- * Set STORAGE_S3_SSE=none for a backend that rejects the header (some MinIO configurations).
+ * On **Cloudflare R2** — the provider actually chosen — the header is REJECTED. R2's S3
+ * compatibility page lists `x-amz-server-side-encryption` as unsupported on PutObject (SSE-C is
+ * supported; AWS-managed SSE is not), so the default made the very first upload fail. That is the
+ * hazard the "NOT YET EXERCISED AGAINST A REAL ENDPOINT" caveat on this file was warning about,
+ * and it is worth naming its shape: not a bug in the code, but a default that is correct for AWS
+ * and wrong for the provider in front of it.
+ *
+ * On **AWS S3** the header buys nothing either, which is the fact that settles the design. Since
+ * 2023-01-05 S3 applies SSE-S3 (AES-256-GCM) as the base level of encryption to every new object
+ * in every bucket, automatically. Sending the header asks for precisely the encryption AWS has
+ * already applied.
+ *
+ * On **R2** encryption at rest is likewise unconditional — AES-256-GCM under Cloudflare-managed
+ * keys, documented as requiring no user configuration and offering no opt-out.
+ *
+ * So on both providers the property holds whether or not this header is sent, and on one of them
+ * sending it fails the request. Defaulting it on could only break things. Defaulting it off is not
+ * a weakening; it stops asking for something that is already true.
+ *
+ * It stays configurable for the one case where it is load-bearing: a bucket policy that DENIES
+ * uploads lacking the header (AWS documents exactly that policy). Set STORAGE_S3_SSE=AES256 there.
+ *
+ * NOTE ON WHAT THIS IS NOT. Provider-managed encryption means the provider holds the key and can
+ * therefore decrypt. It does NOT close docs/security-posture.md §4's "no application-managed
+ * encryption at rest", which needs a key-management decision nobody has made. Recorded precisely
+ * rather than generously, because overstating a control in a posture document is worse than
+ * omitting one.
  */
 function serverSideEncryption(): "AES256" | undefined {
-  return process.env.STORAGE_S3_SSE === "none" ? undefined : "AES256";
+  const requested = process.env.STORAGE_S3_SSE?.trim();
+  if (!requested) return undefined;
+  if (requested.toLowerCase() === "none") return undefined;
+  if (requested.toUpperCase() === "AES256") return "AES256";
+
+  /**
+   * An unrecognised value refuses rather than guesses, because the old `=== "none" ? off : on`
+   * test failed open in the direction nobody would check: STORAGE_S3_SSE=off, =false or =disabled
+   * all read as "not the string none" and therefore turned encryption ON — the opposite of what
+   * was written, silently, on a setting whose whole purpose is to be read later and believed.
+   */
+  throw new Error(
+    `STORAGE_S3_SSE is set to "${requested}", which is not a value this understands. ` +
+      `Use "AES256" to send the header, or "none" (or leave it unset) not to.`,
+  );
 }
 
 /**

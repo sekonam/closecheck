@@ -264,12 +264,27 @@ STORAGE_S3_ACCESS_KEY_ID=...           # omit both to use an instance role inste
 STORAGE_S3_SECRET_ACCESS_KEY=...
 ```
 
+Do **not** set `STORAGE_S3_SSE`. It is off by default and should stay that way unless a bucket
+policy specifically denies uploads that lack the `x-amz-server-side-encryption` header.
+
+That default was the other way round until 2026-09-23, and it is worth saying why it changed,
+because the reasoning is what tells you whether to override it. **Cloudflare R2 rejects that header
+outright** — its S3 compatibility page lists it as unsupported on PutObject, SSE-C only — so a
+default of "always send it" made the first upload against R2 fail. And on **AWS S3 the header buys
+nothing**: since 2023-01-05 S3 encrypts every new object with SSE-S3 (AES-256-GCM) automatically,
+in every bucket. R2 likewise encrypts at rest unconditionally, with no opt-out. On both providers
+the property holds either way; on one of them, asking for it fails the request.
+
 Written against the S3 protocol rather than a named provider, so AWS S3, Cloudflare R2, Backblaze
 B2, DigitalOcean Spaces and MinIO all work. The provider decision is an endpoint and a credential.
 
 **It has not been run against a live bucket.** No credentials exist yet, so the first deployment to
-configure one is also the first exercise of it. Round-trip a single file before trusting it with a
-real engagement — upload a document to an audit, download it back, then set that engagement to a
+configure one is also the first exercise of it. Run `npm run verify:deployment` first — it writes,
+reads back, byte-compares and deletes a real object through whichever backend is configured, and
+will tell you in seconds if the bucket, credentials, region or endpoint are wrong.
+
+Then round-trip a file through the product itself, because that exercises the callers rather than
+the storage seam — upload a document to an audit, download it back, then set that engagement to a
 terminal stage with a past purge date and run
 `npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete, which
 is the whole surface. The code's own docstring carries the same caveat and should lose it once this

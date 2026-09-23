@@ -62,6 +62,11 @@ describe("the S3 backend's requests, unmocked", () => {
   }
 
   it("puts the object at bucket/key, signed, with the encryption header actually present", async () => {
+    // Opt in explicitly: the default is now OFF, because Cloudflare R2 rejects this header and
+    // neither R2 nor AWS needs it to encrypt at rest. This test still earns its place — it is the
+    // one that proves the SDK parameter becomes a real wire header when it IS asked for, which is
+    // what a bucket policy demanding the header depends on.
+    process.env.STORAGE_S3_SSE = "AES256";
     await (await store()).put("org1/evidence/f1/Toast_MSA.pdf", Buffer.from("%PDF-1.4"), "application/pdf");
 
     expect(requests).toHaveLength(1);
@@ -75,7 +80,13 @@ describe("the S3 backend's requests, unmocked", () => {
     expect(req.headers["content-type"]).toBe("application/pdf");
   });
 
-  it("omits the encryption header when it is turned off", async () => {
+  it("omits the encryption header by default, which is what R2 requires", async () => {
+    delete process.env.STORAGE_S3_SSE;
+    await (await store()).put("org1/evidence/f1/x.pdf", Buffer.from("x"));
+    expect(requests[0].headers["x-amz-server-side-encryption"]).toBeUndefined();
+  });
+
+  it("omits it for an explicit none too", async () => {
     process.env.STORAGE_S3_SSE = "none";
     await (await store()).put("org1/evidence/f1/x.pdf", Buffer.from("x"));
     expect(requests[0].headers["x-amz-server-side-encryption"]).toBeUndefined();
@@ -88,6 +99,56 @@ describe("the S3 backend's requests, unmocked", () => {
     // The bucket itself, not a key under it — a pre-flight that HEADed an object would report a
     // perfectly good bucket as unusable whenever that object happened not to exist.
     expect(requests[0].url).toBe("/closecheck-docs/");
+  });
+
+  /**
+   * A stand-in for Cloudflare R2, which is the provider actually chosen.
+   *
+   * R2's S3 API does not implement `x-amz-server-side-encryption` on PutObject — its compatibility
+   * page lists it as unsupported, SSE-C only. This test encodes that constraint as something that
+   * runs, rather than as a sentence in a docstring that a future change to the default would not
+   * disturb. Against the previous default of "always send AES256", the first assertion here fails:
+   * the very first upload to R2 would have been rejected.
+   *
+   * It does not claim to be R2. It is one property of R2, held still so a regression has to trip
+   * over it.
+   */
+  describe("against a backend that refuses the encryption header, as R2 does", () => {
+    beforeEach(async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      requests = [];
+      server = createServer((req, res) => {
+        requests.push({ method: req.method!, url: req.url!, headers: req.headers });
+        req.resume();
+        if (req.headers["x-amz-server-side-encryption"] !== undefined) {
+          res.writeHead(501, { "Content-Type": "application/xml" });
+          res.end(
+            '<?xml version="1.0"?><Error><Code>NotImplemented</Code>' +
+              "<Message>Header not implemented</Message></Error>",
+          );
+          return;
+        }
+        res.writeHead(200, { "Content-Type": "application/xml" });
+        res.end('<?xml version="1.0"?><Result/>');
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const { port } = server.address() as AddressInfo;
+      process.env.STORAGE_S3_ENDPOINT = `http://127.0.0.1:${port}`;
+    });
+
+    it("uploads successfully with the default configuration", async () => {
+      await expect(
+        (await store()).put("org1/evidence/f1/Toast_MSA.pdf", Buffer.from("%PDF-1.4"), "application/pdf"),
+      ).resolves.toBeUndefined();
+      expect(requests[0].headers["x-amz-server-side-encryption"]).toBeUndefined();
+    });
+
+    it("fails if the header is switched on, which is why it is not the default", async () => {
+      process.env.STORAGE_S3_SSE = "AES256";
+      await expect(
+        (await store()).put("org1/evidence/f1/x.pdf", Buffer.from("x")),
+      ).rejects.toThrow();
+    });
   });
 
   it("heads the object before deleting, so absence is distinguishable", async () => {

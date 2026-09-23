@@ -159,19 +159,59 @@ describe("assertUsable", () => {
 });
 
 describe("server-side encryption", () => {
-  it("is requested by default", async () => {
+  /**
+   * The default is OFF. It was ON, and Cloudflare R2 — the provider actually chosen — rejects
+   * `x-amz-server-side-encryption` on PutObject, so the default made the first upload fail.
+   * AWS applies SSE-S3 to every new object automatically since 2023-01-05 and R2 encrypts at rest
+   * unconditionally, so the header is not carrying the property on either provider.
+   */
+  it("is not requested by default", async () => {
+    const store = await backend();
+    send.mockResolvedValue({});
+    await store.put("org1/evidence/f1/x.pdf", Buffer.from("x"), "application/pdf");
+    expect(send.mock.calls[0][0].input.ServerSideEncryption).toBeUndefined();
+  });
+
+  it("is sent when explicitly asked for, for a bucket policy that demands it", async () => {
+    process.env.STORAGE_S3_SSE = "AES256";
     const store = await backend();
     send.mockResolvedValue({});
     await store.put("org1/evidence/f1/x.pdf", Buffer.from("x"), "application/pdf");
     expect(send.mock.calls[0][0].input.ServerSideEncryption).toBe("AES256");
   });
 
-  it("can be turned off for a backend that rejects the header", async () => {
+  it("accepts an explicit none", async () => {
     process.env.STORAGE_S3_SSE = "none";
     const store = await backend();
     send.mockResolvedValue({});
     await store.put("org1/evidence/f1/x.pdf", Buffer.from("x"));
     expect(send.mock.calls[0][0].input.ServerSideEncryption).toBeUndefined();
+  });
+
+  /**
+   * The old test was `=== "none" ? off : on`, which read every other string as "on" — so
+   * STORAGE_S3_SSE=off turned encryption ON, the exact opposite of what the operator wrote, with
+   * nothing reporting it. A setting whose purpose is to be read back later and believed must not
+   * have a spelling that silently means its own negation.
+   */
+  it.each(["off", "false", "disabled", "AES-256", "aes 256", "sse-c", "true", "1"])(
+    "refuses the unrecognised value %j rather than guessing",
+    async (value) => {
+      process.env.STORAGE_S3_SSE = value;
+      const store = await backend();
+      send.mockResolvedValue({});
+      await expect(
+        store.put("org1/evidence/f1/x.pdf", Buffer.from("x")),
+      ).rejects.toThrow(/not a value this understands/);
+    },
+  );
+
+  it("is case- and whitespace-tolerant for the two values it does accept", async () => {
+    process.env.STORAGE_S3_SSE = " aes256 ";
+    const store = await backend();
+    send.mockResolvedValue({});
+    await store.put("org1/evidence/f1/x.pdf", Buffer.from("x"));
+    expect(send.mock.calls[0][0].input.ServerSideEncryption).toBe("AES256");
   });
 });
 
