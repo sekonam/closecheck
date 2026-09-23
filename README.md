@@ -140,6 +140,8 @@ actually holds rather than merely compiling. CI runs all five before it builds t
 
 ## Local object storage
 
-`src/lib/storage/local.ts` writes generated PDFs to `.local-storage/` (gitignored) instead of real
-object storage. Fine for local dev; replace before any real seller/buyer data touches this — see the
-comment at the top of that file and `docs/spec.md` §10.
+In development, uploaded evidence, logos and generated PDFs go to `.local-storage/` (gitignored)
+through the local-disk backend. Production uses Cloudflare R2 through the S3-compatible backend
+(`src/lib/storage/objectStore.ts` chooses; set `STORAGE_S3_BUCKET` to switch), and the app refuses
+to use local disk in production unless explicitly acknowledged — see `docs/deployment.md` "Object
+storage" and `docs/spec.md` §10.

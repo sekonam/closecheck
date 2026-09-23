@@ -242,7 +242,20 @@ async function checkTemplates(direct: PrismaClient) {
 async function checkStorage() {
   section("Object storage");
 
-  console.log(`  Backend: ${describeStorage()}`);
+  // describeStorage() resolves the backend, which in production refuses unacknowledged local disk
+  // by throwing. That refusal has to land as a recorded FAIL with its remedy, not as an uncaught
+  // exception three lines before the check that would have reported it.
+  try {
+    console.log(`  Backend: ${describeStorage()}`);
+  } catch (err) {
+    record(false, "Storage backend is configured", err instanceof Error ? err.message : String(err), {
+      priority: 40,
+      action:
+        'docs/BLOCKED.md item 4 ("Object storage"). Set the five STORAGE_S3_* variables, or ' +
+        "STORAGE_ACKNOWLEDGE_LOCAL=true if the local path really is a mounted volume.",
+    });
+    return;
+  }
 
   try {
     await assertStorageUsable();

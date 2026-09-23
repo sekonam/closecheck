@@ -1,31 +1,43 @@
 # Render Blueprint — see docs/deployment.md for the full first-deploy runbook (role password
 # rotation, template seeding, and the other manual steps a blueprint can't automate).
 #
-# Render, not Vercel: this app renders PDFs with a real headless Chromium (src/lib/reports/pdf.ts)
-# and stores uploaded evidence/logos on local disk (src/lib/storage/local.ts) — both need a
-# long-running container with a persistent volume, not a stateless serverless function.
+# Render, not Vercel: this app renders PDFs with a real headless Chromium (src/lib/reports/pdf.ts),
+# which needs a long-running container rather than a stateless serverless function.
+#
+# No persistent disk. Documents, logos and report PDFs go to Cloudflare R2 through the S3-compatible
+# backend (src/lib/storage/s3.ts) — the founder's provider decision of 2026-09-23. This blueprint
+# used to mount a 1 GB disk for the local-disk backend; with R2 that disk would be provisioned,
+# billed and never written to, and its presence would also rule out Render's zero-downtime deploys,
+# which a service with an attached disk cannot do. The local-disk backend still exists and still
+# works, but it is not what this file deploys. See docs/deployment.md "Object storage".
 services:
   - type: web
     name: closecheck
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter
-    disk:
-      name: closecheck-storage
-      mountPath: /app/.local-storage
-      sizeGB: 1
     preDeployCommand: npm run db:migrate:deploy
     envVars:
       - key: NODE_ENV
         value: production
-      # Pinned to the disk's mountPath above rather than left to the default. They currently
-      # coincide — the default is ./.local-storage and the mount is /app/.local-storage, with /app
-      # as the workdir — which means uploaded evidence survives a deploy by luck rather than by
-      # configuration. Change either one without the other and the app silently writes to the
-      # container's ephemeral filesystem, discarding every seller document on the next deploy.
-      # Setting it explicitly makes the two visibly one decision.
-      - key: STORAGE_ROOT_DIR
-        value: /app/.local-storage
+      # --- Object storage: Cloudflare R2, via the S3 API. All five are required; the app refuses
+      # to serve in production on local disk unless STORAGE_ACKNOWLEDGE_LOCAL=true is set, because
+      # without a mounted volume "local disk" here means the container's ephemeral filesystem and
+      # every seller document would vanish on the next deploy. The bucket and endpoint are not
+      # secrets but are still unsynced: they name the founder's Cloudflare account and belong with
+      # the credentials that go with them. Region is "auto" for R2, always.
+      # Token: named `closecheck-web-prod` in Cloudflare → R2 → Manage API Tokens, permission
+      # "Object Read & Write", scoped to this one bucket. Named so it can be found and rotated.
+      - key: STORAGE_S3_BUCKET
+        sync: false
+      - key: STORAGE_S3_ENDPOINT
+        sync: false
+      - key: STORAGE_S3_REGION
+        value: auto
+      - key: STORAGE_S3_ACCESS_KEY_ID
+        sync: false
+      - key: STORAGE_S3_SECRET_ACCESS_KEY
+        sync: false
       # Render terminates TLS and forwards one hop, so the client address is the last entry in
       # X-Forwarded-For. Stated rather than defaulted because getting it wrong in the permissive
       # direction lets a caller forge the address every rate limit is keyed on — both the API's and

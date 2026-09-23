@@ -109,8 +109,49 @@ let cached: StorageBackend | null = null;
  * environment, and so importing this module never fails on a machine with no storage configured.
  */
 export function storageBackend(): StorageBackend {
-  if (!cached) cached = isS3Configured() ? createS3Backend() : localBackend;
+  if (!cached) {
+    refuseUnacknowledgedLocalStorageInProduction();
+    cached = isS3Configured() ? createS3Backend() : localBackend;
+  }
   return cached;
+}
+
+/**
+ * Why this is a refusal and not a warning, and why it lives here rather than only at boot.
+ *
+ * It was a boot-time warning. That was defensible while render.yaml mounted a persistent disk:
+ * "local disk in production" then meant a real volume, documents survived deploys, and the warning
+ * was about encryption and redundancy — real gaps, but not data loss. The blueprint no longer
+ * mounts a disk, because the founder chose Cloudflare R2 (2026-09-23). From that point on, a
+ * production process that resolves to the local backend is writing seller contracts to the
+ * container's ephemeral filesystem, and every one of them is gone on the next deploy.
+ *
+ * A warning in a boot log is the silent path for that. Nobody reads a boot log on a deploy that
+ * came up green, uploads succeed, downloads succeed, and the loss is discovered by the first firm
+ * to open a two-week-old audit after a redeploy. So the check moves to where the harm happens:
+ * every storage operation resolves the backend through here, and in production with no object
+ * storage configured and no explicit acknowledgement, resolution fails with the reason.
+ *
+ * The acknowledgement is what keeps the legitimate case legitimate. Local-on-a-mounted-volume is
+ * still a supported configuration; an operator who has actually mounted one sets
+ * STORAGE_ACKNOWLEDGE_LOCAL=true and says so on purpose. What is no longer possible is drifting
+ * into ephemeral storage by leaving five variables unset.
+ */
+function refuseUnacknowledgedLocalStorageInProduction(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  if (isS3Configured()) return;
+  if (process.env.STORAGE_ACKNOWLEDGE_LOCAL === "true") return;
+  throw new Error(
+    `[storage] Refusing to use local disk in production (${localBackend.describe()}) without an ` +
+      `explicit acknowledgement.\n` +
+      `[storage] Without a mounted persistent volume that path is the container's ephemeral ` +
+      `filesystem, and every uploaded document would be lost on the next deploy. Documents are ` +
+      `meant to go to object storage: set STORAGE_S3_BUCKET, STORAGE_S3_ENDPOINT, STORAGE_S3_REGION, ` +
+      `STORAGE_S3_ACCESS_KEY_ID and STORAGE_S3_SECRET_ACCESS_KEY (docs/deployment.md, "Object storage").\n` +
+      `[storage] If that path really is a mounted persistent volume, set STORAGE_ACKNOWLEDGE_LOCAL=true. ` +
+      `What a volume still does not give you: encryption at rest beyond what the volume provides, and ` +
+      `redundancy — it is a single copy.`,
+  );
 }
 
 /** Test seam: forces the next call to re-read configuration. */
@@ -158,7 +199,15 @@ export function assertKeyBelongsToOrg(orgId: string, key: string): void {
  * uses the explicitly-named function at the bottom of this file, the same shape as
  * src/lib/db/scoped.ts naming that script as RLS's single documented exception.
  */
-export function putObject(
+/**
+ * Every operation below is `async` even where it only forwards to the backend, so that a failure
+ * to RESOLVE the backend — the production refusal of unacknowledged local disk — and a failure of
+ * the tenancy guard both arrive as rejections. They used to throw synchronously out of a
+ * Promise-returning function, which a caller chaining `.catch()` never sees and which the
+ * `rejects` matcher in a test cannot observe either. A function that returns a promise should
+ * fail through it.
+ */
+export async function putObject(
   orgId: string,
   key: string,
   data: Buffer,
@@ -167,15 +216,15 @@ export function putObject(
   assertKeyBelongsToOrg(orgId, key);
   return storageBackend().put(key, data, contentType);
 }
-export function getObject(orgId: string, key: string): Promise<Buffer> {
+export async function getObject(orgId: string, key: string): Promise<Buffer> {
   assertKeyBelongsToOrg(orgId, key);
   return storageBackend().get(key);
 }
-export function deleteObject(orgId: string, key: string): Promise<void> {
+export async function deleteObject(orgId: string, key: string): Promise<void> {
   assertKeyBelongsToOrg(orgId, key);
   return storageBackend().delete(key);
 }
-export function objectExists(orgId: string, key: string): Promise<boolean> {
+export async function objectExists(orgId: string, key: string): Promise<boolean> {
   assertKeyBelongsToOrg(orgId, key);
   return storageBackend().exists(key);
 }
@@ -189,10 +238,10 @@ export function objectExists(orgId: string, key: string): Promise<boolean> {
  * getObject and its required org; if a new caller seems to want this, the question to ask is which
  * org it is acting for, not how to bypass the argument.
  */
-export function deleteObjectIfPresentAcrossOrgs(key: string): Promise<"deleted" | "missing"> {
+export async function deleteObjectIfPresentAcrossOrgs(key: string): Promise<"deleted" | "missing"> {
   return storageBackend().deleteIfPresent(key);
 }
-export function assertStorageUsable(): Promise<void> {
+export async function assertStorageUsable(): Promise<void> {
   return storageBackend().assertUsable();
 }
 export function describeStorage(): string {
@@ -217,23 +266,32 @@ export { evidenceKey, orgLogoKey, reportPdfKey, storageRoot } from "./local";
  *
  * STORAGE_ACKNOWLEDGE_LOCAL=true silences it — an explicit act rather than a default to drift into.
  */
-export function warnIfProductionStorageIsLocal(): void {
+/**
+ * Boot-time report of the storage decision. Resolves the backend once so that a production
+ * process which would be refused says so in its first lines of log, at error level, rather than
+ * on its first upload — and so that a correctly configured one names where documents go.
+ *
+ * Logs rather than throws, deliberately: what Next does with an exception thrown from
+ * instrumentation's register() has not been verified here, and the refusal does not depend on it —
+ * storageBackend() enforces it on every operation. This is the early, visible copy of that
+ * message, not the enforcement.
+ */
+export function reportStorageBackendAtBoot(): void {
   if (process.env.NODE_ENV !== "production") return;
-  if (storageBackend().kind !== "local") return;
-  if (process.env.STORAGE_ACKNOWLEDGE_LOCAL === "true") return;
-
-  // Names what is actually missing rather than warning generically. An operator who mounted the
-  // volume correctly and then reads a warning implying they did not will either ignore it from
-  // then on, or "fix" something that was already right. Persistence is solved by the mount; what
-  // the mount cannot give is encryption at rest or redundancy.
-  console.warn(
-    `[storage] Running in production on ${describeStorage()}.\n` +
-      `[storage] If that path is a mounted persistent volume, documents survive deploys and this ` +
-      `is the supported configuration — no action needed beyond acknowledging it.\n` +
-      `[storage] What it does not give you, either way: encryption at rest is whatever the volume ` +
-      `provides rather than application-managed, and there is no redundancy — the volume is a ` +
-      `single copy.\n` +
-      `[storage] Configure STORAGE_S3_BUCKET for object storage, or set ` +
-      `STORAGE_ACKNOWLEDGE_LOCAL=true once you have confirmed the mount.`,
-  );
+  try {
+    const backend = storageBackend();
+    if (backend.kind === "local") {
+      // Acknowledged local disk — the only way to get here. Say what it costs, once.
+      console.warn(
+        `[storage] Running in production on ${backend.describe()}, acknowledged via ` +
+          `STORAGE_ACKNOWLEDGE_LOCAL. Encryption at rest is whatever the volume provides, and ` +
+          `there is no redundancy — the volume is a single copy.`,
+      );
+    } else {
+      console.log(`[storage] ${backend.describe()}`);
+    }
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    console.error("[storage] Every upload, download and purge will fail until this is resolved.");
+  }
 }

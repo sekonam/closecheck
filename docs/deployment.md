@@ -12,15 +12,18 @@ Two things about this app don't fit a stateless serverless platform:
   Playwright. That needs a full Chromium binary installed in the runtime image and a process that
   can actually launch it — awkward-to-impossible within typical serverless function size/runtime
   constraints.
-- **Evidence/logo storage** (`src/lib/storage/local.ts`) currently writes to local disk — an
-  explicit, flagged placeholder for real object storage (see that file's docstring), not yet built.
-  Local disk only persists across requests on a platform with a long-running container and a
-  persistent volume, not a stateless function whose filesystem resets per-invocation.
+- **Evidence/logo/report storage** goes to Cloudflare R2 through the S3-compatible backend
+  (`src/lib/storage/objectStore.ts`, "Object storage" below). The local-disk backend still exists
+  for development and for an operator who deliberately mounts a volume, but the app **refuses** to
+  use it in production unless `STORAGE_ACKNOWLEDGE_LOCAL=true` is set — an unmounted container
+  filesystem loses every document on the next deploy, and a warning in a boot log was the silent
+  path to that.
 
-Render, Fly.io, Railway, or a plain VPS all work — anything that runs a container long-lived with an
-attachable persistent disk. This runbook assumes Render specifically (`render.yaml` at repo root is
-a Render Blueprint), since it bundles Docker + persistent disk + managed Postgres in one place with
-infrastructure-as-code support.
+Render, Fly.io, Railway, or a plain VPS all work — anything that runs a long-lived container. This
+runbook assumes Render specifically (`render.yaml` at repo root is a Render Blueprint), since it
+bundles Docker + managed Postgres in one place with infrastructure-as-code support. No persistent
+disk is attached: with R2 it would be billed and never written to, and a service with a disk cannot
+take Render's zero-downtime deploys.
 
 ## What this runbook cannot do for you
 
@@ -36,7 +39,7 @@ first "Apply Blueprint" click are yours.
    Postgres instance.
 2. **Before applying**, note Render's plan pricing for the `starter` web service plan and
    `basic-256mb` Postgres plan (check current pricing at render.com/pricing — this repo doesn't hold
-   a live price). Neither has a permanent free tier once a persistent disk is attached.
+   a live price). Neither has a permanent free tier.
 3. **Apply the blueprint.** The web service's first deploy will fail health checks or crash on any
    DB-touching request — that's expected, because steps 4–6 haven't run yet.
 4. **Set `DIRECT_DATABASE_URL`** on the web service to the new database's *Internal Connection
@@ -289,11 +292,16 @@ The app writes uploaded evidence, brand logos and generated report PDFs through 
 boundary (`src/lib/storage/objectStore.ts`) with two backends. **Local disk is the default and
 needs no configuration.** Naming a bucket switches to object storage; nothing else changes.
 
-Local-on-a-mounted-volume is a supported production configuration — `render.yaml` mounts a
-persistent disk and pins `STORAGE_ROOT_DIR` to it. What a mount cannot give you is encryption at
-rest beyond whatever the volume provides, or any redundancy: the volume is a single copy. The app
-says so once at boot in production, and `STORAGE_ACKNOWLEDGE_LOCAL=true` silences it after you have
-confirmed the mount.
+Local-on-a-mounted-volume remains a supported production configuration for an operator who
+attaches a disk themselves and points `STORAGE_ROOT_DIR` at its mount — but `render.yaml` no longer
+does that, and the app will not drift into it. In production with no `STORAGE_S3_BUCKET` set, every
+storage operation is **refused** with the reason and the remedy until either the five `STORAGE_S3_*`
+variables are set or `STORAGE_ACKNOWLEDGE_LOCAL=true` says, on purpose, that the local path is a
+real volume. What a mount cannot give you either way is encryption at rest beyond whatever the
+volume provides, or any redundancy: the volume is a single copy. That was a boot-time warning while
+the blueprint mounted a disk; once it stopped, "local disk in production" came to mean the
+container's ephemeral filesystem, and a log line nobody reads on a green deploy is not a safeguard
+against losing every seller contract on the next one.
 
 To move to object storage, set on the web service:
 

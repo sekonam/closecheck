@@ -63,49 +63,58 @@ describe("backend selection", () => {
   });
 });
 
-describe("the production-on-local-disk warning", () => {
-  function captureWarn() {
-    return vi.spyOn(console, "warn").mockImplementation(() => {});
-  }
-
-  it("says nothing outside production", async () => {
-    const warn = captureWarn();
+describe("local disk in production is refused unless acknowledged", () => {
+  /**
+   * This was a boot-time warning while render.yaml mounted a persistent disk. The blueprint no
+   * longer does — documents go to R2 — so an unconfigured production process would be writing
+   * seller contracts to the container's ephemeral filesystem, and a warning in a boot log is the
+   * silent path to losing all of them on the next deploy. The refusal is enforced where every
+   * storage operation resolves its backend, not only at boot.
+   */
+  it("is not enforced outside production", async () => {
     const mod = await fresh();
-    mod.warnIfProductionStorageIsLocal();
-    expect(warn).not.toHaveBeenCalled();
+    expect(mod.storageBackend().kind).toBe("local");
   });
 
-  it("says nothing when object storage is configured", async () => {
+  it("does not apply when object storage is configured", async () => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.STORAGE_S3_BUCKET = "closecheck-prod";
-    const warn = captureWarn();
     const mod = await fresh();
-    mod.warnIfProductionStorageIsLocal();
-    expect(warn).not.toHaveBeenCalled();
+    expect(mod.storageBackend().kind).toBe("s3");
   });
 
-  it("warns in production on local disk, naming what is actually missing", async () => {
+  it("refuses every operation in production on unacknowledged local disk, saying why", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    const warn = captureWarn();
     const mod = await fresh();
-    mod.warnIfProductionStorageIsLocal();
-
-    expect(warn).toHaveBeenCalledTimes(1);
-    const text = String(warn.mock.calls[0][0]);
-    // The two things a mounted volume cannot give you.
-    expect(text).toMatch(/[Ee]ncryption at rest/);
-    expect(text).toMatch(/redundancy/);
-    // And it must NOT tell a correctly-mounted operator their setup is broken.
-    expect(text).toMatch(/supported configuration/);
+    expect(() => mod.storageBackend()).toThrow(/Refusing to use local disk in production/);
+    // The message has to carry the remedy, because the operator reading it is mid-deploy.
+    expect(() => mod.storageBackend()).toThrow(/STORAGE_S3_BUCKET/);
+    expect(() => mod.storageBackend()).toThrow(/STORAGE_ACKNOWLEDGE_LOCAL=true/);
+    // And it reaches the operations, not only the resolver.
+    await expect(mod.putObject("org1", "org1/x.txt", Buffer.from("x"))).rejects.toThrow(/Refusing/);
+    await expect(mod.getObject("org1", "org1/x.txt")).rejects.toThrow(/Refusing/);
+    await expect(mod.assertStorageUsable()).rejects.toThrow(/Refusing/);
   });
 
-  it("can be acknowledged once the mount has been confirmed", async () => {
+  it("is lifted by an explicit acknowledgement, which then names the cost once at boot", async () => {
     vi.stubEnv("NODE_ENV", "production");
     process.env.STORAGE_ACKNOWLEDGE_LOCAL = "true";
-    const warn = captureWarn();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const mod = await fresh();
-    mod.warnIfProductionStorageIsLocal();
-    expect(warn).not.toHaveBeenCalled();
+    expect(mod.storageBackend().kind).toBe("local");
+    mod.reportStorageBackendAtBoot();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const text = String(warn.mock.calls[0][0]);
+    expect(text).toMatch(/[Ee]ncryption at rest/);
+    expect(text).toMatch(/redundancy/);
+  });
+
+  it("reports the refusal at boot at error level without throwing out of the boot hook", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mod = await fresh();
+    expect(() => mod.reportStorageBackendAtBoot()).not.toThrow();
+    expect(String(error.mock.calls[0]?.[0])).toMatch(/Refusing to use local disk/);
   });
 });
 
