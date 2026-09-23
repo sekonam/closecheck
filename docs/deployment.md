@@ -205,7 +205,31 @@ produces a client missing whatever had not been saved yet. A relation added in t
 migration, and survives a restart, because the generated client itself is incomplete rather than
 stale. Re-run `prisma generate` and restart.
 
-A second trap in the same family, for anyone writing browser tests against a server action: reading
+A third, which presents as a database bug and is not one: an integration test failing with
+
+```
+Transaction API error: Transaction already closed: A commit cannot be executed on an expired
+transaction. The timeout for this transaction was 5000 ms, however 22626 ms passed since the
+start of the transaction.
+```
+
+Twenty-two seconds for a transaction containing one `findUnique` and one `create` reads as a lock
+or a pathological query. It is neither. Sampling `pg_stat_activity` while the run is in flight
+shows the backend `idle in transaction`, waiting on `Client/ClientRead` — Postgres has finished and
+is waiting for *Node* to send the next statement. The time is going to the event loop, not the
+database.
+
+What stalls it is `next dev` compiling a route on first hit while another request already holds an
+open transaction. That is why it appears when the whole file runs and not when the failing test is
+run alone (it passed in 5s alone, having failed twice in the file), and why re-running the same file
+straight afterwards is usually green — everything is compiled by then. CI does not see it because CI
+runs `npm start` against a production build, which has no on-demand compilation.
+
+So: do not raise the transaction timeout to make it go away. The 5-second default is a reasonable
+alarm for transactions that should take milliseconds, and the stall it is reporting is an artifact
+of the dev server. Re-run, or run against `npm start`.
+
+A further trap in the same family, for anyone writing browser tests against a server action: reading
 an input's value straight after the action can return what you typed rather than what was stored.
 The action re-renders in place, and if the persisted value round-trips to something different (a
 price canonicalised from "$20.50" to "20.50", say), a read taken before that render shows your own
