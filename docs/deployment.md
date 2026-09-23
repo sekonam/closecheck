@@ -219,15 +219,28 @@ shows the backend `idle in transaction`, waiting on `Client/ClientRead` — Post
 is waiting for *Node* to send the next statement. The time is going to the event loop, not the
 database.
 
-What stalls it is `next dev` compiling a route on first hit while another request already holds an
-open transaction. That is why it appears when the whole file runs and not when the failing test is
-run alone (it passed in 5s alone, having failed twice in the file), and why re-running the same file
-straight afterwards is usually green — everything is compiled by then. CI does not see it because CI
-runs `npm start` against a production build, which has no on-demand compilation.
+What stalls Node is the open question, and the evidence points at something specific:
+**`npm run build` running while the dev server is up.** A build rewrites `.next` underneath the
+running server, which then stalls hard. Two sessions were working this tree; the failures appeared
+while the other one was running builds through the day, and stopped as soon as it stopped — both
+suites have been green since. A second session independently hit five failures of the same shape in
+the same window.
 
-So: do not raise the transaction timeout to make it go away. The 5-second default is a reasonable
-alarm for transactions that should take milliseconds, and the stall it is reporting is an artifact
-of the dev server. Re-run, or run against `npm start`.
+The gentler explanation — `next dev` compiling a route on first hit while another request holds a
+transaction open — is real but fits this evidence less well. The two tests that failed were not the
+first in their file, and the failures sat at the harness ceiling (30059ms and 30203ms) rather than
+at a plausible compile time.
+
+Either way the conclusions are the same, and both are worth keeping:
+
+- **Do not run `npm run build` while a dev server is serving tests.** It is not isolated from the
+  dev server; they share `.next`.
+- **Do not raise the transaction timeout to make this go away.** Five seconds is a reasonable alarm
+  for transactions that should take milliseconds, and what it is reporting is an artifact of the
+  environment rather than anything the production path does. CI has never seen it, because CI runs
+  `npm start` against a production build.
+
+Re-run, or run against `npm start`, and check first whether anything else is building.
 
 A further trap in the same family, for anyone writing browser tests against a server action: reading
 an input's value straight after the action can return what you typed rather than what was stored.
