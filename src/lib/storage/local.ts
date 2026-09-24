@@ -74,11 +74,11 @@ export async function deleteObject(key: string): Promise<void> {
  * Every key under the root, as the backend-independent key string (forward slashes, no root).
  * Ops-only: nothing in the request path should enumerate storage.
  */
-export async function listKeys(): Promise<string[]> {
-  const { readdir } = await import("node:fs/promises");
+export async function listObjects(): Promise<{ key: string; lastModified: Date }[]> {
+  const { readdir, stat } = await import("node:fs/promises");
   const { relative, sep } = await import("node:path");
   const root = STORAGE_ROOT;
-  const out: string[] = [];
+  const out: { key: string; lastModified: Date }[] = [];
   async function walk(dir: string): Promise<void> {
     let entries;
     try {
@@ -90,11 +90,13 @@ export async function listKeys(): Promise<string[]> {
     for (const e of entries) {
       const full = join(dir, e.name);
       if (e.isDirectory()) await walk(full);
-      else if (e.isFile()) out.push(relative(root, full).split(sep).join("/"));
+      else if (e.isFile()) {
+        out.push({ key: relative(root, full).split(sep).join("/"), lastModified: (await stat(full)).mtime });
+      }
     }
   }
   await walk(root);
-  return out.sort();
+  return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 export function storageRoot(): string {

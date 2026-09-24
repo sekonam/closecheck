@@ -18,17 +18,26 @@
  * Reports by default. Deletes only with --apply, and never touches the reserved
  * `_deployment-check/` prefix that verify:deployment writes under.
  *
- * Run with: npm run db:sweep-orphaned-objects [-- --apply]
+ * Run with: npm run db:sweep-orphaned-objects [-- --apply] [-- --min-age-minutes=N]
  */
 import { PrismaClient } from "@prisma/client";
 import {
   assertStorageUsable,
   deleteObjectIfPresentAcrossOrgs,
   describeStorage,
-  listAllObjectKeysAcrossOrgs,
+  listAllObjectsAcrossOrgs,
 } from "../src/lib/storage/objectStore";
 
 const RESERVED_PREFIXES = ["_deployment-check/"];
+const DEFAULT_MIN_AGE_MINUTES = 60;
+
+function minAgeMinutes(): number {
+  const arg = process.argv.find((a) => a.startsWith("--min-age-minutes="));
+  if (!arg) return DEFAULT_MIN_AGE_MINUTES;
+  const n = Number(arg.split("=")[1]);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`--min-age-minutes must be a non-negative number, got ${arg}`);
+  return n;
+}
 
 async function keysTheDatabaseNames(direct: PrismaClient): Promise<Set<string>> {
   const named = new Set<string>();
@@ -57,10 +66,20 @@ async function main() {
   } finally {
     await direct.$disconnect();
   }
-  const held = await listAllObjectKeysAcrossOrgs();
-  const orphans = held.filter((k) => !named.has(k) && !RESERVED_PREFIXES.some((p) => k.startsWith(p)));
+  const held = await listAllObjectsAcrossOrgs();
+  const minAge = minAgeMinutes();
+  const cutoff = Date.now() - minAge * 60_000;
+  const unnamed = held.filter((o) => !named.has(o.key) && !RESERVED_PREFIXES.some((p) => o.key.startsWith(p)));
+  const tooYoung = unnamed.filter((o) => o.lastModified.getTime() > cutoff);
+  const orphans = unnamed.filter((o) => o.lastModified.getTime() <= cutoff).map((o) => o.key);
 
   console.log(`Objects in backend: ${held.length}. Keys named by the database: ${named.size}.`);
+  if (tooYoung.length) {
+    console.log(
+      `${tooYoung.length} unnamed object(s) younger than ${minAge} minute(s) left alone — a report ` +
+        `being generated writes its objects before naming them; run again later if they persist.`,
+    );
+  }
   if (orphans.length === 0) {
     console.log("PASS: no orphaned objects — everything the backend holds is named by a row.");
     return;

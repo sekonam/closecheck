@@ -146,7 +146,7 @@ describe("the storage operations refuse a key that escapes the root", () => {
   });
 });
 
-describe("listKeys", () => {
+describe("listObjects", () => {
   async function withRoot<T>(fn: (mod: typeof import("./local"), root: string) => Promise<T>): Promise<T> {
     const { mkdtemp, rm } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
@@ -169,11 +169,13 @@ describe("listKeys", () => {
       await mod.putObject("org2/reports/r1.pdf", Buffer.from("x"));
       await mod.putObject("org1/evidence/f1/e1-contract.pdf", Buffer.from("x"));
       await mod.putObject("org1/logo.png", Buffer.from("x"));
-      expect(await mod.listKeys()).toEqual([
+      const listed = await mod.listObjects();
+      expect(listed.map((o) => o.key)).toEqual([
         "org1/evidence/f1/e1-contract.pdf",
         "org1/logo.png",
         "org2/reports/r1.pdf",
       ]);
+      for (const o of listed) expect(o.lastModified).toBeInstanceOf(Date);
     });
   });
 
@@ -181,7 +183,7 @@ describe("listKeys", () => {
     await withRoot(async (mod, root) => {
       const { rm } = await import("node:fs/promises");
       await rm(root, { recursive: true, force: true });
-      expect(await mod.listKeys()).toEqual([]);
+      expect(await mod.listObjects()).toEqual([]);
     });
   });
 });

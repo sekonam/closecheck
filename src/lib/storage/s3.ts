@@ -232,19 +232,23 @@ export function createS3Backend(): StorageBackend {
       return "deleted";
     },
 
-    async listKeys() {
+    async listObjects() {
       // Paged: a bucket of seller documents outgrows one page quickly, and a listing that stopped
       // at 1,000 would make the orphan sweep report a clean bucket that was not.
-      const keys: string[] = [];
+      const objects: { key: string; lastModified: Date }[] = [];
       let token: string | undefined;
       do {
         const page = await s3().send(
           new ListObjectsV2Command({ Bucket: bucket(), ContinuationToken: token }),
         );
-        for (const o of page.Contents ?? []) if (o.Key) keys.push(o.Key);
+        for (const o of page.Contents ?? []) {
+          // An object with no LastModified is treated as brand new, not as old: the sweep's
+          // threshold must fail towards keeping.
+          if (o.Key) objects.push({ key: o.Key, lastModified: o.LastModified ?? new Date() });
+        }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
       } while (token);
-      return keys.sort();
+      return objects.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
     async assertUsable() {
       try {

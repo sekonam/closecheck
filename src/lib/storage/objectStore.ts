@@ -5,7 +5,7 @@ import {
   getObject as localGet,
   objectExists as localExists,
   putObject as localPut,
-  listKeys as localListKeys,
+  listObjects as localListObjects,
   storageRoot,
 } from "./local";
 import { createS3Backend, isS3Configured } from "./s3";
@@ -35,6 +35,10 @@ import { createS3Backend, isS3Configured } from "./s3";
  * reason about, and neither trusts the caller to have sanitised the key — which matters because
  * keys are read back out of the database as bare strings, not only generated.
  */
+/** One object as the backend reports it. `lastModified` is what lets a sweep tell an orphan from
+ * a write that has not been named yet. */
+export type StoredObject = { key: string; lastModified: Date };
+
 export type StorageBackend = {
   readonly kind: "local" | "s3";
   put(key: string, data: Buffer, contentType?: string): Promise<void>;
@@ -80,7 +84,7 @@ export type StorageBackend = {
    * including the retention purge, so the only way to find them is to ask the backend what it has
    * and subtract what the database knows about.
    */
-  listKeys(): Promise<string[]>;
+  listObjects(): Promise<StoredObject[]>;
   /** One line naming the backend and where it points, for startup logs and the purge script. */
   describe(): string;
 };
@@ -98,7 +102,7 @@ const localBackend: StorageBackend = {
   },
   delete: localDelete,
   deleteIfPresent: localDeleteIfPresent,
-  listKeys: localListKeys,
+  listObjects: localListObjects,
   async assertUsable() {
     const root = storageRoot();
     const info = await stat(root).catch(() => null);
@@ -240,11 +244,11 @@ export async function objectExists(orgId: string, key: string): Promise<boolean>
 }
 
 /**
- * Ops-only, cross-tenant by nature: every key in the backend. See StorageBackend.listKeys for why
+ * Ops-only, cross-tenant by nature: every object in the backend. See StorageBackend.listObjects for why
  * this exists and why nothing in the request path may call it.
  */
-export async function listAllObjectKeysAcrossOrgs(): Promise<string[]> {
-  return storageBackend().listKeys();
+export async function listAllObjectsAcrossOrgs(): Promise<StoredObject[]> {
+  return storageBackend().listObjects();
 }
 
 /**

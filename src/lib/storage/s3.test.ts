@@ -257,7 +257,7 @@ describe("exists distinguishes absence from not knowing", () => {
   });
 });
 
-describe("listKeys", () => {
+describe("listObjects", () => {
   /**
    * The orphan sweep subtracts what the database names from what the backend holds. A listing that
    * stopped at the first page would make it report a clean bucket that was not — and a bucket of
@@ -265,10 +265,15 @@ describe("listKeys", () => {
    */
   it("follows continuation tokens until the listing is complete, and sorts", async () => {
     const store = await backend();
+    const t = new Date("2026-09-24T08:00:00Z");
     send
-      .mockResolvedValueOnce({ Contents: [{ Key: "org2/b.pdf" }, { Key: "org1/a.pdf" }], IsTruncated: true, NextContinuationToken: "t1" })
-      .mockResolvedValueOnce({ Contents: [{ Key: "org1/c.pdf" }], IsTruncated: false });
-    expect(await store.listKeys()).toEqual(["org1/a.pdf", "org1/c.pdf", "org2/b.pdf"]);
+      .mockResolvedValueOnce({ Contents: [{ Key: "org2/b.pdf", LastModified: t }, { Key: "org1/a.pdf", LastModified: t }], IsTruncated: true, NextContinuationToken: "t1" })
+      .mockResolvedValueOnce({ Contents: [{ Key: "org1/c.pdf", LastModified: t }], IsTruncated: false });
+    expect(await store.listObjects()).toEqual([
+      { key: "org1/a.pdf", lastModified: t },
+      { key: "org1/c.pdf", lastModified: t },
+      { key: "org2/b.pdf", lastModified: t },
+    ]);
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[0][0].input).toMatchObject({ Bucket: "closecheck-test" });
     expect(send.mock.calls[1][0].input).toMatchObject({ Bucket: "closecheck-test", ContinuationToken: "t1" });
@@ -277,6 +282,14 @@ describe("listKeys", () => {
   it("returns an empty list for an empty bucket rather than throwing", async () => {
     const store = await backend();
     send.mockResolvedValueOnce({ IsTruncated: false });
-    expect(await store.listKeys()).toEqual([]);
+    expect(await store.listObjects()).toEqual([]);
+  });
+
+  it("treats an object with no LastModified as brand new, so an age threshold keeps it", async () => {
+    const store = await backend();
+    const before = Date.now();
+    send.mockResolvedValueOnce({ Contents: [{ Key: "org1/x.pdf" }], IsTruncated: false });
+    const [o] = await store.listObjects();
+    expect(o.lastModified.getTime()).toBeGreaterThanOrEqual(before);
   });
 });
