@@ -8,7 +8,7 @@ complete in `docs/roadmap.md` or checked off in `docs/releases.md` §5 on the st
 existing — several of these gates are specifically worded to refuse that (`releases.md` §5:
 "demonstrated by an actual cross-org request test, not code inspection alone").
 
-Last reviewed: 2026-09-23.
+Last reviewed: 2026-09-24.
 
 ---
 
@@ -73,76 +73,17 @@ Everything after the first "Apply Blueprint" click is scripted.
 **Blocks:** item 1's webhook endpoint ("Live-mode Stripe"), item 2's end-to-end email test
 ("Resend"), and any GTM step that needs a URL to point at.
 
+**Object storage is ready for it.** Cloudflare R2 was provisioned and proven on 2026-09-24 — bucket
+`closecheck-documents`, token `closecheck-web-prod` (Object Read & Write, that bucket only) — with
+upload, download and purge all exercised through the product against the real bucket. The five
+`STORAGE_S3_*` values are in the local `.env`, commented out under a "production values" heading;
+they go into the Render service's environment when the blueprint asks for its `sync: false`
+values. Do not enable them locally: local runs would write into the production bucket
+(`deployment.md`, "Local development must not point at the production bucket").
+
 ---
 
-## 4. Object storage — the R2 bucket and its credentials
-
-**The provider decision is made: Cloudflare R2.** What is left is a bucket and a credential. The
-code needed one change to suit it, already landed — see "what R2 changed" below.
-
-**State.** Built and tested, not yet run against a real bucket. `src/lib/storage/objectStore.ts`
-has two backends: local disk (the default, unchanged, needs no configuration) and an S3-compatible
-one that activates the moment `STORAGE_S3_BUCKET` is set. Written against the S3 protocol rather
-than a provider, so R2, AWS S3, Backblaze B2, DigitalOcean Spaces and MinIO all work — the R2
-choice is reversible.
-
-**This is a different kind of blocker from the rest of this file, and worth separating.** Everything
-else here waits on evidence you have to go and find — a design partner, a paying customer. This
-waits only on a credential now.
-
-**What only you can do**, concretely:
-
-1. In the Cloudflare dashboard, **create an R2 bucket**. Note your account ID.
-2. **R2 → Manage API Tokens → Create token.** Permission **"Object Read & Write"**, scoped to that
-   one bucket — not an Admin token, which is account-wide and can create and delete buckets. The
-   app only ever reads, writes and deletes objects.
-3. Copy the **Access Key ID** and **Secret Access Key** it shows you. The secret is shown once and
-   cannot be retrieved afterwards; a lost one is replaced by issuing a new token.
-4. Set on the web service:
-   ```
-   STORAGE_S3_BUCKET=<bucket name>
-   STORAGE_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
-   STORAGE_S3_REGION=auto
-   STORAGE_S3_ACCESS_KEY_ID=<access key id>
-   STORAGE_S3_SECRET_ACCESS_KEY=<secret access key>
-   ```
-   Leave `STORAGE_S3_SSE` unset, and `STORAGE_S3_FORCE_PATH_STYLE` unset — R2 needs neither.
-   An EU-jurisdiction bucket uses `https://<account id>.eu.r2.cloudflarestorage.com` instead.
-5. Run `npm run verify:deployment`.
-
-Step 5 is what turns this from configured into proven, and it checks the thing most likely to be
-wrong: it **deletes** the object it wrote, so a token issued with read and write but not delete
-fails there rather than silently, months later, on the first retention purge that cannot remove a
-seller's contract it has already dropped the database row for.
-
-**What R2 changed in the code** (done, 2026-09-23, commit a9c9e4e): the backend used to send
-`x-amz-server-side-encryption: AES256` on every write. R2 does not implement that header and
-refuses the request, so the first upload would have failed. It is now off by default, which costs
-nothing: R2 encrypts every object at rest with AES-256-GCM unconditionally, and AWS S3 has done the
-same automatically since 2023-01-05. See `docs/security-posture.md` §4 for the accurate statement
-of what that does and does not buy.
-
-Once step 5 is green, do a second pass **through the product**, because the script exercises the
-storage seam and not the application paths that use it: upload a document to an audit, download it
-back, set that engagement to a terminal stage with a past purge date, and run
-`npm run db:purge-expired-documents -- --engagement=<id>`. That covers write, read and delete
-through the real callers, which is the whole surface — and it is what lets the "not yet exercised
-against a real endpoint" caveat come out of `s3.ts`, `.env.example`, the runbook, **and
-`docs/security-posture.md` §4**.
-
-That last one is the one to not forget. The other three are internal; the posture document is what
-gets sent to a firm's security reviewer. A caveat left standing there after it stopped being true
-understates the product to the one audience reading it for accuracy — and an inaccuracy found in
-that document costs credibility for every other claim in it, including the ones doing real work.
-
-**Why it matters before a design partner, not after.** Local-on-a-mounted-volume is a supported
-production configuration and the app says so at boot — but it gives no encryption at rest beyond
-whatever the volume provides, and no redundancy: the volume is a single copy. A design partner
-running a real audit means real seller contracts and merchant statements landing on it. That is the
-largest remaining item in `docs/security-posture.md`, and it is the one gap on this list that a
-firm's own security reviewer would ask about.
-
-## 5. Design partners — the evidence gates
+## 4. Design partners — the evidence gates
 
 **Gate:** `roadmap.md` Phase 0 exit, Phase 1 exit, Phase 2 exit.
 
@@ -160,20 +101,19 @@ free-sample-audit offer.
 
 ---
 
-## 6. Distribution channel decision
+## 5. Distribution channel decision
 
 **Gate:** `spec.md` §12; `releases.md` §5 "before any GTM push toward a marketplace partnership".
 
 **What only the founder can do:** decide between a DueDilio-style marketplace listing, continued
 direct outreach, and the ranked alternatives in `research/promotion.md`. The gate explicitly requires
-this be decided *from evidence about where design partners actually came from*, which means item 5
-("Design partners") comes first. It said item 4 until 2026-09-23, which was correct until object
-storage was inserted above it and moved design partners down by one — hence the titles alongside
-the numbers here and below. Not a code task and not one to default into.
+this be decided *from evidence about where design partners actually came from*, which means item 4
+("Design partners") comes first. It has been renumbered twice as items above it were inserted and
+retired — hence the titles alongside the numbers here and below. Not a code task and not one to default into.
 
 ---
 
-## 7. Phase 4 customer enablement
+## 6. Phase 4 customer enablement
 
 **Gate:** `releases.md` §5, "before enabling the Phase 4 depth set for customers".
 
@@ -190,7 +130,7 @@ feature stays dark. That is the gate working, not a gap.
 
 ---
 
-## 8. The deferred Phase 4 items — deliberately not built
+## 7. The deferred Phase 4 items — deliberately not built
 
 `spec.md` §13.4 and `roadmap.md` Phase 4 list several things as "indicative, not committed". They
 were reconsidered on 2026-09-22 under an explicit instruction to build the deferred set, and the
@@ -223,7 +163,7 @@ The honest summary: the Phase 4 scope that could be built without new evidence o
 *was* built, and is covered by tests and documentation. What remains is gated on things code cannot
 supply.
 
-## 9. Read the report disclaimer and decide whether it says what you want
+## 8. Read the report disclaimer and decide whether it says what you want
 
 **Gate:** none — this is not blocking anything. It is here because it is the one piece of content
 in the product that carries your consultants' professional exposure, and it was last edited by
@@ -241,7 +181,7 @@ Note the cost curve: changing it clears every firm's acknowledgement and blocks 
 until each owner re-acknowledges. Today that is one development org. After the first paying
 customers it is a coordinated interruption for all of them — so this is cheapest to settle now.
 
-## 10. When is an audit credit consumed? — §9 promises what the metering contradicts
+## 9. When is an audit credit consumed? — §9 promises what the metering contradicts
 
 **Gate:** none yet; **it bites the day `BILLING_ENFORCEMENT` flips**, so it is a live-charge-day
 surprise rather than a review nicety.
@@ -266,7 +206,7 @@ an implementation detail; `spec-writing` owns the resolution, and the head-to-he
 `research/pricing.md` §7 should probably settle it rather than a guess. Found by the other
 session's spec-versus-code audit, 2026-09-24; verified independently.
 
-## 11. §8 promises consultants an export trail the product cannot show
+## 10. §8 promises consultants an export trail the product cannot show
 
 `spec.md` §8 says the access trail is recorded for portal views *and consultant-side exports* and
 surfaced to the consultant per link. Portal views are surfaced. Exports are recorded by
@@ -280,7 +220,7 @@ consultant can read — a tenant-scoped, RLS-protected table (the portal access 
 SELECT grant on `metric_events`, which would undo that table's isolation. The second is a small
 build; the first is a sentence. Both are honest; the current state is neither.
 
-## 12. SOC 2 posture
+## 11. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by

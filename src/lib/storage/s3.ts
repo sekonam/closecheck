@@ -18,13 +18,14 @@ import type { StorageBackend } from "./objectStore";
  * is then an endpoint and a credential, which is a decision the founder can make later without
  * anyone touching code — the point of building this before the provider is picked.
  *
- * STATUS: IMPLEMENTED, NOT YET EXERCISED AGAINST A REAL ENDPOINT. Nothing here has run against a
- * live bucket — no credentials exist yet, and the sandbox has no container runtime to host a local
- * MinIO. What IS covered by tests is the half where a bug would be ours: key containment refusing
- * an out-of-prefix key before any request is issued, the pre-flight refusing an unreachable bucket,
- * and error mapping treating a missing object as missing rather than as failure. SigV4 correctness
- * is the SDK's job, which is the reason for taking the dependency; a fake endpoint that accepted
- * our signatures would prove nothing about it.
+ * STATUS: EXERCISED AGAINST CLOUDFLARE R2 on 2026-09-24 — bucket `closecheck-documents`, token
+ * `closecheck-web-prod`. Three legs, all through the product's own paths rather than this module in
+ * isolation: a document uploaded and downloaded through the audit UI (11 integration tests, and the
+ * object listed in the bucket afterwards via Cloudflare's API); a real object written, read back
+ * byte-for-byte and deleted by verify:deployment; and scripts/purge-expired-documents.ts deleting a
+ * real object and its row (1 purged, 0 missing, bucket empty after). The caveat that stood here
+ * until then was right to stand: the first real endpoint rejected the default this file shipped
+ * with (see serverSideEncryption).
  *
  * This paragraph comes out the first time someone points it at a bucket and round-trips a file —
  * upload, read, purge. That is a five-minute exit criterion, not a project, and until it happens
@@ -61,7 +62,8 @@ export function s3BackendDescription(): string {
  * On **Cloudflare R2** — the provider actually chosen — the header is REJECTED. R2's S3
  * compatibility page lists `x-amz-server-side-encryption` as unsupported on PutObject (SSE-C is
  * supported; AWS-managed SSE is not), so the default made the very first upload fail. That is the
- * hazard the "NOT YET EXERCISED AGAINST A REAL ENDPOINT" caveat on this file was warning about,
+ * hazard the "not yet exercised against a real endpoint" caveat this file carried until 2026-09-24
+ * was warning about,
  * and it is worth naming its shape: not a bug in the code, but a default that is correct for AWS
  * and wrong for the provider in front of it.
  *

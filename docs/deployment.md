@@ -327,8 +327,8 @@ the property holds either way; on one of them, asking for it fails the request.
 Written against the S3 protocol rather than a named provider, so AWS S3, Cloudflare R2, Backblaze
 B2, DigitalOcean Spaces and MinIO all work. The provider decision is an endpoint and a credential.
 
-**It has not been run against a live bucket.** No credentials exist yet, so the first deployment to
-configure one is also the first exercise of it. Run `npm run verify:deployment` first — it writes,
+**Exercised against Cloudflare R2 on 2026-09-24**, in the order below, which is also the order to
+repeat it in for any new bucket or provider. Run `npm run verify:deployment` first — it writes,
 reads back, byte-compares and deletes a real object through whichever backend is configured, and
 will tell you in seconds if the bucket, credentials, region or endpoint are wrong.
 

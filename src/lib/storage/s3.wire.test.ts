@@ -21,7 +21,7 @@ import type { AddressInfo } from "node:net";
  *
  * It is NOT a claim that the backend works against S3. A listener answering 200 to anything proves
  * nothing about SigV4 being correct, and nothing at all about bucket semantics or error codes. The
- * "not yet exercised against a real endpoint" caveat in s3.ts stands until someone points it at a
+ * "not yet exercised against a real endpoint" caveat s3.ts carried stood until someone pointed it at a
  * bucket.
  */
 describe("the S3 backend's requests, unmocked", () => {
