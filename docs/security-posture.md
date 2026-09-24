@@ -187,9 +187,17 @@ still lands somewhere on S3 — just outside the per-tenant prefix that makes se
   (`spec.md` §4), not an unimplemented feature: Tier C live-access checks are performed by the
   consultant in their own browser and recorded as an attestation. There is no code path anywhere
   that takes a seller's hosting, point-of-sale or booking login.
-- Account passwords are bcrypt-hashed. API keys and webhook secrets are shown once and stored as
-  SHA-256 digests — a random 32-byte token has no dictionary to attack, and the digest doubles as
-  the lookup column.
+- Account passwords are bcrypt-hashed. API keys are shown once and stored as SHA-256 digests — a
+  random 32-byte token has no dictionary to attack, and the digest doubles as the lookup column.
+- **Webhook signing secrets are the exception, and are stored in plaintext.** They cannot be
+  digested: the secret is the HMAC key used to sign every outgoing payload, so the product must be
+  able to recover it to produce a signature the receiving system can verify. That is inherent to
+  signed webhooks rather than a shortcut, but it is a real difference in exposure and is stated
+  here rather than left to be inferred from the word "secrets": anyone who can read the database
+  can sign payloads that a firm's own integration will accept as genuine. The mitigations are that
+  the value is generated randomly, shown once, never logged, and revocable per endpoint from
+  settings — and that this is one more reason the database roles are narrow and none of them is a
+  superuser (§3).
 - One-time secrets (a new API key, a webhook signing secret, an invited teammate's temporary
   password) are handed over in a cookie scoped to the settings page, `httpOnly`, `Secure` in
   production, expiring in 60 seconds.
