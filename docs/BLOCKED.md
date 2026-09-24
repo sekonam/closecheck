@@ -241,7 +241,46 @@ Note the cost curve: changing it clears every firm's acknowledgement and blocks 
 until each owner re-acknowledges. Today that is one development org. After the first paying
 customers it is a coordinated interruption for all of them — so this is cheapest to settle now.
 
-## 10. SOC 2 posture
+## 10. When is an audit credit consumed? — §9 promises what the metering contradicts
+
+**Gate:** none yet; **it bites the day `BILLING_ENFORCEMENT` flips**, so it is a live-charge-day
+surprise rather than a review nicety.
+
+**The contradiction.** `spec.md` §9 says the base subscription includes unlimited Tier A runs —
+the cheap, no-seller-cooperation screen a consultant runs pre-LOI on deals that mostly never
+convert — and that this is what answers the "dead months" problem a pure per-audit fee would have.
+Tier B/C full audits are what the per-audit fee meters.
+
+The code makes no such distinction. `consumeCreditForAudit` is called exactly once, in
+`createAudit` (`src/lib/actions/audits.ts`), before any tier work happens; `runTierAAutomation`
+requires an existing audit and there is no Tier-A-only entry point. So the scenario §9 is built
+around — screen 20 deals, convert 2 — costs 20 credits against 3 included monthly (6 annual).
+`AuditCreditEntry` rows are written whenever billing is configured, so the consumption is already
+in the data; enforcement is what would start refusing.
+
+**What only the founder can decide:** *when* a credit is consumed. The two honest shapes are: at
+audit creation (then §9's "unlimited Tier A" line comes out and the dead-months story changes), or
+when Tier B/C work actually begins (then Tier A screening is free as promised, and the product needs
+a "this audit is now billable" moment a consultant can see coming). This is the pricing model, not
+an implementation detail; `spec-writing` owns the resolution, and the head-to-head price test in
+`research/pricing.md` §7 should probably settle it rather than a guess. Found by the other
+session's spec-versus-code audit, 2026-09-24; verified independently.
+
+## 11. §8 promises consultants an export trail the product cannot show
+
+`spec.md` §8 says the access trail is recorded for portal views *and consultant-side exports* and
+surfaced to the consultant per link. Portal views are surfaced. Exports are recorded by
+`logReportExport` into `metric_events`, on which the app role holds INSERT only — no SELECT, by
+design (that revoked SELECT *is* the table's tenant isolation; see `src/lib/metrics/record.ts`).
+Nothing renders `report.exported`, and the route's own docstring says it cannot back a
+consultant-visible log.
+
+**Decision needed:** either §8 stops promising the export half, or exports get recorded somewhere a
+consultant can read — a tenant-scoped, RLS-protected table (the portal access log's shape), not a
+SELECT grant on `metric_events`, which would undo that table's isolation. The second is a small
+build; the first is a sentence. Both are honest; the current state is neither.
+
+## 13. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
