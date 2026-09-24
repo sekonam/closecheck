@@ -10,10 +10,9 @@ import { prisma } from "@/lib/db/client";
 import { isAutomatable, runTierACheck } from "@/lib/audit/tierA";
 import { assertPublicHost } from "@/lib/net/hostSafety";
 import { dispatchWebhookEvent } from "@/lib/webhooks/dispatch";
-import { consumeCreditForAudit } from "@/lib/billing/credits";
-import { getStripe } from "@/lib/billing/stripe";
-import { overagePriceId } from "@/lib/billing/config";
-import { recordMetric, recordError } from "@/lib/metrics/record";
+import { consumeCreditForBillableWork, isBillableTier } from "@/lib/billing/credits";
+import { settleConsumeAfterCommit } from "@/lib/billing/overage";
+import { recordMetric } from "@/lib/metrics/record";
 import { parseFieldSchema, readFieldValues } from "@/lib/templates/fieldSchema";
 import { isWorthRemembering, vendorKeyFor, vendorLabelFor } from "@/lib/audit/vendorMemory";
 
@@ -42,7 +41,7 @@ export async function createAudit(formData: FormData) {
   });
   if (!template) throw new Error(`No active template found for slug "${templateSlug}"`);
 
-  const { audit, consume } = await withOrgScope(orgId, async (tx) => {
+  const audit = await withOrgScope(orgId, async (tx) => {
     // Confirm the engagement belongs to this org before creating anything under it — withOrgScope's
     // RLS policy would reject a cross-org write anyway, but failing with a clear error here beats a
     // raw crash surfacing to a user. findUnique, not findUniqueOrThrow: a foreign-org engagementId
@@ -68,48 +67,17 @@ export async function createAudit(formData: FormData) {
       },
     });
 
-    // Credit consequence in the SAME transaction (spec.md §9: a full Audit is the metered unit;
-    // Tier A alone is never metered) — "blocked" throws here, so the Audit row above rolls back
-    // with it and enforcement can't be raced past by committing first.
-    const consumeResult = await consumeCreditForAudit(tx, orgId, created.id);
-    if (consumeResult.outcome === "blocked") {
-      throw new Error(consumeResult.reason);
-    }
-    return { audit: created, consume: consumeResult };
+    // No credit here. Creating an audit and running Tier A on it are the screening spec.md §9
+    // includes in the base subscription; the credit is consumed by the first Tier B/C entry
+    // (consumeCreditForBillableWork). Until 2026-09-24 it was consumed on this line, which charged
+    // the pre-LOI screen §9 says is free.
+    return created;
   });
-
-  // Billable overage becomes a Stripe invoice item AFTER commit (external API call, never inside a
-  // DB transaction) — Stripe sweeps pending invoice items into the subscription's next monthly
-  // invoice, which is exactly the batched-rollup billing the roadmap specifies (never per-audit
-  // charges). Best-effort: a failure here loses one overage line item, not the audit.
-  if (consume.outcome === "overage" && consume.billable) {
-    void recordOverageInvoiceItem(orgId, audit.id).catch((err) => {
-      // Billable revenue — a lost invoice item must be recoverable, not silently dropped. The
-      // OVERAGE ledger row already exists (note: "invoice item on next rollup"); this error_events
-      // row is how a reconciliation job or the founder finds the ones that never reached Stripe.
-      void recordError("billing-overage", err instanceof Error ? err : new Error(String(err)), { orgId });
-    });
-  }
 
   void recordMetric("audit.created", { orgId, data: { auditId: audit.id, templateId: template.id } });
 
   revalidatePath(`/engagements/${engagementId}`);
   redirect(`/engagements/${engagementId}/audits/${audit.id}`);
-}
-
-/** Attaches one overage invoice item to the org's Stripe customer (batched onto the next rollup
- * invoice by Stripe). Module-private: only createAudit's post-commit hook calls it. */
-async function recordOverageInvoiceItem(orgId: string, auditId: string): Promise<void> {
-  const stripe = getStripe();
-  const priceId = overagePriceId();
-  if (!stripe || !priceId) return;
-  const account = await withOrgScope(orgId, (tx) => tx.billingAccount.findUnique({ where: { orgId } }));
-  if (!account) return;
-  await stripe.invoiceItems.create({
-    customer: account.stripeCustomerId,
-    pricing: { price: priceId },
-    description: `Audit overage (audit ${auditId})`,
-  });
 }
 
 /**
@@ -246,7 +214,7 @@ export async function updateFinding(formData: FormData) {
     );
   }
 
-  const updated = await withOrgScope(orgId, async (tx) => {
+  const { updated, consume } = await withOrgScope(orgId, async (tx) => {
     // findUnique, not findUniqueOrThrow: a findingId for another org resolves to zero rows under
     // RLS (not a Postgres policy error, just an empty result), so findUniqueOrThrow's raw
     // PrismaClientKnownRequestError (P2025) would crash to Next's default 500 page instead of a
@@ -257,6 +225,15 @@ export async function updateFinding(formData: FormData) {
     });
     if (!existing) {
       throw new Error("Finding not found.");
+    }
+
+    // The first Tier B/C entry on an audit is where its credit is consumed (spec.md §9: Tier A
+    // screening is included; a credit buys the full audit). In this transaction, so a blocked
+    // consumption rolls the entry back with it. Tier A findings never reach this.
+    let consume = null;
+    if (isBillableTier(existing.templateItem.tier)) {
+      consume = await consumeCreditForBillableWork(tx, orgId, existing.auditId);
+      if (consume.outcome === "blocked") throw new Error(consume.reason);
     }
 
     // Whether this submit may touch structuredData is decided from the finding's own pinned
@@ -327,7 +304,7 @@ export async function updateFinding(formData: FormData) {
       }
     }
 
-    return tx.finding.update({
+    const updated = await tx.finding.update({
       where: { id: parsed.findingId },
       data: {
         status: parsed.status,
@@ -340,8 +317,10 @@ export async function updateFinding(formData: FormData) {
       },
       include: { audit: true },
     });
+    return { updated, consume };
   });
 
+  await settleConsumeAfterCommit(orgId, updated.audit.id, consume);
   revalidatePath(`/engagements/${updated.audit.engagementId}/audits/${updated.audit.id}`);
 }
 
@@ -410,20 +389,25 @@ export async function markAuditComplete(formData: FormData): Promise<void> {
     throw new Error("Missing or invalid auditId.");
   }
 
-  const { audit: updated, transitioned } = await withOrgScope(orgId, async (tx) => {
+  const { audit: updated, transitioned, consume } = await withOrgScope(orgId, async (tx) => {
     const existing = await tx.audit.findUnique({ where: { id: result.data } });
     if (!existing) {
       throw new Error("Audit not found.");
     }
     if (existing.status === AuditStatus.COMPLETE) {
-      return { audit: existing, transitioned: false }; // idempotent — no duplicate webhook below
+      return { audit: existing, transitioned: false, consume: null }; // idempotent — no duplicate webhook below
     }
+    // Completing an audit is full-audit work: if nothing before this consumed the credit (an audit
+    // completed on Tier A alone), this does. Usually already consumed by the first Tier B/C entry.
+    const consume = await consumeCreditForBillableWork(tx, orgId, existing.id);
+    if (consume.outcome === "blocked") throw new Error(consume.reason);
     const audit = await tx.audit.update({
       where: { id: existing.id },
       data: { status: AuditStatus.COMPLETE },
     });
-    return { audit, transitioned: true };
+    return { audit, transitioned: true, consume };
   });
+  await settleConsumeAfterCommit(orgId, updated.id, consume);
 
   if (transitioned) {
     // Deliberately not awaited: delivery is best-effort (spec.md §13.3) and must never delay the

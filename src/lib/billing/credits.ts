@@ -1,4 +1,4 @@
-import { CreditReason, type BillingPlan } from "@prisma/client";
+import { CreditReason, type BillingPlan, Tier } from "@prisma/client";
 import type { ScopedTx } from "@/lib/db/scoped";
 import { includedAuditsPerYear, isEnforcementEnabled, isBillingConfigured } from "./config";
 import { countSeats } from "./seats";
@@ -134,4 +134,50 @@ export async function consumeCreditForAudit(
     },
   });
   return { outcome: "overage", billable };
+}
+
+export type BillableWorkResult = ConsumeResult | { outcome: "already-consumed" };
+
+/** Tier A is the pre-LOI screen spec.md §9 includes in the base subscription; everything else is
+ * the full audit a credit pays for. */
+export function isBillableTier(tier: Tier): boolean {
+  return tier !== Tier.A;
+}
+
+/**
+ * Consumes this audit's credit if — and only if — it has not been consumed yet.
+ *
+ * WHEN a credit is consumed is the pricing model, not an implementation detail. spec.md §9 sells
+ * the base subscription on unlimited Tier A screening: the cheap, no-seller-cooperation check a
+ * consultant runs pre-LOI on deals that mostly never convert, which is what answers the
+ * "dead months" problem a pure per-audit fee would have. A credit is the price of a FULL audit,
+ * and full begins at the first Tier B/C entry. Until 2026-09-24 consumption happened in
+ * createAudit, before any tier ran — so screening 20 deals and converting 2 cost 20 credits
+ * against 3 included. Masked by BILLING_ENFORCEMENT=false, but the ledger rows were being written.
+ * The founder decided: consume when Tier B/C work begins.
+ *
+ * Every action that can be the first billable one calls this inside its own transaction:
+ * updating a Tier B/C finding, attaching or citing evidence on a Tier B/C finding, generating a
+ * report, marking the audit complete. Idempotency is the audit's own creditConsumedAt, read and
+ * written under a per-audit advisory lock so two first actions racing cannot both consume. A
+ * "blocked" result is returned, not thrown, so the caller decides how to phrase it — and throws
+ * inside the same transaction, which rolls the billable work back with it.
+ *
+ * Billing not configured still stamps the audit: the work happened while no billing existed, and
+ * configuring billing later must not reach back and charge for it.
+ */
+export async function consumeCreditForBillableWork(
+  tx: ScopedTx,
+  orgId: string,
+  auditId: string,
+): Promise<BillableWorkResult> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`audit-credit:${auditId}`}))`;
+  const audit = await tx.audit.findUnique({ where: { id: auditId }, select: { creditConsumedAt: true } });
+  if (!audit) throw new Error("Audit not found.");
+  if (audit.creditConsumedAt) return { outcome: "already-consumed" };
+
+  const result = await consumeCreditForAudit(tx, orgId, auditId);
+  if (result.outcome === "blocked") return result;
+  await tx.audit.update({ where: { id: auditId }, data: { creditConsumedAt: new Date() } });
+  return result;
 }

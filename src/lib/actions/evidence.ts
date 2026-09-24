@@ -8,6 +8,8 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { deleteObject, putObject, evidenceKey } from "@/lib/storage/objectStore";
 import { recordError } from "@/lib/metrics/record";
+import { consumeCreditForBillableWork, isBillableTier } from "@/lib/billing/credits";
+import { settleConsumeAfterCommit } from "@/lib/billing/overage";
 import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadPolicy";
 import { parseSourceRef, withFieldCitation } from "@/lib/audit/sourceRef";
 import { parseFieldSchema } from "@/lib/templates/fieldSchema";
@@ -67,7 +69,7 @@ export async function attachEvidence(formData: FormData): Promise<void> {
   // finds files by joining through Evidence rows) if a later statement rolled the transaction back.
   // Committing the row first means the only failure mode is the reverse — a row with no file — which
   // is compensated for below and which purge/download paths already treat as a tolerable ENOENT.
-  const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
+  const { engagementId, auditId, consume } = await withOrgScope(orgId, async (tx) => {
     // findUnique, not findUniqueOrThrow: a foreign-org findingId resolves to zero rows under RLS,
     // and findUniqueOrThrow's raw PrismaClientKnownRequestError would crash instead of failing
     // cleanly — same class of bug found live via cross-tenant isolation testing on updateFinding.
@@ -77,6 +79,14 @@ export async function attachEvidence(formData: FormData): Promise<void> {
     });
     if (!finding) {
       throw new Error("Finding not found.");
+    }
+
+    // Attaching a document to a Tier B/C finding is full-audit work; if it is this audit's first,
+    // the credit is consumed here, in this transaction (spec.md §9). Tier A findings never charge.
+    let consume = null;
+    if (isBillableTier(finding.templateItem.tier)) {
+      consume = await consumeCreditForBillableWork(tx, orgId, finding.auditId);
+      if (consume.outcome === "blocked") throw new Error(consume.reason);
     }
 
     await tx.evidence.create({
@@ -113,8 +123,9 @@ export async function attachEvidence(formData: FormData): Promise<void> {
       },
     });
 
-    return { engagementId: finding.audit.engagementId, auditId: finding.auditId };
+    return { engagementId: finding.audit.engagementId, auditId: finding.auditId, consume };
   });
+  await settleConsumeAfterCommit(orgId, auditId, consume);
 
   try {
     // verdict.mimeType, not file.type: the declared type is an assertion by the uploader and the
@@ -228,7 +239,7 @@ export async function citeEvidence(formData: FormData): Promise<void> {
   }
   const parsed = result.data;
 
-  const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
+  const { engagementId, auditId, consume } = await withOrgScope(orgId, async (tx) => {
     // findUnique, not findUniqueOrThrow — a foreign-org evidenceId resolves to zero rows under
     // RLS, same reasoning as the other actions in this file.
     const evidence = await tx.evidence.findUnique({
@@ -237,6 +248,14 @@ export async function citeEvidence(formData: FormData): Promise<void> {
     });
     if (!evidence) {
       throw new Error("Evidence not found.");
+    }
+
+    // Citing a field is Tier B/C work by construction (only MANUAL items declare fields); same
+    // rule as attachEvidence — the audit's first billable entry consumes its credit here.
+    let consume = null;
+    if (isBillableTier(evidence.finding.templateItem.tier)) {
+      consume = await consumeCreditForBillableWork(tx, orgId, evidence.finding.auditId);
+      if (consume.outcome === "blocked") throw new Error(consume.reason);
     }
 
     // The field must be one the finding's own pinned template item declares. Checking against the
@@ -263,8 +282,10 @@ export async function citeEvidence(formData: FormData): Promise<void> {
     return {
       engagementId: evidence.finding.audit.engagementId,
       auditId: evidence.finding.auditId,
+      consume,
     };
   });
+  await settleConsumeAfterCommit(orgId, auditId, consume);
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }
