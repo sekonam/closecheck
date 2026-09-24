@@ -280,7 +280,7 @@ consultant can read — a tenant-scoped, RLS-protected table (the portal access 
 SELECT grant on `metric_events`, which would undo that table's isolation. The second is a small
 build; the first is a sentence. Both are honest; the current state is neither.
 
-## 13. SOC 2 posture
+## 12. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
