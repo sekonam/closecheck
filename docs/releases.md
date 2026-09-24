@@ -51,6 +51,25 @@ walking-deck/mock, per `roadmap.md` Phase 0), so there's nothing to version ther
   hardcoded keys. Retires one item and splits another, which matters to anyone with an audit in
   flight: they keep v3's predecessor until they start a new one.
 
+### Billing-metering event: credit consumed at the first Tier B/C entry — shipped 2026-09-24
+
+**What changed.** An Audit's credit is consumed by its first Tier B/C entry — a rating, document
+or citation on a Tier B/C item, a generated report, or marking the audit complete — instead of at
+creation. Creating an Audit and running Tier A on it consume nothing, which is what `spec.md` §9
+has promised since the pricing model was written ("unlimited Tier A runs"); the implementation
+had metered at creation, and would have charged the pre-LOI screen the base subscription includes.
+Found by a spec-versus-code audit; decided by the founder.
+
+**Why it matters for launch.** It was invisible with `BILLING_ENFORCEMENT=false`, but the ledger
+rows were being written, so it would have surfaced on the first day enforcement was on — as a
+consultant who screened ten deals discovering they had spent ten credits. It is fixed before any
+firm has a subscription. Audits created under the old rule are marked consumed from their existing
+ledger rows, so none is charged twice.
+
+**What a consultant sees.** The audit page states, before the first billable entry, that Tier A is
+included and the next Tier B/C entry uses one credit, with the remaining count; afterwards it
+shows the date the credit was used. The billable moment is one they see coming.
+
 ### Feature release: cross-engagement vendor memory — shipped 2026-09-22
 
 Not a template-version event, and the distinction matters for how it is announced. Template

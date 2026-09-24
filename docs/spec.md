@@ -48,7 +48,7 @@ the buyer."
 | Object | Definition |
 |---|---|
 | **Consultant Org** | The paying account — a solo consultant or firm. Has seats (each with a role, see below), a plan, and a brand kit (firm name, colour, logo) for whitelabeled output — the report footer is rendered from those rather than being a field of its own. |
-| **Engagement** | One acquisition deal being diligenced. Belongs to a Consultant Org. Has a target business, a deal stage (pre-LOI / post-LOI / closing / **closed / dead**), and one or more Audits. The two terminal stages are not decoration: §8's retention default keys on them, so a reader who knows only the first three does not know deletion is ever scheduled. Nothing constrains an Engagement to a single Audit — re-auditing after remediation is supported — and each Audit consumes a credit (§9). |
+| **Engagement** | One acquisition deal being diligenced. Belongs to a Consultant Org. Has a target business, a deal stage (pre-LOI / post-LOI / closing / **closed / dead**), and one or more Audits. The two terminal stages are not decoration: §8's retention default keys on them, so a reader who knows only the first three does not know deletion is ever scheduled. Nothing constrains an Engagement to a single Audit — re-auditing after remediation is supported — and each Audit that proceeds past Tier A consumes a credit (§9): creating it and running Tier A on it is included; its first Tier B/C entry is what spends the credit. |
 | **Template** | A versioned checklist definition for a business type (see §5). Defines which checklist items exist, which tier each belongs to, how each is scored, and what structured evidence each captures (§4). Templates are shared, product-owned content — a consultant selects one per Engagement and cannot edit the shared template from inside an engagement. **Engagement-specific custom items are NOT built**: this table described them from v1 and no implementation ever existed, so the only way to record something outside the fixed item list is the free-text note on an existing finding. Recorded as unbuilt rather than quietly deleted, because the need it was written for is real and a consultant will hit it; whether to build it belongs in §12 alongside the other unresolved scope. |
 | **Audit** | One run of a Template against one Engagement. Holds the state of every checklist item: not started / in progress / pass / fail / not applicable / blocked (seller cooperation not yet available), plus evidence (notes, uploaded documents, screenshots) per item. |
 | **Finding** | A checklist item's resolved state plus its evidence and severity. The unit that renders into the Report. |
@@ -700,6 +700,12 @@ they conflict (the original bands stay visible per this skill's convention):
   audit. This is what answers the "dead months" problem a pure per-audit fee would have.
 - **Per-audit fee for full Tier B/C audits, $49–79/audit**, with 2–3 included per year in the base
   plan so a brand-new low-volume user isn't asking "will this pay for itself" on audit one.
+  *When* the fee applies follows from the line above and was made explicit on 2026-09-24: a
+  credit is consumed by an Audit's **first Tier B/C entry** — a rating, a document, or a citation
+  on a Tier B/C item, a generated report, or marking the audit complete — never by creating the
+  Audit or running Tier A on it. The product says so on the audit page before the first such
+  entry, so the billable moment is one a consultant sees coming. (The implementation consumed it
+  at creation until then, which would have charged the screening this bullet includes.)
 - **Team tier:** additional seats at $20–30/seat/mo on top of the base, once a Team plan exists
   (Phase 2, `roadmap.md`).
 - **Simpler fallback if usage-based billing is too much for v1:** an annual-only plan with bundled

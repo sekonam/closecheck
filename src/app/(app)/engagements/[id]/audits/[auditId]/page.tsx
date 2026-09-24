@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { getCreditBalance } from "@/lib/billing/credits";
+import { isBillingConfigured } from "@/lib/billing/config";
 import { notFound } from "next/navigation";
 import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
@@ -61,6 +63,11 @@ export default async function AuditPage({
   const { error } = await searchParams;
   const { orgId, userId } = await requireOrgSession();
   const backPath = `/engagements/${engagementId}/audits/${auditId}`;
+  // The "this audit is now billable" moment a consultant should see coming (spec.md §9): Tier A
+  // screening is included; the first Tier B/C entry consumes a credit. Read here, not inferred.
+  const creditBalance = isBillingConfigured()
+    ? await withOrgScope(orgId, (tx) => getCreditBalance(tx, orgId))
+    : null;
 
   async function runTierAAutomationAction(formData: FormData) {
     "use server";
@@ -262,6 +269,26 @@ export default async function AuditPage({
           {evidenceCoverage.unsupportedRatedCount === 1 ? "it" : "them"}. They will still appear in
           the report — this is a prompt, not a block, since a seller who won&rsquo;t produce a
           document is itself a finding.
+        </p>
+      )}
+
+      {creditBalance !== null && (
+        <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          {audit.creditConsumedAt ? (
+            <>
+              This audit used one audit credit on{" "}
+              {audit.creditConsumedAt.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}.
+              Everything on it since is included.
+            </>
+          ) : (
+            <>
+              Tier A screening is included in your plan. The first Tier B or Tier C entry on this
+              audit — a rating, a document, or a citation — uses one audit credit.{" "}
+              {creditBalance > 0
+                ? `${creditBalance} remaining.`
+                : "None remaining: the next full audit is recorded as an overage."}
+            </>
+          )}
         </p>
       )}
 
