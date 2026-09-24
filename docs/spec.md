@@ -760,7 +760,16 @@ by legacy decisions.
 Tracked from Phase 0 onward, refined per-phase in `roadmap.md`:
 
 - **Activation:** design partner completes a full Audit (all tiers) on a real live deal within their
-  first engagement using the product.
+  first engagement using the product. **Two of those conditions are instrumented and two are not**,
+  which matters because every evidence gate in `roadmap.md` rests on this number. The metrics report
+  counts orgs with at least one audit and audits marked complete; nothing in the product can see
+  whether all three tiers were actually worked, or whether the deal was real rather than the
+  consultant trying it on a made-up target. At design-partner scale that gap is closed by asking —
+  with two partners the founder knows which audits were real — so this is a metric that is *asked*
+  and partially corroborated by instrumentation, in the same category as report usage below rather
+  than a number to read off a dashboard. It stops being knowable the moment the population is
+  larger than the founder's memory, and that is the point at which it needs rethinking rather than
+  re-reading.
 - **Retention proxy:** a design partner runs a *second* Audit on a second deal without prompting.
 - **Willingness to pay:** stated in Phase 0 discovery calls before any pricing page exists; confirmed
   by conversion once pricing goes live in Phase 1.
