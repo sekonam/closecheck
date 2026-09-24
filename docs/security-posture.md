@@ -110,16 +110,26 @@ this product holds.
   A file the job expects and cannot find is treated as an anomaly rather than a success: the row is
   kept, because it is the only remaining pointer to a document that may exist somewhere, and the run
   exits non-zero so the operator sees it.
-- **There is a hole in that model, demonstrated rather than suspected, and it is not yet fixed.**
-  The purge finds documents by joining through database rows, so a document whose row is gone is
-  invisible to it — permanently. Removing one attachment deletes its row and leaves the object;
-  deleting an organisation cascades every row away in a single statement and leaves every object it
-  named. Verified against a live bucket on 2026-09-24: a document survived deletion of its evidence
-  row, its engagement, its audit, and the whole consultant organisation. The case that reaches it
-  soonest is the one where it matters most — a consultant who attaches the wrong seller's contract,
-  removes it, and is shown that it is gone. Recorded here, before it is fixed, because a posture
-  document that lists only the controls that work is the kind a reader stops believing; the fix is a
-  retention decision rather than a patch, and it is open.
+- **A hole in that model was found and closed on 2026-09-24, and both halves are worth stating.**
+  The purge finds documents by joining through database rows, so a document whose row was gone was
+  invisible to it permanently. Removing one attachment left its object behind; deleting an
+  organisation cascaded every row away in a single statement and left every object those rows named.
+  Demonstrated against a live bucket rather than suspected: a document survived deletion of its
+  evidence row, its engagement, its audit, and the whole consultant organisation. The case that
+  reached it soonest was the one where it mattered most — a consultant who attaches the wrong
+  seller's contract, removes it, and is shown that it is gone.
+
+  Removing an attachment now deletes the object as well as the row, in that order, so nothing can
+  serve the file in the gap. The cascade path has no code of its own to put a hook in, so it is
+  covered instead by a sweep that lists what the backend holds, compares it against every key the
+  database names, and reports by default — deleting only when explicitly asked. Its first run here
+  found 184 orphans against 18 live keys, which is the backlog the old behaviour had already built
+  on one developer machine.
+
+  **Not yet true:** no test removes evidence through the interface a consultant actually uses, so
+  the ordering is covered by unit tests rather than end to end. And the sweep is a scheduled
+  cleanup, not a guarantee — between a cascade delete and the next sweep, objects outlive their
+  rows.
 - **Provenance is recorded**: what a document is, how large, and which named person attached it.
 - **Storage keys are contained at the operation, not at the generator.** Every read, write and
   delete resolves the key and refuses anything landing outside the storage root — absolute paths and
