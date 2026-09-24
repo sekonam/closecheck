@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
+import { listReportExports } from "@/lib/reports/exportTrail";
 import { computeSeverityRollup } from "@/lib/reports/rollup";
 import { runTierAAutomation, updateFinding, updateAuditOverride, markAuditComplete, reopenAudit } from "@/lib/actions/audits";
 import { generateReport } from "@/lib/actions/reports";
@@ -16,6 +17,7 @@ import { StructuredFields } from "./StructuredFields";
 import { FieldSources } from "./FieldCitations";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
 import { PortalAccessHistory } from "./PortalAccessHistory";
+import { ReportExportTrail } from "./ReportExportTrail";
 import { attributionFor, describeEvidence } from "@/lib/storage/describeEvidence";
 import { unavailableReason } from "@/lib/audit/blocking";
 import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
@@ -169,6 +171,15 @@ export default async function AuditPage({
       orderBy: { createdAt: "desc" },
     }),
   );
+  // spec.md §8's other half: exports belong to the REPORT, not to a link — a report can be exported
+  // before it is ever shared and after every link is revoked, and those are exactly the cases a
+  // consultant is asked about.
+  const exportsByReport = await withOrgScope(orgId, async (tx) => {
+    const byReport = new Map<string, Awaited<ReturnType<typeof listReportExports>>>();
+    for (const r of reports) byReport.set(r.id, await listReportExports(tx, r.id));
+    return byReport;
+  });
+
   const portalLinksByReport = new Map<string, typeof portalLinks>();
   for (const link of portalLinks) {
     const existing = portalLinksByReport.get(link.reportId) ?? [];
@@ -407,6 +418,8 @@ export default async function AuditPage({
                     </form>
                   </div>
                 </div>
+                <ReportExportTrail exports={exportsByReport.get(r.id) ?? []} />
+
                 {links.length > 0 && (
                   <ul className="mt-2 space-y-2 pl-3 text-xs">
                     {links.map((link) => {
