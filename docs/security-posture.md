@@ -127,9 +127,11 @@ this product holds.
   on one developer machine.
 
   **Not yet true:** no test removes evidence through the interface a consultant actually uses, so
-  the ordering is covered by unit tests rather than end to end. And the sweep is a scheduled
-  cleanup, not a guarantee — between a cascade delete and the next sweep, objects outlive their
-  rows.
+  the ordering is covered by unit tests rather than end to end. And the sweep is a scheduled cleanup
+  rather than a guarantee, so there are two windows in which objects outlive their rows: between a
+  cascade delete and the next sweep, and after an object delete that fails once its row has already
+  committed. The second is recorded when it happens, naming the sweep as the remedy, so it is
+  visible rather than silent — but it is still the sweep that closes it.
 - **Provenance is recorded**: what a document is, how large, and which named person attached it.
 - **Storage keys are contained at the operation, not at the generator.** Every read, write and
   delete resolves the key and refuses anything landing outside the storage root — absolute paths and
