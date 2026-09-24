@@ -4,6 +4,7 @@ import { fileResponseHeaders } from "@/lib/http/fileResponseHeaders";
 import { withOrgScope, type ScopedTx } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
 import { getObject } from "@/lib/storage/objectStore";
+import { recordReportExport } from "@/lib/reports/exportTrail";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ reportId: string }> }) {
   const { reportId } = await params;
@@ -57,18 +58,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ rep
  * org-scoped transaction, awaited rather than fire-and-forget — an export that is not recorded is
  * the failure this exists to prevent, so it is worth the round trip.
  *
- * This is deliberately NOT the end state. metric_events is product telemetry with no SELECT grant
- * for the app role, readable only by scripts/metrics-report.ts under the DIRECT role — so it can
- * answer "who exported this" for the operator, but it cannot back a consultant-visible access log
- * in the product. Doing that properly needs a first-class, org-scoped, consultant-readable export
- * log table; see the handoff note accompanying this work. Recording the event now means the history
- * exists to migrate when that table lands, instead of starting from empty.
+ * Two writes, one transaction. metric_events is product telemetry with no SELECT grant for the app
+ * role, readable only by scripts/metrics-report.ts under the DIRECT role — it answers "who exported
+ * this" for the operator and could never back a consultant-visible trail. report_export_events
+ * (2026-09-24) is the first-class, org-scoped, consultant-readable log that §8's promise needed;
+ * src/lib/reports/exportTrail.ts reads it. Both are written so the operator's telemetry and the
+ * consultant's trail cannot disagree about whether an export happened.
  */
 async function logReportExport(orgId: string, userId: string, reportId: string): Promise<void> {
   try {
-    await withOrgScope(orgId, (tx: ScopedTx) => {
+    await withOrgScope(orgId, async (tx: ScopedTx) => {
+      await recordReportExport(tx, orgId, reportId, userId);
       const data = JSON.stringify({ reportId, userId, surface: "consultant_download" });
-      return tx.$executeRaw`
+      await tx.$executeRaw`
         INSERT INTO "metric_events" (id, "orgId", type, data, "createdAt")
         VALUES (${randomUUID()}, ${orgId}, ${"report.exported"}, ${data}::jsonb, (now() AT TIME ZONE 'utc'))
       `;

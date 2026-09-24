@@ -59,6 +59,7 @@ model ConsultantOrg {
   creditLedger      AuditCreditEntry[]
 
   @@map("consultant_orgs")
+  reportExports ReportExportEvent[]
 }
 
 enum UserRole {
@@ -78,6 +79,7 @@ model User {
 
   uploadedEvidence   Evidence[]
   createdPortalLinks ClientPortalLink[] @relation("PortalLinkCreator")
+  reportExports      ReportExportEvent[] @relation("ReportExporter")
   revokedPortalLinks ClientPortalLink[] @relation("PortalLinkRevoker")
 
   @@index([orgId])
@@ -242,6 +244,14 @@ model Audit {
   // as if it were the same field.
   overallRatingOverride     Severity?
   overallRatingOverrideNote String?
+  /**
+   * When this Audit's credit was consumed — by its FIRST Tier B/C entry, never by its creation.
+   * spec.md §9 includes unlimited Tier A screening in the base subscription; a credit is the price
+   * of a full audit, and "full" begins at the first Tier B/C action. Null means the audit has not
+   * left Tier A. Backfilled from the ledger for audits created while consumption happened at
+   * creation (migration 20260924100000).
+   */
+  creditConsumedAt          DateTime?
   createdAt                 DateTime      @default(now())
   updatedAt                 DateTime      @updatedAt
 
@@ -440,6 +450,8 @@ model Report {
   brandSnapshotLogoKey    String?
 
   portalLinks ClientPortalLink[]
+
+  exports ReportExportEvent[]
 
   @@index([orgId])
   @@index([auditId])
@@ -667,6 +679,33 @@ model ErrorEvent {
 enum PortalAccessKind {
   PAGE // the buyer opened the portal page
   DOCUMENT // the report bytes were fetched — the viewer embedded in the page, or a direct download
+}
+
+/**
+ * A consultant-side export of a report — the moment the PDF leaves the system by the path it most
+ * often actually leaves (downloaded, then attached to an email). spec.md §8 promises the trail
+ * covers exports as well as portal views; until 2026-09-24 exports were written only to
+ * metric_events, which the app role cannot read, so nothing could show them.
+ *
+ * Belongs to the REPORT, not to a link: a report can be exported before it is ever shared and
+ * after every link is revoked. Names a person, unlike a portal view, which is deliberately
+ * unattributable — the surface keeps the two visibly distinct so neither caveat drifts onto the
+ * other. Append-only at the grant level: the app role may insert and read, never update or delete.
+ */
+model ReportExportEvent {
+  id           String        @id @default(cuid())
+  orgId        String
+  org          ConsultantOrg @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reportId     String
+  report       Report        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  /** Nullable and SET NULL: the export must outlive the person, as Evidence.uploadedById does. */
+  exportedById String?
+  exportedBy   User?         @relation("ReportExporter", fields: [exportedById], references: [id], onDelete: SetNull)
+  exportedAt   DateTime      @default(now())
+
+  @@index([orgId])
+  @@index([reportId])
+  @@map("report_export_events")
 }
 
 model PortalAccessLogEntry {

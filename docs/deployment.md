@@ -170,6 +170,20 @@ first "Apply Blueprint" click are yours.
 13. **Create the first real account** at `https://<your-domain>/signup` and confirm the full loop:
     create an engagement, start an audit, run Tier A checks, generate a report.
 
+### Role passwords are cluster-wide
+
+`scripts/rotate-production-role-passwords.ts` rotates `closecheck_app` and the other narrow roles.
+Postgres roles belong to the **cluster**, not to a database — so it rotates them for every database
+on that server, not only the one whose URL you hand it. On Render that is harmless, because each
+database is its own instance. It stops being harmless the moment anyone rehearses a deploy or stands
+up a staging database beside anything else on one cluster: the rotation silently changes the
+passwords behind the other database too, and every `.env` and running server pointed at it breaks
+mid-session. The script's name says "production"; nothing in it is scoped to one. Rehearse against a
+separate cluster, or skip step 6 in a rehearsal and say so. (Found by the other session rehearsing
+this runbook end to end on a scratch database, 2026-09-24 — everything else in it passed clean on
+an empty database: migrations, seed and the five publishes to v6, `verify:deployment` 24/24, and all
+four role verifiers.)
+
 ## Ongoing deploys
 
 Every subsequent push runs `preDeployCommand` (`prisma migrate deploy`) automatically before the new
