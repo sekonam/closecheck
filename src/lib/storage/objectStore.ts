@@ -255,18 +255,6 @@ export function describeStorage(): string {
 export { evidenceKey, orgLogoKey, reportPdfKey, storageRoot } from "./local";
 
 /**
- * Warns when production is running on local disk.
- *
- * Deliberately a warning and not a refusal. Local-with-a-mounted-volume is the currently SUPPORTED
- * production configuration — render.yaml mounts a persistent disk and docs/deployment.md walks
- * through it — so refusing to boot would turn a working documented setup into a failure the first
- * time anyone deployed. What it cannot do is stay invisible, because the difference between "local
- * disk on a mounted volume" and "local disk on a container that resets every deploy" is every
- * document the firm has uploaded, and nothing in the running system says which one you have.
- *
- * STORAGE_ACKNOWLEDGE_LOCAL=true silences it — an explicit act rather than a default to drift into.
- */
-/**
  * Boot-time report of the storage decision. Resolves the backend once so that a production
  * process which would be refused says so in its first lines of log, at error level, rather than
  * on its first upload — and so that a correctly configured one names where documents go.
