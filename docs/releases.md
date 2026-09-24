@@ -103,6 +103,8 @@ and that automated checks read public records and **cannot establish who control
 second clause is the one doing the work: "automated" on its own reads to a buyer as a strength, and
 the limit that matters to them is specific rather than general.
 
+**Disclaimer text accepted by the founder, 2026-09-24**, as corrected on 2026-09-22 below. No further change is planned before the first real buyer; a lawyer's read before that point remains the founder's option, not a gate.
+
 **Every acknowledgement was cleared**, by migration `20260922214500_disclaimer_scope_of_automated_checks`.
 `ConsultantOrg.disclaimerAcknowledgedAt` means "this owner reviewed the text as it read on that
 date" and nothing else, so leaving it set after a wording change would record an acknowledgement of

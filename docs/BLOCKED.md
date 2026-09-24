@@ -163,25 +163,7 @@ The honest summary: the Phase 4 scope that could be built without new evidence o
 *was* built, and is covered by tests and documentation. What remains is gated on things code cannot
 supply.
 
-## 8. Read the report disclaimer and decide whether it says what you want
-
-**Gate:** none — this is not blocking anything. It is here because it is the one piece of content
-in the product that carries your consultants' professional exposure, and it was last edited by
-engineering correcting a statement that had become false (`releases.md` §3, 2026-09-22).
-
-Correcting it was right: it claimed Tier C was the only non-automated part, which invited a buyer's
-counsel to read everything else as verified, and template v6 established that most Tier A checks
-cannot reach the verdict their rubric describes. But "no longer false" is a lower bar than "the
-language this firm wants to stand behind", and the second is yours, not ours.
-
-The current text is a single paragraph in `src/lib/reports/disclaimer.ts`. Worth five minutes, and
-worth a lawyer's eye before the first report reaches a real buyer's advisory team rather than after.
-
-Note the cost curve: changing it clears every firm's acknowledgement and blocks report generation
-until each owner re-acknowledges. Today that is one development org. After the first paying
-customers it is a coordinated interruption for all of them — so this is cheapest to settle now.
-
-## 9. When is an audit credit consumed? — §9 promises what the metering contradicts
+## 8. When is an audit credit consumed? — §9 promises what the metering contradicts
 
 **Gate:** none yet; **it bites the day `BILLING_ENFORCEMENT` flips**, so it is a live-charge-day
 surprise rather than a review nicety.
@@ -206,7 +188,7 @@ an implementation detail; `spec-writing` owns the resolution, and the head-to-he
 `research/pricing.md` §7 should probably settle it rather than a guess. Found by the other
 session's spec-versus-code audit, 2026-09-24; verified independently.
 
-## 10. §8 promises consultants an export trail the product cannot show
+## 9. §8 promises consultants an export trail the product cannot show
 
 `spec.md` §8 says the access trail is recorded for portal views *and consultant-side exports* and
 surfaced to the consultant per link. Portal views are surfaced. Exports are recorded by
@@ -220,7 +202,7 @@ consultant can read — a tenant-scoped, RLS-protected table (the portal access 
 SELECT grant on `metric_events`, which would undo that table's isolation. The second is a small
 build; the first is a sentence. Both are honest; the current state is neither.
 
-## 11. SOC 2 posture
+## 10. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by
