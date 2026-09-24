@@ -339,6 +339,86 @@ terminal stage with a past purge date and run
 is the whole surface. The code's own docstring carries the same caveat and should lose it once this
 has been done.
 
+### Changing the storage backend on an installation that already holds documents
+
+**Do not change `STORAGE_S3_BUCKET` on a running installation without doing this first.** The backend
+is resolved per operation and nothing copies objects between backends, so pointing the application at
+a new bucket leaves every existing document where it was while every database row goes on naming it.
+The failure is silent and total, and it does not look like a failure: a report whose PDF is not in
+the new bucket renders the portal's "not generated yet" state, which is indistinguishable from a
+report that genuinely was never generated. A firm would conclude the product lost their work, and
+they would be right.
+
+This is a copy rather than a migration because the key scheme is backend-independent by design — the
+same key names the same document whichever backend holds it. That property was built for exactly
+this moment; nothing needs rewriting, only moving.
+
+**1. Stop writes.** Scale the service to zero, or put it in maintenance. A document uploaded after
+the copy starts and before the cutover lands in the old backend and is not carried across — which
+reintroduces the same silent gap for one file, the hardest kind to notice.
+
+**2. Copy, key for key.** From a machine with the storage root and credentials for the new bucket:
+
+```
+aws s3 sync "$STORAGE_ROOT_DIR"/ s3://$STORAGE_S3_BUCKET/ \
+  --endpoint-url "$STORAGE_S3_ENDPOINT" --exact-timestamps
+```
+
+`rclone copy` works equally well. Do not add `--delete`: this is additive, and a flag that removes
+what it does not recognise is the wrong instrument to point at a bucket of seller documents.
+
+**3. Verify against the database, not against a file count.** A count can match while the one key a
+consultant needs is missing, and a sample can pass while missing the same key. The bar worth meeting
+is that **every key the database names resolves in the new backend**, because an orphaned row is the
+entire failure mode:
+
+```
+npm run db:verify-storage-keys
+```
+
+It enumerates every key-bearing column — `reports.pdfStorageKey`, `reports.brandSnapshotLogoKey`,
+`evidence.storageKey`, `consultant_orgs.brandLogoUrl` — issues a HEAD for each against the configured
+backend, and exits non-zero naming any that do not resolve. Run it before cutover, with the new
+backend configured, while the old one still holds the originals: a failure then is recoverable by
+re-running the copy, and the same failure after cutover is a support incident.
+
+**4. Cut over and re-verify.** Set the variables, restart, run `npm run verify:deployment` (which
+round-trips a real object), then `npm run db:verify-storage-keys` once more against the live service.
+
+**5. Keep the old storage until you are sure.** The copy is additive and the originals are the only
+remaining copy of anything the sync missed. Delete the old root after a deliberate decision, not as
+part of the cutover.
+
+**On a fresh install none of this applies** — there are no objects yet, and setting the variables
+before the first upload is the whole procedure.
+
+### The S3 credentials are the R2 token in another encoding
+
+R2's S3 credentials are derived, not issued: the **Access Key ID is the R2 API token's id**, and the
+**Secret Access Key is `sha256(token value)`** as a hex string. That is a fact about R2's design,
+verified here by minting a token through Cloudflare's API and completing the round trip with the
+derived pair — and it has two consequences the words "hash" and "derived" invite you to get wrong:
+
+- The derived secret is **not a lesser artefact** than the token. Anyone holding it has the token's
+  full S3 authority; they are the same secret in two encodings. Handle `STORAGE_S3_SECRET_ACCESS_KEY`
+  exactly as you would the token, not as something safely downstream of it.
+- **Rotating means re-deriving.** A new token is a new id and a new value, so both S3 variables change
+  together; rotating one without the other is a credential that fails, not one that degrades.
+
+The production token is named `closecheck-web-prod` in Cloudflare → R2 → Manage API Tokens
+(Object Read & Write, scoped to the one bucket), so it can be found and rotated by someone who was
+not there when it was made.
+
+### Local development must not point at the production bucket
+
+A local `.env` that names the production bucket makes every local integration run write into it and
+— worse — every fixture teardown leaves orphaned objects behind, because the suites delete their
+orgs through the database and nothing deletes the objects those rows named. This happened once
+during the R2 proving run: one 69-byte test upload survived its org. Keep local development on the
+local-disk backend (leave `STORAGE_S3_*` unset in `.env`); the production values live on the
+service. Use `STORAGE_S3_*` locally only for a deliberate, one-off proving run like the one in
+"First deploy" step 12, and clear them afterwards.
+
 **Two things the purge does that matter more with a bucket than with a directory.** It refuses to
 start unless the backend answers, so a misconfigured one cannot get as far as deleting database
 rows whose files it never found. And a file it cannot find keeps its row and fails the run — which

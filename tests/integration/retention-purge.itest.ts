@@ -69,7 +69,18 @@ describe("the retention purge cannot destroy the only pointer to a document", ()
           `--engagement=${org.engagementId}`,
           ...args,
         ],
-        { env: { ...process.env, ...env }, cwd: process.cwd() },
+        {
+          // Pinned to the LOCAL backend regardless of what .env says. These tests assert local-disk
+          // purge semantics against fixtures written straight into a temp STORAGE_ROOT_DIR with
+          // writeFile; a .env that names an object-storage bucket (as it does once R2 is
+          // configured) would make the spawned purge resolve to S3, find every fixture "missing",
+          // and fail three of these for a reason that has nothing to do with the purge. Object
+          // storage is exercised by verify:deployment and by the product-level pass documented in
+          // docs/deployment.md, not here. Empty string is enough: isS3Configured() is a truthiness
+          // test, and dotenv never overwrites a variable that is already set.
+          env: { ...process.env, STORAGE_S3_BUCKET: "", ...env },
+          cwd: process.cwd(),
+        },
       );
       return { code: 0, output: stdout };
     } catch (err) {
