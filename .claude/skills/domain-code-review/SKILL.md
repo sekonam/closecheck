@@ -221,6 +221,25 @@ controls):
   `0xA9FEA9FE`), IPv4-mapped and NAT64 IPv6 (`::ffff:169.254.169.254`, `64:ff9b::a9fe:a9fe`) — and
   a guard that disagrees with the resolver about which address a string names is worse than none.
 
+**Before reporting a finding, verify the instrument that produced it**:
+- **A probe that manufactures a finding costs more than one that hides a finding.** Both happen; this
+  project has produced ten instances of the tooling being wrong rather than the system. Hiding a bug
+  costs that bug. *Manufacturing* one costs a false report to the founder — and a security finding
+  that turns out to be an artefact of the test environment is far harder to walk back than one that
+  was simply missed, because it spends the credibility of every finding beside it.
+- The concrete case: a rehearsal of the database role rotation reported that **the old hardcoded
+  password still worked afterwards**, which would have been serious. It was the test cluster —
+  `initdb --auth=trust` accepts any password, so that check could only ever pass. Switching
+  `pg_hba.conf` to `scram-sha-256` and re-running gave the real answer, which was that rotation works.
+  Rehearse on real authentication for exactly this reason; under `trust`, the one check that matters
+  after a rotation is incapable of failing.
+- So when a probe returns something alarming, **confirm the probe before confirming the finding** —
+  by a second method, a different tool, or a positive control that proves the probe can distinguish
+  the two outcomes at all. The recurring shapes here: `innerText` silently omitting collapsed
+  `<details>`; a grep truncating output and hiding the reason; a regex matching escaped text; a
+  selector matching the wrong one of two forms; and a permissive auth mode making a negative test
+  impossible to fail.
+
 **Any test added in response to a defect**:
 - **Has it been shown to FAIL against the bug?** Not reasoned about — run. Reintroduce the defect,
   confirm the new case goes red, restore. A test written against a fix is worth nothing until it
