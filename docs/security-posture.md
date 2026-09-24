@@ -13,7 +13,7 @@ gaps into the open.
 **Every "not yet" below is deliberate and stated.** A posture document that lists only strengths is
 worse than none: the first reader who finds an omission stops believing the rest of it.
 
-Last reviewed: 2026-09-23. This document is only true on the date at the top — re-check it against
+Last reviewed: 2026-09-24. This document is only true on the date at the top — re-check it against
 the code before sending it to anyone.
 
 ---
@@ -159,10 +159,19 @@ choosing one is a decision the firm running this has not made.
   against someone who obtains our credentials. It does not close the application-managed-encryption
   gap in §8, which needs a key-management decision nobody has made. The one improvement over
   requesting it per object is that an unconditional property cannot be forgotten by a future writer.
-- **On local storage, encryption at rest is whatever the volume provides.** In the currently
-  documented production setup that is a mounted persistent disk: documents survive deploys, there is
-  no redundancy, and the encryption is the substrate's. Running production on local storage without
-  acknowledging it produces a startup warning naming exactly that.
+- **Local disk is no longer a production configuration, and the product refuses to treat it as one.**
+  It was one until 2026-09-23, when the deployment blueprint stopped mounting a persistent volume:
+  without that mount, an unconfigured production process writes seller contracts to a container
+  filesystem that is discarded on the next deploy. A startup warning was the wrong instrument for
+  that, because the warning and the data loss are separated by however long it takes someone to
+  deploy again. So in production, with no object storage configured and no explicit
+  acknowledgement, every read, write and delete refuses — enforced where the backend is resolved,
+  not at boot, so it cannot be skipped by a process that starts before anyone looks at the log.
+
+  An operator who genuinely has a mounted volume can still say so, deliberately, and is then told
+  once what it costs: encryption at rest is whatever the volume provides rather than
+  application-managed, and there is no redundancy, because the volume is a single copy. What is no
+  longer possible is arriving in that state without having chosen it.
 
 The containment guard above is what made replacing the writer safe to do rather than a re-audit —
 the refusal lives with the operation, so neither backend trusts a key it was handed. Each enforces
