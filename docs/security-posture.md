@@ -107,6 +107,19 @@ this product holds.
 - **Retention is tied to the engagement lifecycle.** A deal reaching a terminal stage (closed or
   dead) schedules deletion after 90 days by default, which the consultant can move. Reviving a deal
   clears the schedule. A purge job deletes the files and requires the engagement still be terminal.
+  A file the job expects and cannot find is treated as an anomaly rather than a success: the row is
+  kept, because it is the only remaining pointer to a document that may exist somewhere, and the run
+  exits non-zero so the operator sees it.
+- **There is a hole in that model, demonstrated rather than suspected, and it is not yet fixed.**
+  The purge finds documents by joining through database rows, so a document whose row is gone is
+  invisible to it — permanently. Removing one attachment deletes its row and leaves the object;
+  deleting an organisation cascades every row away in a single statement and leaves every object it
+  named. Verified against a live bucket on 2026-09-24: a document survived deletion of its evidence
+  row, its engagement, its audit, and the whole consultant organisation. The case that reaches it
+  soonest is the one where it matters most — a consultant who attaches the wrong seller's contract,
+  removes it, and is shown that it is gone. Recorded here, before it is fixed, because a posture
+  document that lists only the controls that work is the kind a reader stops believing; the fix is a
+  retention decision rather than a patch, and it is open.
 - **Provenance is recorded**: what a document is, how large, and which named person attached it.
 - **Storage keys are contained at the operation, not at the generator.** Every read, write and
   delete resolves the key and refuses anything landing outside the storage root — absolute paths and
@@ -139,11 +152,14 @@ backend (AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces, MinIO — one
 not a commitment to a provider) activates when it is configured; nothing is configured yet, because
 choosing one is a decision the firm running this has not made.
 
-- **The S3 backend has not been exercised against a live bucket.** It is written, unit-tested on the
-  half where a bug would be ours — key containment, the reachability pre-flight, and the rule that a
-  missing object is distinguishable from an unreadable one — and it has never stored a real byte.
-  That is a claim and not yet a fact, and this sentence stays here until someone uploads, reads and
-  purges a document through it.
+- **The S3 backend has been exercised against a live bucket** — Cloudflare R2, on 2026-09-24. This
+  sentence previously said it had never stored a real byte and would say so until someone uploaded,
+  read and purged a document through it. That happened, through the product's own paths rather than
+  a harness: a document attached and downloaded through the audit workflow and then listed in the
+  bucket through the provider's API; an object written, read back, byte-compared and deleted by the
+  deployment verifier; and the retention purge deleting an object and its row together, leaving the
+  bucket empty. What remains untested is everything that needs a deployment — concurrency, scale,
+  and behaviour under a provider outage — because no deployment exists yet.
 - **On object storage, encryption at rest is the provider's and is not requested per object.** The
   application does not send an encryption header, and does not need to: Cloudflare R2 encrypts every
   object with AES-256-GCM automatically, with no configuration and no documented opt-out, and Amazon
