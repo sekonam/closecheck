@@ -126,12 +126,22 @@ this product holds.
   found 184 orphans against 18 live keys, which is the backlog the old behaviour had already built
   on one developer machine.
 
-  **Not yet true:** no test removes evidence through the interface a consultant actually uses, so
-  the ordering is covered by unit tests rather than end to end. And the sweep is a scheduled cleanup
-  rather than a guarantee, so there are two windows in which objects outlive their rows: between a
-  cascade delete and the next sweep, and after an object delete that fails once its row has already
-  committed. The second is recorded when it happens, naming the sweep as the remedy, so it is
-  visible rather than silent — but it is still the sweep that closes it.
+  Removal is now exercised the way a consultant performs it: a test signs in, attaches a real
+  document through the audit page, and removes it through the same control, asserting the object is
+  present beforehand and gone afterwards. The first half of that assertion is the load-bearing one —
+  a test that only checked the object was absent at the end would pass against an upload that never
+  wrote anything.
+
+  **Still true, and worth stating rather than leaving to be discovered:** a sweep is scheduled
+  cleanup, not a guarantee, so objects can outlive their rows in two windows. Between a cascade
+  delete and the next sweep. And after an object delete that fails once its row has already
+  committed — which is recorded when it happens, naming the sweep as the remedy, so it is visible
+  rather than silent, but it is still the sweep that closes it. A third window was found and closed
+  on 2026-09-24: report generation writes its objects before naming them on the row, so a sweep
+  running during a render classified a report being generated as an orphan and, with deletion
+  enabled, removed it. The sweep now ignores anything younger than an hour, and treats an object
+  whose age cannot be determined as brand new — failing towards keeping, which is the only safe
+  direction for a script whose mistakes delete a seller's documents.
 - **Provenance is recorded**: what a document is, how large, and which named person attached it.
 - **Storage keys are contained at the operation, not at the generator.** Every read, write and
   delete resolves the key and refuses anything landing outside the storage root — absolute paths and
