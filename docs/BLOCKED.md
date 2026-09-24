@@ -163,25 +163,7 @@ The honest summary: the Phase 4 scope that could be built without new evidence o
 *was* built, and is covered by tests and documentation. What remains is gated on things code cannot
 supply.
 
-## 8. §8 promises consultants an export trail the product cannot show — backend landed, surface in progress
-
-`spec.md` §8 says the access trail is recorded for portal views *and consultant-side exports* and
-surfaced to the consultant per link. Portal views are surfaced. Exports are recorded by
-`logReportExport` into `metric_events`, on which the app role holds INSERT only — no SELECT, by
-design (that revoked SELECT *is* the table's tenant isolation; see `src/lib/metrics/record.ts`).
-Nothing renders `report.exported`, and the route's own docstring says it cannot back a
-consultant-visible log.
-
-**Decided 2026-09-24: build it.** The table (`report_export_events`, RLS'd, append-only for the app
-role) and the read helper are landed and proven; the per-report surface with link trails nested
-inside is being built by the other session. This item closes when that surface ships.
-
-Original decision text, kept for the record: either §8 stops promising the export half, or exports
-get recorded somewhere a consultant can read — a tenant-scoped, RLS-protected table (the portal access log's shape), not a
-SELECT grant on `metric_events`, which would undo that table's isolation. The second is a small
-build; the first is a sentence. Both are honest; the current state is neither.
-
-## 9. SOC 2 posture
+## 8. SOC 2 posture
 
 **Gate:** `spec.md` §8, §13.4 — explicitly gated on a real sales blocker (a firm's client contract or
 a partner requirement), not built speculatively. Listed here only so it is visibly *deferred by

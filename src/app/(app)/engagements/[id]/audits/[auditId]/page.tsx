@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getCreditBalance } from "@/lib/billing/credits";
-import { isBillingConfigured } from "@/lib/billing/config";
+import { isBillingConfigured, isEnforcementEnabled } from "@/lib/billing/config";
 import { notFound } from "next/navigation";
 import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
@@ -286,7 +286,12 @@ export default async function AuditPage({
               audit — a rating, a document, or a citation — uses one audit credit.{" "}
               {creditBalance > 0
                 ? `${creditBalance} remaining.`
-                : "None remaining: the next full audit is recorded as an overage."}
+                : isEnforcementEnabled()
+                  ? "None remaining: the next full audit is billed as an overage."
+                  : // Enforcement off (the launch-gate default): the ledger records the overage and nothing
+                    // invoices it. "Recorded as an overage" reads as "you will be charged" — a sentence
+                    // that is literally true and that a consultant would act on as if it meant more.
+                    "None remaining. Overage is being recorded but not billed yet."}
             </>
           )}
         </p>
