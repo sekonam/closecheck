@@ -213,7 +213,18 @@ describe("the two budgets cannot evict each other", () => {
     for (let i = 0; i < 12_000; i++) checkRateLimit(`ip:flood-${i}`, { limit: 120 });
 
     expect(focusedGuessingAllowed(victim, address)).toBe(false);
-  });
+  },
+  /**
+   * Deliberately expensive: it floods 12,000 keys so that MAX_TRACKED_KEYS is exceeded and a real
+   * prune runs — the previous version flooded in 6ms, was throttled out of pruning, and passed
+   * while evicting nothing. The cost is the point. Under load (another session running the full
+   * suite in a loop; transform 11s and import 28s against the usual 3s and 7s) it was the only test
+   * in the suite whose budget was tight enough to notice, failing 1 run in 6 at the default 5s while
+   * passing 28/28 alone every time. A generous budget here, rather than a smaller flood or a larger
+   * global timeout: the flood must stay above the threshold or the test is vacuous again, and
+   * everything else should stay tight.
+   */
+  30_000);
 
   it("keeps a tenant's API budget through a sign-in flood large enough to force eviction", () => {
     const tenantKey = "key:paying-customer";
