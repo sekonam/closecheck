@@ -5,6 +5,7 @@ import {
   getObject as localGet,
   objectExists as localExists,
   putObject as localPut,
+  listKeys as localListKeys,
   storageRoot,
 } from "./local";
 import { createS3Backend, isS3Configured } from "./s3";
@@ -72,6 +73,14 @@ export type StorageBackend = {
    * travel with the abstraction rather than staying behind as a filesystem detail.
    */
   assertUsable(): Promise<void>;
+  /**
+   * Every key the backend holds, across all tenants. OPS ONLY — the request path never enumerates
+   * storage, and this is deliberately not exposed through any org-scoped helper. It exists for the
+   * orphan sweep: objects that no row names are invisible to everything that joins through rows,
+   * including the retention purge, so the only way to find them is to ask the backend what it has
+   * and subtract what the database knows about.
+   */
+  listKeys(): Promise<string[]>;
   /** One line naming the backend and where it points, for startup logs and the purge script. */
   describe(): string;
 };
@@ -89,6 +98,7 @@ const localBackend: StorageBackend = {
   },
   delete: localDelete,
   deleteIfPresent: localDeleteIfPresent,
+  listKeys: localListKeys,
   async assertUsable() {
     const root = storageRoot();
     const info = await stat(root).catch(() => null);
@@ -227,6 +237,14 @@ export async function deleteObject(orgId: string, key: string): Promise<void> {
 export async function objectExists(orgId: string, key: string): Promise<boolean> {
   assertKeyBelongsToOrg(orgId, key);
   return storageBackend().exists(key);
+}
+
+/**
+ * Ops-only, cross-tenant by nature: every key in the backend. See StorageBackend.listKeys for why
+ * this exists and why nothing in the request path may call it.
+ */
+export async function listAllObjectKeysAcrossOrgs(): Promise<string[]> {
+  return storageBackend().listKeys();
 }
 
 /**

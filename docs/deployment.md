@@ -419,6 +419,37 @@ local-disk backend (leave `STORAGE_S3_*` unset in `.env`); the production values
 service. Use `STORAGE_S3_*` locally only for a deliberate, one-off proving run like the one in
 "First deploy" step 12, and clear them afterwards.
 
+### Objects that no row names — and why removing evidence now deletes the file
+
+Every product path finds a document by joining through the row that names it: the download route,
+the portal, the retention purge. An object whose row is gone is therefore not "waiting for the
+purge" — it is unreachable by everything, permanently, with nothing in the database that knows it
+is there. Two things produce that state, and both were demonstrated against the real bucket on
+2026-09-24:
+
+- **Removing evidence.** `deleteEvidence` used to delete the row and deliberately leave the object,
+  on the reasoning that the purge would collect it. The purge cannot; it never sees a key without a
+  row. Since 2026-09-24 removing evidence deletes the object too, row first and then object, with no
+  grace period — a consultant who attaches the wrong seller's contract and removes it needs it
+  gone, and `docs/spec.md` §8's premise is that documents do not outlive the engagement, let alone
+  the customer. If the object delete fails after the row has gone, that is recorded to
+  `error_events` (`evidence-delete-object`) and left for the sweep below.
+- **Deleting an organisation.** The cascade removes every row in one statement; there is no code on
+  that path to put a hook in, so every object the org ever stored is orphaned.
+
+```
+npm run db:sweep-orphaned-objects            # report: keys the backend holds that no row names
+npm run db:sweep-orphaned-objects -- --apply # delete them
+```
+
+It is `db:verify-storage-keys` run in the other direction — that one finds rows whose object is
+missing, this finds objects whose row is missing — and it is exact for the same reason: the failure
+is a single document, and a count cannot see it. It never touches the reserved `_deployment-check/`
+prefix. Run it after deleting an organisation, after any `evidence-delete-object` error, and on a
+schedule if you want the property to hold without someone remembering. On a development machine it
+will report a great deal: integration suites delete their fixture orgs through the database and
+leave every object those rows named, which is the same mechanism, harmlessly.
+
 **Two things the purge does that matter more with a bucket than with a directory.** It refuses to
 start unless the backend answers, so a misconfigured one cannot get as far as deleting database
 rows whose files it never found. And a file it cannot find keeps its row and fails the run — which

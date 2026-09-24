@@ -25,6 +25,7 @@ vi.mock("@aws-sdk/client-s3", () => {
     DeleteObjectCommand: class extends Cmd {},
     HeadObjectCommand: class extends Cmd {},
     HeadBucketCommand: class extends Cmd {},
+    ListObjectsV2Command: class extends Cmd {},
   };
 });
 
@@ -253,5 +254,29 @@ describe("exists distinguishes absence from not knowing", () => {
     const store = await backend();
     await expect(store.exists("../escape.pdf")).rejects.toThrow(/not a plain relative/);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("listKeys", () => {
+  /**
+   * The orphan sweep subtracts what the database names from what the backend holds. A listing that
+   * stopped at the first page would make it report a clean bucket that was not — and a bucket of
+   * seller documents outgrows one page quickly — so pagination is the property under test.
+   */
+  it("follows continuation tokens until the listing is complete, and sorts", async () => {
+    const store = await backend();
+    send
+      .mockResolvedValueOnce({ Contents: [{ Key: "org2/b.pdf" }, { Key: "org1/a.pdf" }], IsTruncated: true, NextContinuationToken: "t1" })
+      .mockResolvedValueOnce({ Contents: [{ Key: "org1/c.pdf" }], IsTruncated: false });
+    expect(await store.listKeys()).toEqual(["org1/a.pdf", "org1/c.pdf", "org2/b.pdf"]);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0][0].input).toMatchObject({ Bucket: "closecheck-test" });
+    expect(send.mock.calls[1][0].input).toMatchObject({ Bucket: "closecheck-test", ContinuationToken: "t1" });
+  });
+
+  it("returns an empty list for an empty bucket rather than throwing", async () => {
+    const store = await backend();
+    send.mockResolvedValueOnce({ IsTruncated: false });
+    expect(await store.listKeys()).toEqual([]);
   });
 });

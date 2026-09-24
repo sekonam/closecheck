@@ -145,3 +145,43 @@ describe("the storage operations refuse a key that escapes the root", () => {
     });
   });
 });
+
+describe("listKeys", () => {
+  async function withRoot<T>(fn: (mod: typeof import("./local"), root: string) => Promise<T>): Promise<T> {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = await mkdtemp(join(tmpdir(), "closecheck-list-test-"));
+    const previous = process.env.STORAGE_ROOT_DIR;
+    process.env.STORAGE_ROOT_DIR = root;
+    vi.resetModules();
+    try {
+      return await fn(await import("./local"), root);
+    } finally {
+      process.env.STORAGE_ROOT_DIR = previous;
+      vi.resetModules();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("returns every stored key as a backend-independent key, nested and sorted", async () => {
+    await withRoot(async (mod) => {
+      await mod.putObject("org2/reports/r1.pdf", Buffer.from("x"));
+      await mod.putObject("org1/evidence/f1/e1-contract.pdf", Buffer.from("x"));
+      await mod.putObject("org1/logo.png", Buffer.from("x"));
+      expect(await mod.listKeys()).toEqual([
+        "org1/evidence/f1/e1-contract.pdf",
+        "org1/logo.png",
+        "org2/reports/r1.pdf",
+      ]);
+    });
+  });
+
+  it("reports nothing stored when the root does not exist yet", async () => {
+    await withRoot(async (mod, root) => {
+      const { rm } = await import("node:fs/promises");
+      await rm(root, { recursive: true, force: true });
+      expect(await mod.listKeys()).toEqual([]);
+    });
+  });
+});

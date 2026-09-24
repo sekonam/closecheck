@@ -21,6 +21,7 @@
     "db:purge-expired-documents": "tsx -r dotenv/config scripts/purge-expired-documents.ts",
     "verify:deployment": "tsx -r dotenv/config scripts/verify-deployment.ts",
     "db:verify-storage-keys": "tsx -r dotenv/config scripts/verify-storage-keys.ts",
+    "db:sweep-orphaned-objects": "tsx -r dotenv/config scripts/sweep-orphaned-objects.ts",
     "metrics:report": "tsx -r dotenv/config scripts/metrics-report.ts",
     "db:rotate-production-role-passwords": "tsx -r dotenv/config scripts/rotate-production-role-passwords.ts",
     "ops:dashboard": "tsx -r dotenv/config scripts/ops-dashboard.ts",

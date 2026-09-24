@@ -70,6 +70,33 @@ export async function deleteObject(key: string): Promise<void> {
  * under STORAGE_ROOT_DIR, and reported success — a spec.md §8 retention failure that looked like a
  * clean run. One definition, one place.
  */
+/**
+ * Every key under the root, as the backend-independent key string (forward slashes, no root).
+ * Ops-only: nothing in the request path should enumerate storage.
+ */
+export async function listKeys(): Promise<string[]> {
+  const { readdir } = await import("node:fs/promises");
+  const { relative, sep } = await import("node:path");
+  const root = STORAGE_ROOT;
+  const out: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT" && dir === root) return; // no root yet: nothing stored
+      throw err;
+    }
+    for (const e of entries) {
+      const full = join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile()) out.push(relative(root, full).split(sep).join("/"));
+    }
+  }
+  await walk(root);
+  return out.sort();
+}
+
 export function storageRoot(): string {
   return STORAGE_ROOT;
 }

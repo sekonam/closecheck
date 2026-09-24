@@ -6,7 +6,8 @@ import { revalidatePath } from "next/cache";
 import { EvidenceKind, Tier } from "@prisma/client";
 import { withOrgScope } from "@/lib/db/scoped";
 import { requireOrgSession } from "@/lib/auth/session";
-import { putObject, evidenceKey } from "@/lib/storage/objectStore";
+import { deleteObject, putObject, evidenceKey } from "@/lib/storage/objectStore";
+import { recordError } from "@/lib/metrics/record";
 import { checkEvidenceContent, checkEvidenceUpload } from "@/lib/storage/uploadPolicy";
 import { parseSourceRef, withFieldCitation } from "@/lib/audit/sourceRef";
 import { parseFieldSchema } from "@/lib/templates/fieldSchema";
@@ -139,7 +140,7 @@ export async function deleteEvidence(formData: FormData): Promise<void> {
   }
   const evidenceId = evidenceIdResult.data;
 
-  const { engagementId, auditId } = await withOrgScope(orgId, async (tx) => {
+  const { engagementId, auditId, storageKey } = await withOrgScope(orgId, async (tx) => {
     // findUnique, not findUniqueOrThrow — same reasoning as attachEvidence above.
     const evidence = await tx.evidence.findUnique({
       where: { id: evidenceId },
@@ -149,11 +150,50 @@ export async function deleteEvidence(formData: FormData): Promise<void> {
       throw new Error("Evidence not found.");
     }
     await tx.evidence.delete({ where: { id: evidenceId } });
-    // Deliberately not deleting the underlying object from local storage here — matches
-    // docs/spec.md §8's retention model (purge is a lifecycle-driven job, not an on-delete side
-    // effect of removing one reference) and avoids a half-built deletion path that looks complete.
-    return { engagementId: evidence.finding.audit.engagementId, auditId: evidence.finding.auditId };
+    return {
+      engagementId: evidence.finding.audit.engagementId,
+      auditId: evidence.finding.auditId,
+      storageKey: evidence.storageKey,
+    };
   });
+
+  /**
+   * The object goes too, after the row is gone.
+   *
+   * This function used to leave it, on the stated reasoning that the retention purge is a
+   * lifecycle job rather than an on-delete side effect, and that deleting here would be a
+   * half-built deletion path. That reasoning contradicted the comment ninety lines above it: the
+   * purge finds files ONLY by joining through Evidence rows, so once the row is gone the object is
+   * unreachable by the purge, by the download route, by everything. It was not parked for later
+   * collection; it was orphaned permanently, in the bucket, with nothing in the database that knew
+   * it was there. Demonstrated against the real bucket on 2026-09-24: the object survived deletion
+   * of its row, its engagement, and the entire consultant organisation.
+   *
+   * The case that reaches this fastest is the one where it matters most: a consultant attaches the
+   * wrong seller's contract, removes it, sees it gone — and it is not gone. docs/spec.md §8's
+   * premise is that documents do not outlive the engagement; here one outlived the customer.
+   *
+   * Ordering mirrors attachEvidence in reverse: row first, so nothing can hand the file out while
+   * the object is still there, then the object. Deleting the one object one row named is a
+   * complete operation, not a partial one. If the object delete fails after the row has committed,
+   * that IS an orphan — recorded, and collected by scripts/sweep-orphaned-objects.ts, which exists
+   * for exactly this and for the cascade case (deleting an org takes every row with it in one
+   * statement, and there is no code on that path to put a hook in).
+   */
+  if (storageKey) {
+    try {
+      await deleteObject(orgId, storageKey);
+    } catch (err) {
+      await recordError(
+        "evidence-delete-object",
+        new Error(
+          `Evidence row ${evidenceId} was deleted but its object ${storageKey} was not: ` +
+            `${err instanceof Error ? err.message : String(err)}. ` +
+            `Run npm run db:sweep-orphaned-objects.`,
+        ),
+      );
+    }
+  }
 
   revalidatePath(`/engagements/${engagementId}/audits/${auditId}`);
 }

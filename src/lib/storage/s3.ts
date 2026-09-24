@@ -3,6 +3,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   type S3ClientConfig,
@@ -231,6 +232,20 @@ export function createS3Backend(): StorageBackend {
       return "deleted";
     },
 
+    async listKeys() {
+      // Paged: a bucket of seller documents outgrows one page quickly, and a listing that stopped
+      // at 1,000 would make the orphan sweep report a clean bucket that was not.
+      const keys: string[] = [];
+      let token: string | undefined;
+      do {
+        const page = await s3().send(
+          new ListObjectsV2Command({ Bucket: bucket(), ContinuationToken: token }),
+        );
+        for (const o of page.Contents ?? []) if (o.Key) keys.push(o.Key);
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (token);
+      return keys.sort();
+    },
     async assertUsable() {
       try {
         await s3().send(new HeadBucketCommand({ Bucket: bucket() }));
