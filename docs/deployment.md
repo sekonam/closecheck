@@ -179,7 +179,19 @@ database is its own instance. It stops being harmless the moment anyone rehearse
 up a staging database beside anything else on one cluster: the rotation silently changes the
 passwords behind the other database too, and every `.env` and running server pointed at it breaks
 mid-session. The script's name says "production"; nothing in it is scoped to one. Rehearse against a
-separate cluster, or skip step 6 in a rehearsal and say so. (Found by the other session rehearsing
+separate cluster, or skip step 6 in a rehearsal and say so.
+
+If you do rehearse on a separate cluster, **initialise it with password authentication
+(`scram-sha-256` in `pg_hba.conf`), not `initdb --auth=trust`.** Under `trust` Postgres accepts any
+password, so the check that matters after rotation — "the old hardcoded dev password no longer
+connects" — can only ever pass, and it reads as a failure of the rotation when it is a property of
+the cluster. The other session hit exactly this on 2026-09-24: the first run reported the old
+password still worked, which would have been a serious finding; with `scram-sha-256` the old
+password failed and the rotated credential connected as `closecheck_app`, superuser off. Steps 5, 6,
+10 and 12 have each been executed end to end that way against a cluster that had never seen this
+schema — fresh role creation included, not only the `IF NOT EXISTS` re-run path. What remains
+unrehearsed is whatever needs Render itself: the blueprint apply, `preDeployCommand`, the
+disk-free service coming up, and `NEXTAUTH_URL` against a real hostname. (Found by the other session rehearsing
 this runbook end to end on a scratch database, 2026-09-24 — everything else in it passed clean on
 an empty database: migrations, seed and the five publishes to v6, `verify:deployment` 24/24, and all
 four role verifiers.)
