@@ -278,7 +278,7 @@ export default async function SettingsPage({
             <p className="font-medium">Temporary password for {invitedEmail}</p>
             <p className="mt-1 font-mono text-xs">{invitedTempPassword}</p>
             <p className="mt-1 text-xs text-amber-700">
-              Shown once — relay it to them yourself. There is no invite-email sending yet (Phase 2
+              Shown here for one minute, in this browser only — relay it to them yourself. There is no invite-email sending yet (Phase 2
               placeholder); this password won&apos;t be shown again after you leave this page.
             </p>
           </div>

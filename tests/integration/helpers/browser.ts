@@ -56,9 +56,21 @@ export async function requireServer(): Promise<void> {
  * Waiting on the POST response is the only signal that actually means "the action finished". Only
  * after this resolves is it safe to navigate and assert persistence against a fresh load.
  */
+/**
+ * How long a server action may take before the harness calls it failed. 30s was hard-coded and
+ * was right for one driver on an idle machine; four parallel drivers on one dev server pushed
+ * ordinary actions past it (load average 45, renders at 60–80s) and produced false failures in
+ * three rows of the E2E plan. The default is now 60s and CLOSECHECK_E2E_ACTION_TIMEOUT_MS overrides
+ * it for a deliberately loaded run. It is not a product timeout — nothing in the app changes.
+ */
+export function actionTimeoutMs(): number {
+  const n = Number(process.env.CLOSECHECK_E2E_ACTION_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 60_000;
+}
+
 export async function submitAndSettle(page: Page, locator: Locator): Promise<void> {
   await Promise.all([
-    page.waitForResponse((response) => response.request().method() === "POST", { timeout: 30_000 }),
+    page.waitForResponse((response) => response.request().method() === "POST", { timeout: actionTimeoutMs() }),
     locator.click(),
   ]);
 }
@@ -69,7 +81,7 @@ export async function submitAndSettle(page: Page, locator: Locator): Promise<voi
  */
 export async function submitExpectingRefusal(page: Page, locator: Locator): Promise<void> {
   await Promise.all([
-    page.waitForURL(/[?&]error=/, { timeout: 30_000 }),
+    page.waitForURL(/[?&]error=/, { timeout: actionTimeoutMs() }),
     locator.click(),
   ]);
 }
@@ -91,7 +103,12 @@ export function collectPageErrors(page: Page): { errors: string[]; significant: 
     errors,
     significant: () =>
       errors.filter(
-        (message) => !/favicon|DevTools|Download the React DevTools|Extension|sourcemap/i.test(message),
+        (message) =>
+          !/favicon|DevTools|Download the React DevTools|Extension|sourcemap/i.test(message) &&
+          // React 19's dev-only performance tracks throw "cannot have a negative time stamp" under
+          // load in `next dev`; it is instrumentation, cannot occur in a production build, and was
+          // caught by driver C reading the audit page during the E2E plan.
+          !/Failed to execute 'measure' on 'Performance'/.test(message),
       ),
   };
 }
