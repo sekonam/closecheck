@@ -256,6 +256,16 @@ describe("B · engagements and audits, through the UI", () => {
           await new Promise((r) => setTimeout(r, 500));
         }
       }
+      // After a delivery the dispatcher still has a database write to make (lastSuccessAt) — the
+      // receiver sees the request before that write lands. Reading the row the instant the request
+      // arrives lost that race on CI and passed locally; wait for the write, then assert on it.
+      if (received.length > 0) {
+        for (let i = 0; i < 40; i++) {
+          const probe = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
+          if (probe.lastSuccessAt) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
       const ep = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
       if (received.length === 0) {
         // A receiver on 127.0.0.1 may be refused by the outbound host guard; that is a documented
