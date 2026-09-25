@@ -4,7 +4,8 @@ import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
 import { updateOrgBranding, uploadOrgLogo, removeOrgLogo, acknowledgeDisclaimer } from "@/lib/actions/org";
 import { inviteMember, removeMember } from "@/lib/actions/team";
-import { createApiKey, revokeApiKey } from "@/lib/actions/apiKeys";
+import { createApiKey, revokeApiKey, consumeSecretReveals } from "@/lib/actions/apiKeys";
+import { RevealOnce } from "./RevealOnce";
 import { addWebhookEndpoint, deleteWebhookEndpoint } from "@/lib/actions/webhooks";
 import { startCheckout, openBillingPortal } from "@/lib/actions/billing";
 import { isBillingConfigured, isEnforcementEnabled, PLAN_LABELS } from "@/lib/billing/config";
@@ -467,13 +468,12 @@ export default async function SettingsPage({
         </p>
 
         {newApiKey && (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-medium">Your new API key</p>
-            <p className="mt-1 break-all font-mono text-xs">{newApiKey}</p>
-            <p className="mt-1 text-xs text-amber-700">
-              Shown once — store it now. CloseCheck keeps only a hash and cannot show it again.
-            </p>
-          </div>
+          <RevealOnce
+            title="Your new API key"
+            value={newApiKey}
+            hint="Shown once — store it now. CloseCheck keeps only a hash and cannot show it again."
+            consume={consumeSecretReveals}
+          />
         )}
 
         {apiKeys.length > 0 && (
@@ -539,13 +539,12 @@ export default async function SettingsPage({
         </p>
 
         {newWebhookSecret && (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-medium">Signing secret for your new endpoint</p>
-            <p className="mt-1 break-all font-mono text-xs">{newWebhookSecret}</p>
-            <p className="mt-1 text-xs text-amber-700">
-              Shown once — configure it in your receiver now to verify delivery signatures.
-            </p>
-          </div>
+          <RevealOnce
+            title="Signing secret for your new endpoint"
+            value={newWebhookSecret}
+            hint="Shown once — configure it in your receiver now to verify delivery signatures."
+            consume={consumeSecretReveals}
+          />
         )}
 
         {webhookEndpoints.length > 0 && (

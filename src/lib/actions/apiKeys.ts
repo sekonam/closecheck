@@ -67,6 +67,18 @@ export async function createApiKey(formData: FormData): Promise<void> {
   revalidatePath("/settings");
 }
 
+/**
+ * Deletes the one-time reveal cookies once the settings page has painted them. Called by the
+ * RevealOnce client component on mount; see its docstring for why a Server Component cannot do
+ * this itself. Deleting both is deliberate — a page that shows one secret has shown its render.
+ */
+export async function consumeSecretReveals(): Promise<void> {
+  const cookieStore = await cookies();
+  for (const name of ["closecheck_new_api_key", "closecheck_new_webhook_secret"]) {
+    cookieStore.set(name, "", { maxAge: 0, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/settings" });
+  }
+}
+
 export async function revokeApiKey(formData: FormData): Promise<void> {
   const { orgId, userId } = await requireOrgSession();
 
