@@ -117,6 +117,12 @@ jobs:
       # tests; here it must not become a source of false failures.
       TRUSTED_PROXY_HOPS: "0"
       API_RATE_LIMIT_PER_MINUTE: "100000"
+      # This job runs the PRODUCTION build (npm start), and in production the app refuses local
+      # disk as a storage backend unless told the path is a real volume — without this every
+      # upload, report and download refused and 24 rows failed on 2026-09-25, which was the guard
+      # doing its job against a job that had not said so. The runner's disk is exactly as durable
+      # as the suite needs it to be.
+      STORAGE_ACKNOWLEDGE_LOCAL: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

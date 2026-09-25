@@ -18,7 +18,10 @@ const direct = new PrismaClient({ datasourceUrl: process.env.DIRECT_DATABASE_URL
 describe("an audit's credit is consumed by its first billable entry, once", () => {
   let org: OrgFixture;
   beforeAll(async () => {
+    // isBillingConfigured() needs BOTH; with only the key set, consumption reports "not-configured"
+    // and every expectation below is vacuous. CI has neither in its environment.
     process.env.STRIPE_SECRET_KEY ||= "sk_test_dummy";
+    process.env.STRIPE_WEBHOOK_SECRET ||= "whsec_dummy";
     process.env.BILLING_INCLUDED_AUDITS_MONTHLY = "3";
     org = await createOrgFixture("billable-work");
     await withOrgScope(org.orgId, (tx) => grantPlanCreditsIfDue(tx, org.orgId, "SOLO_MONTHLY"));

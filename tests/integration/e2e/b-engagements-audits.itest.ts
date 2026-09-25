@@ -6,6 +6,14 @@ import { BASE_URL } from "../helpers/http";
 import { createOrgFixture, destroyOrgFixture, type OrgFixture } from "../helpers/fixtures";
 
 /**
+ * The SERVER's billing configuration, as far as this process can tell: the job env in CI, .env
+ * locally (loadEnv). Rows that need Stripe test keys on the server skip with this reason rather
+ * than fail — CI has no Stripe secrets by design, and a skip that names why is honest where a
+ * silent pass would not be.
+ */
+const SERVER_BILLING_CONFIGURED = !!process.env.STRIPE_SECRET_KEY && !!process.env.STRIPE_WEBHOOK_SECRET;
+
+/**
  * E2E plan 2026-09-25, area B rows B1–B4, B10, B11: the engagement and audit lifecycle as a
  * consultant drives it, in a real browser, against the running app and the real database.
  *
@@ -184,7 +192,7 @@ describe("B · engagements and audits, through the UI", () => {
     expect((await ledger(orgId)).length).toBe(0);
   }, 300_000);
 
-  it("B4 · the credit notice before and after the first Tier B/C entry; balance decrements once", async () => {
+  it.skipIf(!SERVER_BILLING_CONFIGURED)("B4 · the credit notice before and after the first Tier B/C entry; balance decrements once", async () => {
     await direct.auditCreditEntry.create({ data: { orgId, delta: 3, reason: "PLAN_GRANT", note: "e2e grant" } });
     await page.goto(auditUrl, { waitUntil: "domcontentloaded" });
     let body = (await page.innerText("body")).replace(/\s+/g, " ");
@@ -237,7 +245,17 @@ describe("B · engagements and audits, through the UI", () => {
       await submitAndSettle(page, page.locator('form:has(button:has-text("Mark audit complete")) button'));
       expect((await direct.audit.findUniqueOrThrow({ where: { id: auditId } })).status).toBe("COMPLETE");
 
-      for (let i = 0; i < 30 && received.length === 0; i++) await new Promise((r) => setTimeout(r, 500));
+      // The dispatcher's worst case before it records anything is three 5 s attempts plus 2 s and 4 s
+      // of back-off — 21 s — so a 15 s wait could read "nothing recorded" while it was still trying.
+      // Wait past that, then also give a recorded failure a moment to land.
+      for (let i = 0; i < 60 && received.length === 0; i++) await new Promise((r) => setTimeout(r, 500));
+      if (received.length === 0) {
+        for (let i = 0; i < 20; i++) {
+          const probe = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
+          if (probe.lastFailureReason || probe.lastSuccessAt) break;
+          await new Promise((r) => setTimeout(r, 500));
+        }
+      }
       const ep = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
       if (received.length === 0) {
         // A receiver on 127.0.0.1 may be refused by the outbound host guard; that is a documented
