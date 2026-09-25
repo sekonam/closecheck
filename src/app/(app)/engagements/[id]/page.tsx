@@ -142,7 +142,7 @@ export default async function EngagementPage({
             <select
               id="templateSlug"
               name="templateSlug"
-              className="mt-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+              className="mt-1 w-full max-w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm sm:w-auto"
             >
               {activeTemplates.map((t) => (
                 <option key={t.slug} value={t.slug}>

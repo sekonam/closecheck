@@ -216,8 +216,8 @@ export default async function SettingsPage({
             </p>
           )}
           {isOwner && (
-          <form action={uploadOrgLogoAction} className="flex items-center gap-2">
-            <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
+          <form action={uploadOrgLogoAction} className="flex flex-wrap items-center gap-2">
+            <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required className="min-w-0 max-w-full text-sm" />
             <button
               type="submit"
               className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -467,14 +467,14 @@ export default async function SettingsPage({
           owner can create or revoke keys.
         </p>
 
-        {newApiKey && (
-          <RevealOnce
-            title="Your new API key"
-            value={newApiKey}
-            hint="Shown once — store it now. CloseCheck keeps only a hash and cannot show it again."
-            consume={consumeSecretReveals}
-          />
-        )}
+        {/* Always mounted: it keeps the secret in client state across the refresh its own
+            consume() triggers (see RevealOnce). */}
+        <RevealOnce
+          title="Your new API key"
+          value={newApiKey ?? null}
+          hint="Shown once — store it now. CloseCheck keeps only a hash and cannot show it again."
+          consume={consumeSecretReveals}
+        />
 
         {apiKeys.length > 0 && (
           <ul className="mt-3 divide-y divide-slate-100 text-sm">
@@ -538,14 +538,12 @@ export default async function SettingsPage({
           endpoints.
         </p>
 
-        {newWebhookSecret && (
-          <RevealOnce
-            title="Signing secret for your new endpoint"
-            value={newWebhookSecret}
-            hint="Shown once — configure it in your receiver now to verify delivery signatures."
-            consume={consumeSecretReveals}
-          />
-        )}
+        <RevealOnce
+          title="Signing secret for your new endpoint"
+          value={newWebhookSecret ?? null}
+          hint="Shown once — configure it in your receiver now to verify delivery signatures."
+          consume={consumeSecretReveals}
+        />
 
         {webhookEndpoints.length > 0 && (
           <ul className="mt-3 divide-y divide-slate-100 text-sm">

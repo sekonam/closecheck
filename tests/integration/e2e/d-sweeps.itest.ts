@@ -126,12 +126,9 @@ describe("area D — page sweeps: console, viewport, not-found", () => {
   }, 240_000);
 
   /**
-   * D6 in two halves, deliberately. Three pages are known to overflow 400px, each by one control:
-   * the engagement page's "Start audit" row (area B), the audit page's evidence "Attach" rows
-   * (area B), and the settings page's logo-upload form (area A). They are not this driver's to fix,
-   * so they are not hidden in a skip-list either: the strict half covers every other page, and the
-   * `it.fails` half holds the three known offenders — it goes RED the moment any of them is fixed,
-   * which is the prompt to move that page into the strict half. Measured 2026-09-25: 413, 512, 490.
+   * D6: every page fits a 400px viewport. Three pages overflowed when this was first measured
+   * (2026-09-25: engagement 413, audit 512, settings 490 — one control each) and were held in an
+   * expected-failure half until fixed; they are fixed, so there is one strict test again.
    */
   async function measureAll() {
     const results = [];
@@ -142,22 +139,11 @@ describe("area D — page sweeps: console, viewport, not-found", () => {
     console.log(`D6 sweep: ${results.map((r) => `${r.url.replace(BASE_URL, "")}=${r.scrollWidth}`).join(", ")}`);
     return results;
   }
-  const knownOverflowing = (url: string) =>
-    /\/engagements\/[^/]+$/.test(url) || /\/audits\/[^/]+$/.test(url) || /\/settings$/.test(url);
-
-  it("D6: every page outside the three known offenders fits a 400px viewport", async () => {
-    const results = (await measureAll()).filter((r) => !knownOverflowing(r.url));
-    expect(results.length).toBeGreaterThanOrEqual(5);
+  it("D6: every page fits a 400px viewport", async () => {
+    const results = await measureAll();
+    expect(results.length).toBeGreaterThanOrEqual(8);
     const overflowing = results.filter((r) => r.scrollWidth > 400).map((r) => `${r.url} scrollWidth=${r.scrollWidth}`);
     expect(overflowing, "pages overflowing 400px").toEqual([]);
-  }, 240_000);
-
-  it.fails("D6 (known, routed): engagement, audit and settings pages still overflow 400px", async () => {
-    const results = (await measureAll()).filter((r) => knownOverflowing(r.url));
-    expect(results.length).toBe(3);
-    const overflowing = results.filter((r) => r.scrollWidth > 400);
-    // When this assertion starts passing, the offender is fixed: move it to the strict test above.
-    expect(overflowing, "the known offenders").toEqual([]);
   }, 240_000);
 
   it("D7: bogus ids and tokens render the branded not-found page, never a stack trace", async () => {

@@ -1,5 +1,6 @@
 "use server";
 
+import { secureCookies } from "@/lib/http/secureCookies";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { cookies } from "next/headers";
@@ -121,7 +122,7 @@ export async function inviteMember(formData: FormData): Promise<void> {
     path: "/settings",
     // Not unconditional: local development runs over plain HTTP, and a Secure cookie there would
     // simply never be set, silently breaking the invite hand-off.
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
   });
 
   // Outside the transaction and deliberately not awaited: this makes a Stripe round trip, which

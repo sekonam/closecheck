@@ -35,11 +35,44 @@ export async function withOrgScope<T>(
     throw new Error("withOrgScope called without an orgId — refusing to run an unscoped query");
   }
 
-  return prisma.$transaction(async (tx) => {
-    // set_config's third argument (`true`) scopes the setting to this transaction only — it never
-    // leaks to the next query on a pooled connection. Parameterized via Prisma's tagged template, not
-    // string interpolation, even though orgId is server-generated (cuid), not raw user input.
-    await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`;
-    return fn(tx);
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      // set_config's third argument (`true`) scopes the setting to this transaction only — it never
+      // leaks to the next query on a pooled connection. Parameterized via Prisma's tagged template,
+      // not string interpolation, even though orgId is server-generated (cuid), not raw user input.
+      await tx.$executeRaw`SELECT set_config('app.current_org_id', ${orgId}, true)`;
+      return fn(tx);
+    },
+    /**
+     * Interactive-transaction budget. Prisma's defaults (2s to acquire, 5s to run) stay the
+     * defaults, and CLOSECHECK_TX_MAX_WAIT_MS / CLOSECHECK_TX_TIMEOUT_MS override them per
+     * deployment. The reasoning is measured, not argued, and it went both ways on 2026-09-25:
+     *
+     * Under a stalled event loop (four browsers and PDF renders on one machine) every page and
+     * action answered 500 at the session check, because every one of them opens one of these and
+     * a 5s budget turns a few-second stall into an outage. Raising the budget to 20s looked like
+     * the fix — and the full E2E suite then hung one row that had passed at 5s under heavier load,
+     * while the server log showed POSTs queued for 24–94s with zero transaction errors. A long
+     * budget under pool contention does not absorb a stall; it queues every request behind every
+     * other one and moves the failure to whoever is waiting. At 5s the same suite is 176/176.
+     *
+     * So the default is the alarm, and an operator running a small box that renders PDFs can
+     * raise it deliberately once a real stall — not a test matrix — is what they are seeing.
+     */
+    transactionBudget(),
+  );
+}
+
+/**
+ * The interactive-transaction budget, overridable per deployment without a code change. Defaults
+ * are Prisma's own; see the note at the call site for why raising them is an operator's decision
+ * against a measured stall and not a default.
+ */
+export function transactionBudget(): { maxWait: number; timeout: number } {
+  const maxWait = Number(process.env.CLOSECHECK_TX_MAX_WAIT_MS);
+  const timeout = Number(process.env.CLOSECHECK_TX_TIMEOUT_MS);
+  return {
+    maxWait: Number.isFinite(maxWait) && maxWait > 0 ? maxWait : 2_000,
+    timeout: Number.isFinite(timeout) && timeout > 0 ? timeout : 5_000,
+  };
 }

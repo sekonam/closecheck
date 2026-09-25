@@ -35,8 +35,13 @@ jobs:
           cache: npm
       - run: npm ci
       # The Prisma client is generated code that nothing commits, and both tsc and the unit suite
-      # import types from it.
+      # import types from it. prisma.config.ts reads DIRECT_DATABASE_URL at load — for every CLI
+      # command, generate included, which never connects — so the job supplies a placeholder. It
+      # failed this job outright on 2026-09-25 with PrismaConfigEnvError, and stayed unnoticed
+      # because every push superseded the previous run before anyone read a result.
       - run: npx prisma generate
+        env:
+          DIRECT_DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
       - run: npx eslint .
       # --incremental false: tsconfig.tsbuildinfo is committed, and a stale one would let a real
       # type error be skipped as already-checked.
@@ -67,7 +72,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # Same placeholder as the static job: prisma.config.ts reads it at load, generate never connects.
       - run: npx prisma generate
+        env:
+          DIRECT_DATABASE_URL: postgresql://unused:unused@localhost:5432/unused
       - run: npm run test:policy-watch
 
   integration:

@@ -27,8 +27,34 @@ export async function runOrRedirect(action: () => Promise<void>, path: string): 
     // Phase 2.5 error tracking: every server-action failure that reaches a user as an error message
     // also lands in error_events. Fire-and-forget — recording must never delay or alter the redirect.
     void recordError("server-action", err);
-    const message = err instanceof Error ? err.message : "Something went wrong.";
-    redirect(`${path}?error=${encodeURIComponent(message)}`);
+    redirect(`${path}?error=${encodeURIComponent(userFacingMessage(err))}`);
   }
   redirect(path);
+}
+
+export const GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again.";
+
+/**
+ * Only a message this application wrote on purpose reaches the consultant.
+ *
+ * Every action here throws a plain `Error` with consultant-facing text when it refuses something
+ * ("A Red finding needs a note…"). Anything else that escapes — a Prisma error, a TypeError, a
+ * timeout — carries text written for an engineer, and it used to be forwarded verbatim into
+ * `?error=` and rendered on the page. Under load during the E2E plan a consultant would have read
+ * "Transaction API error: Transaction already closed…" followed by absolute filesystem paths and
+ * `.next` chunk names. That is an information leak dressed as an error message, and none of it
+ * helps the person reading it. The full error still goes to error_events above; the page gets the
+ * one sentence it can act on.
+ *
+ * The discriminator is the constructor, not the text: subclasses (PrismaClientKnownRequestError,
+ * TypeError, AuthError…) are not ours. A belt-and-braces path check catches the one case where a
+ * plain Error was constructed around a foreign message.
+ */
+export function userFacingMessage(err: unknown): string {
+  if (!(err instanceof Error) || err.constructor !== Error) return GENERIC_ERROR_MESSAGE;
+  const message = err.message.trim();
+  if (!message || /\/(Users|home|app|node_modules)\/|\.next\/|\S:\d+:\d+\b|Prisma|Transaction API/i.test(message)) {
+    return GENERIC_ERROR_MESSAGE;
+  }
+  return message;
 }

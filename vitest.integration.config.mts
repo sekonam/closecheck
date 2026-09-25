@@ -13,6 +13,9 @@ import { fileURLToPath } from "node:url";
  */
 export default defineConfig({
   test: {
+    // The E2E production build (NEXT_DIST_DIR=.next-e2e) copies the source tree, tests included,
+    // into its standalone output; without this the suite runs twice.
+    exclude: ["**/node_modules/**", "**/.next/**", "**/.next-e2e/**"],
     environment: "node",
     include: ["tests/integration/**/*.itest.ts"],
     setupFiles: ["tests/integration/helpers/loadEnv.ts"],

@@ -1,5 +1,6 @@
 "use server";
 
+import { secureCookies } from "@/lib/http/secureCookies";
 import { z } from "zod";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
@@ -60,7 +61,7 @@ export async function createApiKey(formData: FormData): Promise<void> {
     // (relaxed outside production so local http://localhost development still works), and the path
     // scope stops it riding along on every unrelated request — the settings page is the only thing
     // that ever reads it. httpOnly keeps it out of page JS, which has no reason to see it.
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/settings",
   });
 
@@ -75,7 +76,7 @@ export async function createApiKey(formData: FormData): Promise<void> {
 export async function consumeSecretReveals(): Promise<void> {
   const cookieStore = await cookies();
   for (const name of ["closecheck_new_api_key", "closecheck_new_webhook_secret"]) {
-    cookieStore.set(name, "", { maxAge: 0, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/settings" });
+    cookieStore.set(name, "", { maxAge: 0, httpOnly: true, sameSite: "lax", secure: secureCookies(), path: "/settings" });
   }
 }
 

@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Where the build lands. Defaults to Next's `.next`; NEXT_DIST_DIR lets a production build for the
+  // E2E suite (`NEXT_DIST_DIR=.next-e2e npm run build`) coexist with a running `next dev`, which owns
+  // `.next` and is corrupted by a build written underneath it (docs/deployment.md). CI and the
+  // Dockerfile never set it, so nothing about a real deploy changes.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   // Bundles only the production dependencies actually reachable from the app into .next/standalone,
   // instead of shipping the full node_modules — needed to keep the production Docker image (which
   // also carries a full Chromium install for src/lib/reports/pdf.ts) a reasonable size.

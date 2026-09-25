@@ -1,5 +1,6 @@
 "use server";
 
+import { secureCookies } from "@/lib/http/secureCookies";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { cookies } from "next/headers";
@@ -54,7 +55,7 @@ export async function addWebhookEndpoint(formData: FormData): Promise<void> {
     // (relaxed outside production so local http://localhost development still works), and the path
     // scope stops it riding along on every unrelated request — the settings page is the only thing
     // that ever reads it. httpOnly keeps it out of page JS, which has no reason to see it.
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies(),
     path: "/settings",
   });
 

@@ -196,6 +196,30 @@ this runbook end to end on a scratch database, 2026-09-24 — everything else in
 an empty database: migrations, seed and the five publishes to v6, `verify:deployment` 24/24, and all
 four role verifiers.)
 
+### Run the E2E suite against a production build, not only `next dev`
+
+`next dev` hides two classes of failure: dev-only React instrumentation errors and — the one that
+mattered — behaviour that differs in production. Auth.js trusts the request host implicitly under
+`next dev` and refuses it under `next start` unless `trustHost` is set; every sign-in on a
+production build 500ed with `UntrustedHost` and nothing local had ever shown it, because nothing
+local ran the production build. The fix is in `src/lib/auth/config.ts`; the lesson is the harness.
+
+To run the whole integration suite against a production build beside a running dev server:
+
+```
+NEXT_DIST_DIR=.next-e2e npm run build
+NEXT_DIST_DIR=.next-e2e PORT=3100 NEXTAUTH_URL=http://localhost:3100 \
+  STORAGE_ACKNOWLEDGE_LOCAL=true npm start &
+CLOSECHECK_TEST_BASE_URL=http://localhost:3100 npx vitest run --config vitest.integration.config.mts
+```
+
+`NEXT_DIST_DIR` keeps the build out of `.next`, which the dev server owns and which a build written
+underneath it corrupts (above). `STORAGE_ACKNOWLEDGE_LOCAL=true` is required because this IS a
+production process: without it, and with no bucket configured, every upload, report and download
+refuses — which is the guard working, and which made every storage-touching row fail on the first
+production-build run until the harness said so. Full-matrix timing is also far more honest here: no route recompiles
+on first hit, no dev overlay, no hydration-timing artefacts.
+
 ## Ongoing deploys
 
 Every subsequent push runs `preDeployCommand` (`prisma migrate deploy`) automatically before the new
@@ -268,10 +292,14 @@ Either way the conclusions are the same, and both are worth keeping:
   like a bug in whatever they just wrote: whoever needs a production build says so, the other stops
   their dev server, and it is taken in turns. Nothing shares `.next` safely, so there is no
   cleverer arrangement than that.
-- **Do not raise the transaction timeout to make this go away.** Five seconds is a reasonable alarm
-  for transactions that should take milliseconds, and what it is reporting is an artifact of the
-  environment rather than anything the production path does. CI has never seen it, because CI runs
-  `npm start` against a production build.
+- **Do not raise the transaction timeout to make this go away.** What it is reporting here is an
+  artifact of the environment rather than anything the production path does. The budget is now an
+  environment knob (`CLOSECHECK_TX_MAX_WAIT_MS`, `CLOSECHECK_TX_TIMEOUT_MS`; defaults 2s/5s) for one
+  reason only: a small box rendering PDFs may see genuine event-loop stalls, and there every page
+  and action 500s at the session check on a 5s budget. Raise it there, deliberately, against a
+  stall you have measured. Do not raise it to make a loaded test matrix pass — that was tried on
+  2026-09-25 and made it worse: at 20s one row hung behind queued requests (POSTs of 24–94s, no
+  transaction errors); at 5s the same suite was 176/176.
 
 Re-run, or run against `npm start`, and check first whether anything else is building.
 

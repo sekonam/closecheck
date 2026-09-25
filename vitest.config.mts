@@ -16,7 +16,7 @@ export default defineConfig({
     // point of it, and it is also why it must not gate pull requests: a check that turns someone
     // else's unrelated push red is a check that gets deleted, and deleting it leaves nothing.
     // Excluded by glob rather than by skipping, so it can never report green without running.
-    exclude: [...configDefaults.exclude, "**/.next/**", "**/policyWatch*.test.ts"],
+    exclude: [...configDefaults.exclude, "**/.next/**", "**/.next-e2e/**", "**/policyWatch*.test.ts"],
   },
   resolve: {
     alias: {

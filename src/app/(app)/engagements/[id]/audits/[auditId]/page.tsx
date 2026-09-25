@@ -726,13 +726,13 @@ export default async function AuditPage({
                         ))}
                       </ul>
                     )}
-                    <form action={attachEvidenceAction} className="mt-2 flex items-center gap-2">
+                    <form action={attachEvidenceAction} className="mt-2 flex items-center gap-2 flex-wrap">
                       <input type="hidden" name="findingId" value={finding.id} />
-                      <input type="file" name="file" className="text-xs" />
+                      <input type="file" name="file" className="min-w-0 max-w-full text-xs" />
                       <input
                         name="label"
                         placeholder="Label (optional) — e.g. Toast MSA, executed"
-                        className="w-56 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                        className="w-full max-w-full rounded-md border border-slate-300 px-2 py-1 text-xs sm:w-56"
                       />
                       <button
                         type="submit"

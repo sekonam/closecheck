@@ -24,6 +24,19 @@ import {
 const DUMMY_PASSWORD_HASH = "$2b$10$p8065EY9xQWymfpjfyaMF.v.MeDMzJMhzkDXnStxcN2yrnB0Q7s52";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  /**
+   * Required in production, and invisible in development, which is how it stayed unset until the
+   * E2E plan ran the suite against a production build on 2026-09-25: every sign-in and sign-up
+   * ended at /api/auth/callback/credentials with a 500 and `[auth][error] UntrustedHost`, and no
+   * session was ever issued. `next dev` trusts the host implicitly; `next start` does not, and
+   * NEXTAUTH_URL alone does not satisfy Auth.js v5's check. The first real sign-up on Render would
+   * have hit this.
+   *
+   * Trusting the Host header is safe here for the same reason TRUSTED_PROXY_HOPS is 1: the app
+   * runs behind exactly one platform proxy (Render) that sets Host itself, so it is not
+   * client-controlled. Callback and redirect URLs derive from it.
+   */
+  trustHost: true,
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
