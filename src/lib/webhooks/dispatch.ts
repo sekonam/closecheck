@@ -95,6 +95,23 @@ export async function dispatchWebhookEvent(orgId: string, event: WebhookEvent): 
 
     await Promise.allSettled(
       endpoints.map(async (endpoint) => {
+        // Re-checked at dispatch, not only at create: the stored URL may predate a rule the check
+        // has since learned (every alternate private-address spelling it used to miss, for one),
+        // and a fetch is the moment the SSRF surface is real. Still name-based — this cannot stop
+        // DNS rebinding (hostSafety.ts header) — but a URL the product would refuse to register
+        // today must not keep being fetched just because it was registered yesterday.
+        if (!isDeliverableWebhookUrl(endpoint.url)) {
+          await withOrgScope(orgId, (tx) =>
+            tx.webhookEndpoint.update({
+              where: { id: endpoint.id },
+              data: {
+                lastFailureAt: new Date(),
+                lastFailureReason: "Refused at dispatch: endpoint URL is not a deliverable public https URL",
+              },
+            }),
+          );
+          return;
+        }
         const signature = signWebhookPayload(endpoint.secret, body);
         let lastError = "";
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {

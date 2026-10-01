@@ -173,9 +173,11 @@ describe("A · identity and the firm", () => {
     let org = await direct.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
     expect(org.disclaimerAcknowledgedAt).toBeNull();
     await page.goto(`${BASE_URL}/settings`, { waitUntil: "domcontentloaded" });
-    const ack = page.getByRole("button", { name: /reviewed this language/i }).first();
-    expect(await ack.count(), "the disclaimer section should offer exactly one action to an owner").toBe(1);
-    await submitAndSettle(page, ack);
+    // Count the un-firsted locator: `.first().count()` is capped at 1 and could never report a
+    // duplicated control, which is half of what "exactly one" claims.
+    const acks = page.getByRole("button", { name: /reviewed this language/i });
+    expect(await acks.count(), "the disclaimer section should offer exactly one action to an owner").toBe(1);
+    await submitAndSettle(page, acks.first());
     await page.goto(`${BASE_URL}/settings`, { waitUntil: "domcontentloaded" });
     org = await direct.consultantOrg.findUniqueOrThrow({ where: { id: orgId } });
     expect(org.disclaimerAcknowledgedAt).toBeInstanceOf(Date);
@@ -234,11 +236,11 @@ describe("A · identity and the firm", () => {
     expect(body).not.toMatch(/acknowledge the (report )?disclaimer/i);
   }, 60_000);
 
-  it("A9 password change: no such surface exists (reported, not tested)", () => {
-    // There is no profile/password page in src/app — a consultant cannot change their own
-    // password, and a member invited with a temp password keeps it. Routed as a finding.
-    expect(true).toBe(true);
-  });
+  // There is no profile/password page in src/app — a consultant cannot change their own
+  // password, and a member invited with a temp password keeps it. Routed to the founder as a
+  // feature gap (plan row A9); a todo rather than a green row, so the pass count never claims
+  // coverage that does not exist.
+  it.todo("A9 password change: no surface exists — routed to the founder");
 
   it("no significant console or page errors across the journey", async () => {
     await page.close();

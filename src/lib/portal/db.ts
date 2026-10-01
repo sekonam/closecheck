@@ -1,6 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { PrismaClient } from "@prisma/client";
 
+import { transactionBudget } from "@/lib/db/scoped";
+
 /**
  * A separate client, deliberately not the shared `prisma` from src/lib/db/client.ts, connected as
  * `closecheck_portal` (PORTAL_DATABASE_URL) — a role granted SELECT on
@@ -35,8 +37,15 @@ export async function withPortalScope<T>(token: string, fn: (tx: PortalTx) => Pr
     throw new Error("withPortalScope called without a token — refusing to run an unscoped query");
   }
 
-  return portalPrisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.portal_token', ${token}, true)`;
-    return fn(tx);
-  });
+  return portalPrisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.portal_token', ${token}, true)`;
+      return fn(tx);
+    },
+    // Same budget knob as withOrgScope, for the same operator and the same stall: the portal is
+    // the buyer-facing surface, and a deployment whose measured event-loop stall made the operator
+    // raise CLOSECHECK_TX_TIMEOUT_MS would otherwise keep 500ing exactly here — the one page the
+    // firm's client sees — while every consultant page recovered.
+    transactionBudget(),
+  );
 }

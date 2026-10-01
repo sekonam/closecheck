@@ -180,7 +180,18 @@ describe("B · engagements and audits, through the UI", () => {
     const findingCount = await direct.finding.count({ where: { auditId } });
     await page.goto(auditUrl, { waitUntil: "domcontentloaded" });
     const body = (await page.innerText("body")).replace(/\s+/g, " ");
-    expect(body, "page shows no trace of the automated run").toMatch(/automat|checked|last run/i);
+    // The falsifiable trace of the run is the Tier A rated count: before the run the section reads
+    // "(0/N rated", after it the rated findings count. Computed with the roll-up's own semantics
+    // (rated = severity set, NOT_APPLICABLE excluded from the total — src/lib/reports/rollup.ts).
+    // (The earlier /automat|checked/ match could never fail — the "Run Tier A automated checks"
+    // button matches it on an untouched page.)
+    const allFindings = await direct.finding.findMany({ where: { auditId }, include: { templateItem: true } });
+    const tierA = allFindings.filter((f) => f.templateItem.tier === "A" && f.status !== "NOT_APPLICABLE");
+    const ratedA = tierA.filter((f) => f.severity != null).length;
+    expect(ratedA, "the run rated nothing, so the page cannot show a trace").toBeGreaterThan(0);
+    expect(body, "the page still shows Tier A as unrated after the run").toContain(
+      `(${ratedA}/${tierA.length} rated`,
+    );
 
     // Re-run: no new findings, no credit, results refreshed rather than duplicated.
     await Promise.all([
@@ -245,40 +256,22 @@ describe("B · engagements and audits, through the UI", () => {
       await submitAndSettle(page, page.locator('form:has(button:has-text("Mark audit complete")) button'));
       expect((await direct.audit.findUniqueOrThrow({ where: { id: auditId } })).status).toBe("COMPLETE");
 
-      // The dispatcher's worst case before it records anything is three 5 s attempts plus 2 s and 4 s
-      // of back-off — 21 s — so a 15 s wait could read "nothing recorded" while it was still trying.
-      // Wait past that, then also give a recorded failure a moment to land.
-      for (let i = 0; i < 60 && received.length === 0; i++) await new Promise((r) => setTimeout(r, 500));
-      if (received.length === 0) {
-        for (let i = 0; i < 20; i++) {
-          const probe = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
-          if (probe.lastFailureReason || probe.lastSuccessAt) break;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-      }
-      // After a delivery the dispatcher still has a database write to make (lastSuccessAt) — the
-      // receiver sees the request before that write lands. Reading the row the instant the request
-      // arrives lost that race on CI and passed locally; wait for the write, then assert on it.
-      if (received.length > 0) {
-        for (let i = 0; i < 40; i++) {
-          const probe = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
-          if (probe.lastSuccessAt) break;
-          await new Promise((r) => setTimeout(r, 250));
-        }
+      // The recorded outcome is the signal to wait on (the dispatch-time refusal writes it almost
+      // immediately; a genuine delivery attempt's worst case before recording anything is three
+      // 5 s attempts plus 2 s and 4 s of back-off — 21 s — so the budget still clears that).
+      for (let i = 0; i < 70; i++) {
+        const probe = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
+        if (probe.lastFailureReason || probe.lastSuccessAt) break;
+        await new Promise((r) => setTimeout(r, 500));
       }
       const ep = await direct.webhookEndpoint.findUniqueOrThrow({ where: { id: endpoint.id } });
-      if (received.length === 0) {
-        // A receiver on 127.0.0.1 may be refused by the outbound host guard; that is a documented
-        // property, not a bug, but it means this row cannot be verified here — say so.
-        expect(ep.lastFailureReason, "no delivery and no recorded failure reason").not.toBeNull();
-        console.log("B10: delivery to 127.0.0.1 refused by design:", ep.lastFailureReason);
-      } else {
-        const payload = received[0];
-        expect(payload).toContain(auditId);
-        expect(payload).toContain("audit.completed");
-        expect(payload, "webhook payload carried finding content").not.toMatch(/second entry, same audit/);
-        expect(ep.lastSuccessAt).not.toBeNull();
-      }
+      // The dispatcher re-checks the URL at dispatch time (it used to check only at create, which
+      // is how CI once delivered to this loopback receiver), so a 127.0.0.1 endpoint is refused
+      // deterministically and the refusal is the recorded outcome. Delivery and payload shape stay
+      // covered by webhook-payload.itest.ts at the fetch boundary.
+      expect(received, "the dispatch-time host guard let a loopback delivery through").toHaveLength(0);
+      expect(ep.lastFailureReason).toMatch(/refused at dispatch/i);
+      expect(ep.lastSuccessAt).toBeNull();
 
       await page.goto(auditUrl, { waitUntil: "domcontentloaded" });
       await submitAndSettle(page, page.locator('form:has(button:has-text("Reopen audit")) button'));

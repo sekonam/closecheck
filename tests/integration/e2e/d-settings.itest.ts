@@ -134,7 +134,10 @@ describe("area D — settings, integrations and retention through the UI", () =>
 
     // "Shown once" has to mean once: after a reload the list shows the prefix only, never the token
     // (it used to replay the plaintext for the reveal cookie's whole lifetime), and "never used"
-    // flips once used.
+    // flips once used. RevealOnce expires the cookie via a server action fired on mount, and a
+    // reload CANCELS an in-flight action (the repo's documented trap) — so wait for the network to
+    // settle before reloading, or the cookie survives and the reveal legitimately re-renders.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1_000);
     const listBody = await page.innerText("body");
@@ -170,7 +173,9 @@ describe("area D — settings, integrations and retention through the UI", () =>
     await secretBox.waitFor({ state: "visible", timeout: 15_000 });
     const shownSecret = (await secretBox.textContent())?.trim() ?? "";
     expect(shownSecret).toMatch(/^whsec_/);
-    // "Shown once" has to mean once: a reload must not show it again.
+    // "Shown once" has to mean once: a reload must not show it again. Same consume-action race as
+    // the API-key reveal above: let the expiry action's response land before reloading.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1_000);
     expect(await page.innerText("body")).not.toContain(shownSecret);
@@ -184,9 +189,9 @@ describe("area D — settings, integrations and retention through the UI", () =>
     // tests/integration/webhook-payload.itest.ts at the fetch boundary; this proves the UI → dispatch
     // → outcome path with a real network hop.)
     await page.goto(`${BASE_URL}/engagements/${engagementId}/audits/${auditId}`, { waitUntil: "domcontentloaded" });
-    const complete = page.locator("form").filter({ has: page.locator("button", { hasText: /mark.*complete/i }) }).first();
-    expect(await complete.count(), "no mark-complete control on the audit page").toBe(1);
-    await submitAndSettle(page, complete.locator('button[type="submit"]'));
+    const completes = page.locator("form").filter({ has: page.locator("button", { hasText: /mark.*complete/i }) });
+    expect(await completes.count(), "expected exactly one mark-complete control on the audit page").toBe(1);
+    await submitAndSettle(page, completes.first().locator('button[type="submit"]'));
     const audit = await directPrisma.audit.findUniqueOrThrow({ where: { id: auditId } });
     expect(audit.status).toBe("COMPLETE");
 
@@ -199,11 +204,21 @@ describe("area D — settings, integrations and retention through the UI", () =>
       if (recorded.lastFailureAt || recorded.lastSuccessAt) break;
       await new Promise((r) => setTimeout(r, 1_000));
     }
-    expect(recorded?.lastFailureAt, "dispatch never recorded an outcome").toBeInstanceOf(Date);
-    expect(recorded?.lastFailureReason).toMatch(/Receiver responded 4\d\d/);
+    // What this row proves is UI → dispatch → recorded outcome. Which outcome depends on a third
+    // party (example.com answers 4xx today; a 200, a timeout, or new status text is theirs, not
+    // ours), so accept either — but whichever it was must be recorded and must reach the page.
+    expect(
+      recorded?.lastFailureAt ?? recorded?.lastSuccessAt,
+      "dispatch never recorded an outcome",
+    ).toBeInstanceOf(Date);
+    if (recorded?.lastFailureAt) {
+      expect(recorded.lastFailureReason, "a failure was recorded with no reason").toBeTruthy();
+    }
 
     await page.goto(`${BASE_URL}/settings`, { waitUntil: "domcontentloaded" });
-    expect(await page.innerText("body")).toMatch(/last failure \d{4}-\d{2}-\d{2}/);
+    expect(await page.innerText("body")).toMatch(
+      recorded?.lastFailureAt ? /last failure \d{4}-\d{2}-\d{2}/ : /last delivered \d{4}-\d{2}-\d{2}/,
+    );
   }, 150_000);
 
   it("D4: moving an engagement to a terminal stage sets the documented retention date", async () => {

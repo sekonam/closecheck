@@ -49,6 +49,7 @@ describe("C · reports, portal and trails through the real UI", () => {
   let other: OrgFixture;
   let firstReportId: string;
   let firstToken: string;
+  let errorsBeforeC5 = 0;
 
   beforeAll(async () => {
     await requireServer();
@@ -177,8 +178,13 @@ describe("C · reports, portal and trails through the real UI", () => {
       const anon = await anonymous.newPage();
       anon.setDefaultNavigationTimeout(240_000);
       const anonErrors = collectPageErrors(anon);
+      // The page embeds its PDF in an iframe whose fetch is one of the two DOCUMENT log rows
+      // asserted below — register the wait before navigating, so the log query never races a
+      // subresource that domcontentloaded does not wait for.
+      const iframePdf = anon.waitForResponse((r) => r.url().includes("/pdf"), { timeout: 240_000 });
       const response = await anon.goto(`${BASE_URL}/portal/${link.token}`, { waitUntil: "domcontentloaded" });
       expect(response?.status()).toBe(200);
+      expect((await iframePdf).status()).toBe(200);
       const shell = await anon.innerText("body");
       expect(shell).toContain(ORG_NAME);
       expect(shell.toLowerCase()).toContain("read-only");
@@ -268,6 +274,10 @@ describe("C · reports, portal and trails through the real UI", () => {
   }, 600_000);
 
   it("C5 · another firm's report is unreachable: by consultant URL, by evidence URL, and by a link row that names it", async () => {
+    // C5 provokes 404s on purpose; mark where they start so the final sweep can filter them out
+    // of this slice without discarding anything C1-C4 logged (the B11 pattern — truncating the
+    // array here would wipe the earlier tests' evidence along with the noise).
+    errorsBeforeC5 = pageErrors.significant().length;
     // Signed in as this firm, asking for the other firm's report and evidence by id.
     const pdf = await page.request.get(`${BASE_URL}/api/reports/${other.reportId}/pdf`, { timeout: 120_000 });
     expect(pdf.status()).toBe(404);
@@ -280,8 +290,6 @@ describe("C · reports, portal and trails through the real UI", () => {
     const auditPage = await page.goto(`${BASE_URL}/engagements/${other.engagementId}/audits/${other.auditId}`, { waitUntil: "domcontentloaded" });
     expect(auditPage?.status()).toBe(404);
     expect(await page.innerText("body")).not.toContain("Diner");
-    // That 404 was the point; it must not count as a console error in the final sweep.
-    pageErrors.errors.length = 0;
 
     // A portal link row in THIS org that names the OTHER org's report: the two statements of
     // ownership disagree, and the portal must refuse rather than pick one.
@@ -347,7 +355,12 @@ describe("C · reports, portal and trails through the real UI", () => {
     // browser throws "cannot have a negative time stamp". It comes from next dev's instrumentation,
     // not from application code, and never occurs in a production build. Filtered here rather than
     // in the shared helper (not this driver's file); reported to the plan owner.
-    const real = pageErrors.significant().filter((m) => !/cannot have a negative time stamp/.test(m));
-    expect(real, `console errors:\n${real.join("\n")}`).toEqual([]);
+    const all = pageErrors.significant().filter((m) => !/cannot have a negative time stamp/.test(m));
+    // C5 provokes 404s deliberately; everything logged before it must be clean as-is, and within
+    // C5's slice only the 404 resource-load messages are expected.
+    const beforeC5 = all.slice(0, errorsBeforeC5);
+    expect(beforeC5, `console errors before C5:\n${beforeC5.join("\n")}`).toEqual([]);
+    const fromC5 = all.slice(errorsBeforeC5).filter((m) => !/status of 404/.test(m));
+    expect(fromC5, `console errors from C5 on:\n${fromC5.join("\n")}`).toEqual([]);
   });
 });
