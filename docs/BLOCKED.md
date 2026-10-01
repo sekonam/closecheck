@@ -8,7 +8,10 @@ complete in `docs/roadmap.md` or checked off in `docs/releases.md` §5 on the st
 existing — several of these gates are specifically worded to refuse that (`releases.md` §5:
 "demonstrated by an actual cross-org request test, not code inspection alone").
 
-Last reviewed: 2026-09-24.
+Last reviewed: 2026-10-01. On that date a session walked items 1–3 as far as a browser session
+legitimately can; each item below now records the exact handoff point. The pattern across all
+three is the same: every screen up to the one asking for a card number, an identity document, or
+a bank account is done, and that screen is the founder's by rule, not by accident.
 
 ---
 
@@ -22,6 +25,12 @@ drives real Stripe **test-mode** objects: real customers carrying server-set `me
 subscriptions (including the two-line Team shape), real signed webhook events delivered to the real
 route with real signature verification, and a real $129 PaymentIntent confirmed and then refunded to
 zero. The chain works.
+
+**Handoff point (2026-10-01):** the activation wizard is reachable and started — Stripe dashboard
+(Google SSO as sergiip180@gmail.com) → Activate Payments. Step 1 is pre-filled with
+Poland / sole proprietorship. The remaining steps are identity (ID document), bank (IBAN), and
+review — all founder-only input. Everything after submission (live prices, webhook endpoint,
+the charge-and-refund proof) is scripted or documented below and can be driven for you.
 
 **What only the founder can do:**
 - Provision a **live-mode** Stripe account (business details, bank account, identity verification).
@@ -53,6 +62,17 @@ and marking overages billable; it ships dark deliberately (`releases.md` §5).
 **State.** `RESEND_API_KEY` is set and is a real, send-restricted key. Sending is implemented with a
 LOGGED fallback when unconfigured, so nothing crashes without it.
 
+**Handoff point (2026-10-01):** a sending domain was selected and its purchase carried to the last
+field: **closecheckhq.com**, available at $10.46/yr via Cloudflare Registrar (account
+sergiip180@gmail.com, card on file, registrant form filled from the billing record). The checkout
+only still needs the registrant **phone number** typed and "Continue to pay" clicked. The brand
+names are contested, which is why the HQ form: closecheck.com is parked (registered 2005),
+**closecheck.app is a live unrelated product** ("CloseCheck" for real-estate closing documents,
+registered 2026-06), and getclosecheck.com is a third product (homebuyer deed coordination) —
+worth knowing before any GTM naming decision, see item 5. Resend dashboard access is confirmed
+working (Google SSO); once the domain exists, adding it in Resend and placing the DKIM/SPF records
+in Cloudflare DNS is all drivable without the founder.
+
 **What only the founder can do:** verify a sending domain in Resend (DNS records on a domain you
 control) and set `EMAIL_FROM` to an address on it. Until then Resend's sandbox restriction means mail
 only delivers to the account owner's own address — already noted in `deployment.md`. Team invites and
@@ -65,6 +85,15 @@ this is a real blocker and not a formality.
 
 **State.** `render.yaml`, `Dockerfile`, migrations, role-password rotation and the full runbook in
 `deployment.md` are ready. No deployment exists.
+
+**Handoff point (2026-10-01):** the hosting account now exists — Render, GitHub sign-in as
+sekonam (account email psergii613@gmail.com, verified), workspace "CloseCheck", with the
+`sekonam/closecheck` repo connected through the already-installed Render GitHub App. The New
+Blueprint flow reads `render.yaml` and stops at Render's "Payment Information Required" dialog —
+the card entry that `deployment.md` says should never be automated, and wasn't. One founder
+action: open dashboard.render.com (GitHub login) → New → Blueprint → closecheck → add the card.
+Everything after that click — apply, `DIRECT_DATABASE_URL`, role-password rotation, the six
+template publishes to v6, `verify:deployment` — is scripted and can be driven for you.
 
 **What only the founder can do:** create the hosting account and enter billing details
 (`deployment.md` says plainly that this should not be automated on anyone's behalf, and that stands).
