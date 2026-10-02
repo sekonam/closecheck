@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { recordMetric } from "@/lib/metrics/record";
 import { objectExists } from "@/lib/storage/objectStore";
+import { buttonClass } from "@/components/ui";
 import { resolvePortalAccess } from "./access";
 import { loadPortalBranding, type PortalBranding } from "./branding";
 
@@ -70,27 +71,35 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
 
   return (
     <PortalShell branding={branding} accent={accent}>
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900">Technology due-diligence report</h1>
-          <p className="mt-1 text-sm text-slate-500">
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="min-w-0">
+          <h1 className="text-lg font-semibold text-ink-900 sm:text-xl">
+            Technology due-diligence report
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed text-ink-500">
             Read-only copy shared with you{branding ? ` by ${branding.orgName}` : ""}.
           </p>
         </div>
-        <div className="flex gap-2">
+        {/* Both affordances are peers and both are unconditional: a buyer with no account has no
+            other way to keep the document, so nothing here may gate on identity. */}
+        <div className="flex flex-wrap items-center gap-2">
           <a
             href={pdfUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            className={buttonClass("secondary", "md")}
           >
+            <NewTabIcon />
             Open in new tab
           </a>
+          {/* The firm's accent is applied inline, so a hover that re-paints the background would be
+              overridden by it — the affordance is opacity instead. */}
           <a
             href={`${pdfUrl}?download=1`}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-white"
+            className="inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 py-2 text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90"
             style={{ backgroundColor: accent }}
           >
+            <DownloadIcon />
             Download PDF
           </a>
         </div>
@@ -103,11 +112,11 @@ export default async function ClientPortalPage({ params }: { params: Promise<{ t
       <iframe
         src={pdfUrl}
         title="Due-diligence report"
-        className="w-full flex-1 rounded-lg border border-slate-200 bg-white"
+        className="w-full flex-1 rounded-lg border border-ink-200 bg-white shadow-sm"
         style={{ minHeight: "78vh" }}
       />
 
-      <p className="mt-3 text-center text-xs text-slate-500">
+      <p className="mx-auto mt-4 max-w-xl text-center text-xs leading-relaxed text-ink-500">
         This link is scoped to one report and can be revoked at any time by the firm that shared it.
         If the report does not appear above, use “Download PDF”.
       </p>
@@ -167,27 +176,76 @@ function PortalShell({
 }) {
   return (
     <div className="flex flex-1 flex-col">
-      <header className="border-b border-slate-200 bg-white" style={{ borderBottomColor: accent, borderBottomWidth: 3 }}>
+      <header
+        className="border-b border-ink-200 bg-white shadow-xs"
+        style={{ borderBottomColor: accent, borderBottomWidth: 3 }}
+      >
         <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3">
           {branding?.logoDataUri ? (
             // eslint-disable-next-line @next/next/no-img-element -- a data: URI, not an optimizable remote asset
             <img
               src={branding.logoDataUri}
               alt={`${branding.orgName} logo`}
-              className="h-8 w-auto object-contain"
+              className="h-8 w-auto shrink-0 object-contain"
             />
           ) : null}
           {/* Truncated rather than wrapped: a long firm name pushed the header to three lines at
               phone width, which is where a buyer forwarded a link is most likely to open it. */}
-          <span className="min-w-0 truncate text-sm font-semibold text-slate-900">
+          <span className="min-w-0 truncate text-sm font-semibold text-ink-900">
             {branding?.orgName ?? "Due-diligence report"}
           </span>
-          <span className="ml-auto shrink-0 text-xs text-slate-500">Read-only · confidential</span>
+          {/* The confidentiality status is chrome the buyer should be able to find without reading:
+              a bordered pill, never wrapped, always in the same corner. */}
+          <span className="ml-auto shrink-0 rounded-full border border-ink-200 bg-ink-50 px-2.5 py-1 text-[11px] font-medium whitespace-nowrap text-ink-600">
+            Read-only · confidential
+          </span>
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6">{children}</main>
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6 sm:py-8">
+        {children}
+      </main>
     </div>
+  );
+}
+
+/* Icons are drawn inline: this page must add no text of its own to the firm's chrome, and must load
+   no external asset. aria-hidden because each one sits beside the label it decorates. */
+function NewTabIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 4h6v6" />
+      <path d="M20 4 11 13" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 4v11" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M4 20h16" />
+    </svg>
   );
 }
 
@@ -199,12 +257,14 @@ function PortalShell({
  */
 function Unavailable() {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center">
-      <h1 className="text-xl font-semibold text-slate-900">Report not ready</h1>
-      <p className="max-w-sm text-sm text-slate-500">
-        This link is valid, but the report it points to isn&apos;t available yet. Please contact the
-        firm that shared this link with you.
-      </p>
+    <div className="flex flex-1 items-center justify-center px-4 py-16">
+      <div className="w-full max-w-sm rounded-lg border border-ink-200 bg-white px-6 py-8 text-center shadow-xs">
+        <h1 className="text-xl font-semibold text-ink-900">Report not ready</h1>
+        <p className="mt-2 text-sm leading-relaxed text-ink-500">
+          This link is valid, but the report it points to isn&apos;t available yet. Please contact the
+          firm that shared this link with you.
+        </p>
+      </div>
     </div>
   );
 }

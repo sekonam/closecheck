@@ -17,10 +17,28 @@
 
 import { BlockingDependency, EvidenceExpectation } from "@prisma/client";
 
+import { cn } from "@/components/ui";
 import { BLOCKING_LABEL } from "@/lib/audit/blocking";
 import { consultantNoticesFor } from "@/lib/templates/policyWatch";
 
-const CHIP = "rounded-full px-2 py-0.5 text-xs font-medium";
+const CHIP =
+  "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap";
+
+/**
+ * The disclosure indicator, drawn with borders instead of a glyph. globals.css hides the native
+ * marker, so each <summary> has to supply its own; a CSS triangle adds no text node, which keeps it
+ * out of the verbatim-asserted copy on this page.
+ */
+export const DISCLOSURE_CARET =
+  "h-0 w-0 shrink-0 border-y-[3.5px] border-l-[5px] border-y-transparent border-l-ink-400 " +
+  "transition-transform duration-150 group-open:rotate-90";
+
+/**
+ * The same caret for a <summary> that stays in normal inline flow. Deliberately not a flex summary
+ * in the trails: flex blockifies each text node into its own item, which inserts a line break into
+ * innerText and splits summary strings the browser suites match whole.
+ */
+export const DISCLOSURE_CARET_INLINE = `${DISCLOSURE_CARET} mr-1.5 inline-block align-middle`;
 
 export function BlockingChip({
   dependency,
@@ -32,7 +50,12 @@ export function BlockingChip({
   if (dependency === BlockingDependency.NONE) return null;
   return (
     <span
-      className={`${CHIP} ${reason ? "bg-amber-50 text-amber-800" : "bg-slate-100 text-slate-600"}`}
+      className={cn(
+        CHIP,
+        reason
+          ? "border-sev-amber-border bg-sev-amber-bg text-sev-amber"
+          : "border-ink-200 bg-ink-50 text-ink-600",
+      )}
       title={reason ?? "Your deal stage should allow this now."}
     >
       {BLOCKING_LABEL[dependency]}
@@ -54,7 +77,7 @@ export function EvidenceChip({
   const noun = expectation === EvidenceExpectation.DOCUMENT ? "document" : "attestation";
   if (satisfied) {
     return (
-      <span className={`${CHIP} bg-emerald-50 text-emerald-700`}>
+      <span className={cn(CHIP, "border-sev-green-border bg-sev-green-bg text-sev-green")}>
         {expectation === EvidenceExpectation.DOCUMENT ? "Document attached" : "Attestation recorded"}
       </span>
     );
@@ -65,7 +88,12 @@ export function EvidenceChip({
   // not done yet, which is unremarkable.
   return (
     <span
-      className={`${CHIP} ${rated ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-500"}`}
+      className={cn(
+        CHIP,
+        rated
+          ? "border-sev-red-border bg-sev-red-bg text-sev-red"
+          : "border-ink-200 bg-ink-50 text-ink-500",
+      )}
       title={
         rated
           ? `This item is rated but has no ${noun} behind it. The rating will still appear in the report — consider whether you could defend it.`
@@ -74,6 +102,21 @@ export function EvidenceChip({
     >
       {rated ? `Rated with no ${noun}` : `${noun[0].toUpperCase()}${noun.slice(1)} expected`}
     </span>
+  );
+}
+
+/** One reference disclosure inside the guidance block. */
+function Reference({ label, body }: { label: string; body: string }) {
+  return (
+    <details className="group">
+      <summary className="flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-ink-600 hover:bg-ink-100 hover:text-ink-900">
+        <span aria-hidden="true" className={DISCLOSURE_CARET} />
+        {label}
+      </summary>
+      <p className="border-t border-ink-200 bg-white px-3 py-2 text-xs leading-relaxed whitespace-pre-line text-ink-700">
+        {body}
+      </p>
+    </details>
   );
 }
 
@@ -97,40 +140,28 @@ export function FindingGuidance({
   if (!guidance && !severityGuidance && !unavailable && policyNotices.length === 0) return null;
 
   return (
-    <div className="mt-2 space-y-1.5">
+    <div className="mt-2.5 space-y-1.5">
       {unavailable && (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+        <p className="rounded-md border border-sev-amber-border bg-sev-amber-bg px-2.5 py-1.5 text-xs leading-relaxed text-sev-amber">
           {unavailable}
         </p>
       )}
       {policyNotices.map((notice) => (
         <p
           key={notice.slice(0, 40)}
-          className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs leading-relaxed text-sky-900"
+          className="rounded-md border border-accent-200 bg-accent-50 px-2.5 py-1.5 text-xs leading-relaxed text-accent-900"
         >
-          <span className="font-medium">Policy in flux · </span>
+          <span className="font-semibold">Policy in flux · </span>
           {notice}
         </p>
       ))}
-      {guidance && (
-        <details className="group">
-          <summary className="cursor-pointer text-xs font-medium text-slate-600 hover:text-slate-900">
-            How to verify this
-          </summary>
-          <p className="mt-1 whitespace-pre-line border-l-2 border-slate-200 pl-3 text-xs leading-relaxed text-slate-600">
-            {guidance}
-          </p>
-        </details>
-      )}
-      {severityGuidance && (
-        <details className="group">
-          <summary className="cursor-pointer text-xs font-medium text-slate-600 hover:text-slate-900">
-            When this is Red, Yellow or Green
-          </summary>
-          <p className="mt-1 whitespace-pre-line border-l-2 border-slate-200 pl-3 text-xs leading-relaxed text-slate-600">
-            {severityGuidance}
-          </p>
-        </details>
+      {(guidance || severityGuidance) && (
+        <div className="divide-y divide-ink-200 overflow-hidden rounded-md border border-ink-200 bg-ink-50">
+          {guidance && <Reference label="How to verify this" body={guidance} />}
+          {severityGuidance && (
+            <Reference label="When this is Red, Yellow or Green" body={severityGuidance} />
+          )}
+        </div>
       )}
     </div>
   );

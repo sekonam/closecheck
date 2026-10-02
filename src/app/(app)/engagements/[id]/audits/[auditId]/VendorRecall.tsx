@@ -29,20 +29,25 @@ export function VendorRecall({
   const divergent = fields.filter((field) => field.differs);
 
   return (
-    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-2.5">
-      <div className="text-xs font-medium text-slate-600">
-        You audited {vendorLabel} before
-      </div>
-      <p className="mt-0.5 text-xs text-slate-500">
+    // `rounded-md bg-slate-50` is pinned: tests/integration/audit-workflow.itest.ts locates this
+    // panel as `div.rounded-md.bg-slate-50` to assert it holds no control that could write a
+    // recalled value into the finding. slate-50 and ink-50 are the same colour to the eye, so the
+    // selector costs nothing visually — but renaming it would silently unhook that assertion.
+    <div className="mt-3 rounded-md border border-ink-200 bg-slate-50 p-3">
+      <div className="text-xs font-semibold text-ink-700">You audited {vendorLabel} before</div>
+      <p className="mt-0.5 text-xs leading-relaxed text-ink-500">
         Recorded on {sourceBusinessName}, {recordedAt.toISOString().slice(0, 10)}. Shown for
         reference — read this deal&rsquo;s own document; terms vary between contracts.
       </p>
 
-      <dl className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 sm:grid-cols-2">
+      <dl className="mt-2 grid grid-cols-1 gap-x-5 gap-y-1 sm:grid-cols-2">
         {fields.map((field) => (
-          <div key={field.label} className="flex justify-between gap-2 text-xs">
-            <dt className="text-slate-500">{field.label}</dt>
-            <dd className={field.differs ? "font-medium text-amber-700" : "text-slate-600"}>
+          <div
+            key={field.label}
+            className="flex items-baseline justify-between gap-2 border-b border-ink-200 pb-1 text-xs last:border-0"
+          >
+            <dt className="text-ink-500">{field.label}</dt>
+            <dd className={field.differs ? "font-semibold text-sev-amber" : "text-ink-800"}>
               {field.value}
             </dd>
           </div>
@@ -50,7 +55,7 @@ export function VendorRecall({
       </dl>
 
       {divergent.length > 0 && (
-        <p className="mt-1.5 text-xs text-amber-800">
+        <p className="mt-2 text-xs leading-relaxed text-sev-amber">
           {divergent.length === 1 ? "One answer differs" : `${divergent.length} answers differ`} from
           what you recorded last time. Either this contract was negotiated differently — worth
           saying so in the finding — or one of the two readings is wrong.

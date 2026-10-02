@@ -1,1 +1,153 @@
 @import "tailwindcss";
+
+/**
+ * CloseCheck design tokens.
+ *
+ * Two audiences, two different bars (see .claude/skills/consultant-ux-design):
+ *   - The consultant works here daily, under deal pressure. Dense, fast, legible; not decorative.
+ *   - The buyer only ever sees the Report and the Portal, under the CONSULTANT's brand. This
+ *     file's accent is CloseCheck's own chrome and must never compete with a firm's brand colour;
+ *     whitelabel surfaces take their accent from the org and fall back to ink, not to brand blue.
+ *
+ * Severity colours are NOT a free design choice. They are a financial deliverable's traffic light,
+ * are always paired with a shape (▲ ◆ ● ○) rather than carrying meaning in hue alone, and are kept
+ * at the values already validated for colourblind legibility. Changing them is a methodology
+ * change, not a styling one.
+ */
+@theme {
+  /* Neutral ramp. Cool, slightly desaturated — reads as instrument, not as marketing. */
+  --color-ink-50: #f7f8fa;
+  --color-ink-100: #eef0f4;
+  --color-ink-200: #dfe3ea;
+  --color-ink-300: #c6ccd8;
+  --color-ink-400: #98a1b3;
+  --color-ink-500: #6b7589;
+  --color-ink-600: #4d5768;
+  --color-ink-700: #3a4354;
+  --color-ink-800: #252d3c;
+  --color-ink-900: #161d29;
+  --color-ink-950: #0b111b;
+
+  /* Interactive accent for CloseCheck's own chrome. Deliberately restrained. */
+  --color-accent-50: #eef4ff;
+  --color-accent-100: #dae5ff;
+  --color-accent-200: #bdd2ff;
+  --color-accent-300: #90b4ff;
+  --color-accent-400: #5c8cfa;
+  --color-accent-500: #3566ef;
+  --color-accent-600: #1f47dc;
+  --color-accent-700: #1a37b4;
+  --color-accent-800: #1b3091;
+  --color-accent-900: #1b2d73;
+
+  /* Severity. Lightness is the carrier, hue is the reinforcement: red and amber differ in
+     luminance as well as hue so they remain separable under deuteranopia and in greyscale print. */
+  --color-sev-red: #b42318;
+  --color-sev-red-bg: #fef3f2;
+  --color-sev-red-border: #fecdc9;
+  --color-sev-amber: #b54708;
+  --color-sev-amber-bg: #fffaeb;
+  --color-sev-amber-border: #fedf89;
+  --color-sev-green: #067647;
+  --color-sev-green-bg: #ecfdf3;
+  --color-sev-green-border: #abefc6;
+  --color-sev-none: #6b7589;
+  --color-sev-none-bg: #f7f8fa;
+  --color-sev-none-border: #dfe3ea;
+
+  /* Tier identity. The consultant's first question on opening an audit is "what can I actually do
+     right now" — so the tiers are colour-coded by who has to act, not by sequence. */
+  --color-tier-a: #1f47dc; /* runnable now, nobody else needed */
+  --color-tier-a-bg: #eef4ff;
+  --color-tier-b: #b54708; /* blocked on seller documents */
+  --color-tier-b-bg: #fffaeb;
+  --color-tier-c: #6938ef; /* blocked on scheduled live access */
+  --color-tier-c-bg: #f4f3ff;
+
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Shadows kept shallow: depth here signals "this is a layer", not "this is pretty". */
+  --shadow-xs: 0 1px 2px 0 rgb(11 17 27 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(11 17 27 / 0.06), 0 1px 2px -1px rgb(11 17 27 / 0.04);
+  --shadow-md: 0 4px 12px -2px rgb(11 17 27 / 0.08), 0 2px 4px -2px rgb(11 17 27 / 0.04);
+  --shadow-lg: 0 12px 28px -6px rgb(11 17 27 / 0.12), 0 4px 10px -4px rgb(11 17 27 / 0.06);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    /* Numbers in this product are money, ratios and dates sitting in columns. Tabular figures stop
+       them shifting width between rows, which is what makes a column scannable. */
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Headings carry the hierarchy; keep tracking tight so dense pages still read as structured. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.012em;
+  }
+
+  /* One focus treatment everywhere, including for keyboard users tabbing a long audit form. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent-500);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  /* Native controls inherit the product's type rather than the platform's. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* A <details> summary is used throughout the audit page for guidance and rubrics; the default
+     marker is inconsistent across browsers and visually noisy next to a label. */
+  summary {
+    cursor: pointer;
+    list-style: none;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer utilities {
+  /* Reusable severity surface, so a badge, a rail and a report cell cannot drift apart. */
+  .sev-red {
+    color: var(--color-sev-red);
+    background-color: var(--color-sev-red-bg);
+    border-color: var(--color-sev-red-border);
+  }
+  .sev-amber {
+    color: var(--color-sev-amber);
+    background-color: var(--color-sev-amber-bg);
+    border-color: var(--color-sev-amber-border);
+  }
+  .sev-green {
+    color: var(--color-sev-green);
+    background-color: var(--color-sev-green-bg);
+    border-color: var(--color-sev-green-border);
+  }
+  .sev-none {
+    color: var(--color-sev-none);
+    background-color: var(--color-sev-none-bg);
+    border-color: var(--color-sev-none-border);
+  }
+}

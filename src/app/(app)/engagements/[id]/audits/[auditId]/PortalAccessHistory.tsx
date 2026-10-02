@@ -16,6 +16,7 @@
  * consultant doesn't over-read it when relaying it to a client.
  */
 
+import { DISCLOSURE_CARET_INLINE } from "./FindingGuidance";
 import {
   collapseEmbeddedFetches,
   describeAccessSummary,
@@ -64,55 +65,56 @@ export function PortalAccessHistory({
   const chronologicalViews = [...accessLog].sort((a, b) => a.viewedAt.getTime() - b.viewedAt.getTime());
 
   return (
-    <details className="mt-1">
-      <summary className="cursor-pointer text-slate-500 hover:text-slate-800">
+    <details className="group mt-1 text-xs">
+      <summary className="text-ink-500 hover:text-ink-800">
+        <span aria-hidden="true" className={DISCLOSURE_CARET_INLINE} />
         Access history — {describeAccessSummary(summary)}
       </summary>
 
-      <ol className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3">
-        <li className="text-slate-500">
-          <span className="font-medium text-slate-600">
+      <ol className="mt-1.5 space-y-1 border-l-2 border-ink-200 pl-3">
+        <li className="text-ink-500">
+          <span className="font-medium text-ink-700">
             {createdBy ? `Sent by ${createdBy}` : "Link created"}
           </span>{" "}
           · {formatTimestamp(createdAt)}
         </li>
 
         {accessLog.length === 0 && (
-          <li className="text-slate-400">
+          <li className="text-ink-400">
             No views recorded. If the buyer says they read it, check they weren&rsquo;t sent the PDF
             by another route.
           </li>
         )}
 
         {chronologicalViews.map((entry) => (
-          <li key={entry.id} className="text-slate-500">
-            <span className="font-medium text-slate-600">
+          <li key={entry.id} className="text-ink-500">
+            <span className="font-medium text-ink-700">
               {entry.kind === "DOCUMENT" ? "Report downloaded" : "Viewed"}
             </span>{" "}
             · {formatTimestamp(entry.viewedAt)}
             {entry.ipHash ? (
-              <span className="text-slate-400"> · {originLabels.get(entry.ipHash)}</span>
+              <span className="text-ink-400"> · {originLabels.get(entry.ipHash)}</span>
             ) : (
-              <span className="text-slate-400"> · origin not recorded</span>
+              <span className="text-ink-400"> · origin not recorded</span>
             )}
           </li>
         ))}
 
         {revokedAt && (
-          <li className="text-slate-500">
-            <span className="font-medium text-slate-600">
+          <li className="text-ink-500">
+            <span className="font-medium text-ink-700">
               {revokedBy ? `Revoked by ${revokedBy}` : "Revoked"}
             </span>{" "}
             · {formatTimestamp(revokedAt)}
           </li>
         )}
 
-        <li className="text-slate-400">
+        <li className="text-ink-400">
           {revokedAt ? "Revoked before expiry" : `Expires ${formatTimestamp(expiresAt)}`}
         </li>
       </ol>
 
-      <p className="mt-1.5 text-slate-400">
+      <p className="mt-1.5 leading-relaxed text-ink-400">
         Origins are grouped from a one-way hash of the viewer&rsquo;s network address — enough to tell
         a repeat visit from a new one, not enough to identify anyone. Several people behind one
         office connection will appear as a single viewer.

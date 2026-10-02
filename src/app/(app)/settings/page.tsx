@@ -13,6 +13,32 @@ import { getCreditBalance } from "@/lib/billing/credits";
 import { BillingPlan } from "@prisma/client";
 import { REPORT_DISCLAIMER_TEXT } from "@/lib/reports/disclaimer";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
+import {
+  Button,
+  Callout,
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  Field,
+  PageHeader,
+  cn,
+  inputClass,
+} from "@/components/ui";
+
+/** A status dot carrying no text of its own, so a live row is separable from a retired one at a
+    glance without adding a word to a page whose copy is asserted verbatim. */
+function StatusDot({ tone }: { tone: "live" | "failed" | "idle" }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
+        tone === "live" ? "bg-sev-green" : tone === "failed" ? "bg-sev-red" : "bg-ink-300",
+      )}
+    />
+  );
+}
 
 export default async function SettingsPage({
   searchParams,
@@ -106,492 +132,593 @@ export default async function SettingsPage({
     }),
   );
 
+  const disclaimerAcknowledged = !!org.disclaimerAcknowledgedAt;
+
   return (
     <div>
-      <Link href="/engagements" className="text-sm text-slate-500 hover:underline">
-        ← Engagements
-      </Link>
-      <h1 className="mt-2 text-lg font-semibold text-slate-900">Firm branding</h1>
-      <p className="text-sm text-slate-500">
-        Your logo, name, and brand color appear on the cover and footer of every generated report
-        — never CloseCheck&apos;s.
-      </p>
+      <PageHeader
+        breadcrumb={
+          <Link href="/engagements" className="hover:text-ink-700 hover:underline">
+            ← Engagements
+          </Link>
+        }
+        title="Firm branding"
+        description={
+          <>
+            Your logo, name, and brand color appear on the cover and footer of every generated report
+            — never CloseCheck&apos;s.
+          </>
+        }
+      />
 
       {error && (
-        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <Callout tone="error" className="mb-6">
           {error}
-        </p>
+        </Callout>
       )}
 
-      <div
-        key={`${org.name}-${org.brandColorHex}`}
-        className="mt-6 rounded-lg border border-slate-200 bg-white p-4"
-      >
-        <h2 className="text-sm font-medium text-slate-900">Firm name and color</h2>
-        {/* Firm-scoped (spec.md §3): this rewrites the branding on every report the firm has ever
-            issued. Enforced server-side — rendering the form to a member anyway would be a control
-            that presents itself and then refuses, which is the same failure as a message telling
-            someone to do what only an owner can. The values stay visible, because a member needs to
-            know what is on the reports they produce; only the control is owner-only. */}
-        {!isOwner && (
-          <div className="mt-3 text-sm text-slate-600">
-            <p>
-              {org.name}
-              {org.brandColorHex && (
-                <span className="ml-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
-                  <span
-                    className="inline-block h-3 w-3 rounded-full border border-slate-300"
-                    style={{ backgroundColor: org.brandColorHex }}
-                  />
-                  {org.brandColorHex}
-                </span>
-              )}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Your account owner sets the firm&apos;s name and colour.
-            </p>
-          </div>
-        )}
-        {isOwner && (
-        <form action={updateOrgBrandingAction} className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-600" htmlFor="name">
-              Firm name
-            </label>
-            <input
-              id="name"
-              name="name"
-              defaultValue={org.name}
-              required
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600" htmlFor="brandColorHex">
-              Brand color
-            </label>
-            <input
-              id="brandColorHex"
-              name="brandColorHex"
-              defaultValue={org.brandColorHex ?? ""}
-              placeholder="#0f172a"
-              className="mt-1 w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm"
-            />
-            <p className="mt-1 text-xs text-slate-400">Blank = default (#0f172a).</p>
-          </div>
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Save
-            </button>
-          </div>
-        </form>
-        )}
-      </div>
+      {/* One column at phone width; two from xl, where the container is wide enough that a single
+          stack of cards would be a 1100px-wide card holding a 300px input. The left column is what
+          the firm IS (identity, the report gate, who is on it), the right is what the account DOES
+          (money, integrations, delivery).
 
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Logo</h2>
-        <div className="mt-3 flex items-center gap-4">
-          {org.brandLogoUrl ? (
-            // Cache-busted with updatedAt so the preview reflects a just-replaced logo immediately —
-            // /api/branding/logo itself is always served no-store, but the <img> tag's src is
-            // otherwise identical across uploads and the browser's own image cache can still short-
-            // circuit the request without a query-string change.
-            // eslint-disable-next-line @next/next/no-img-element -- external-route-served, not a static/optimizable asset
-            <img
-              src={`/api/branding/logo?t=${org.updatedAt.getTime()}`}
-              alt="Firm logo"
-              className="h-16 w-auto rounded border border-slate-200 bg-white p-1"
-            />
-          ) : (
-            <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
-              No logo
-            </div>
-          )}
-          {!isOwner && (
-            <p className="text-xs text-slate-500">
-              Your account owner sets the firm&apos;s logo.
-            </p>
-          )}
-          {isOwner && (
-          <form action={uploadOrgLogoAction} className="flex flex-wrap items-center gap-2">
-            <input type="file" name="file" accept="image/png,image/jpeg,image/webp,image/gif" required className="min-w-0 max-w-full text-sm" />
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Upload
-            </button>
-          </form>
-          )}
-          {isOwner && org.brandLogoUrl && (
-            <form action={removeOrgLogoAction}>
-              <button type="submit" className="text-sm text-slate-500 underline hover:text-slate-700">
-                Remove
-              </button>
-            </form>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Report disclaimer</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Every generated report includes this language. It has to be accepted once, on the
-          firm&apos;s behalf, before any report can be generated.
-        </p>
-        <blockquote className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-          {REPORT_DISCLAIMER_TEXT}
-        </blockquote>
-        {org.disclaimerAcknowledgedAt ? (
-          <p className="mt-3 text-sm text-emerald-700">
-            Reviewed on {org.disclaimerAcknowledgedAt.toISOString().slice(0, 10)}.
-          </p>
-        ) : !isOwner ? (
-          <p className="mt-3 text-sm text-amber-700">
-            Your account owner needs to accept this language before anyone in the firm can generate
-            a report.
-          </p>
-        ) : (
-          <form action={acknowledgeDisclaimerAction} className="mt-3">
-            <button
-              type="submit"
-              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              I&apos;ve reviewed this language — enable report generation
-            </button>
-          </form>
-        )}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Team</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Everyone listed here shares this firm&apos;s engagements, templates, and branding
-          Only the account owner can invite or remove teammates.
-        </p>
-
-        {invitedEmail && invitedTempPassword && (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <p className="font-medium">Temporary password for {invitedEmail}</p>
-            <p className="mt-1 font-mono text-xs">{invitedTempPassword}</p>
-            <p className="mt-1 text-xs text-amber-700">
-              Shown here for one minute, in this browser only — relay it to them yourself. There is no invite-email sending yet (Phase 2
-              placeholder); this password won&apos;t be shown again after you leave this page.
-            </p>
-          </div>
-        )}
-
-        <ul className="mt-3 divide-y divide-slate-100 text-sm">
-          {members.map((m) => (
-            <li key={m.id} className="flex items-center justify-between py-2">
-              <div>
-                <span className="font-medium text-slate-900">{m.name || m.email}</span>
-                {m.name && <span className="ml-2 text-slate-500">{m.email}</span>}
-                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                  {m.role}
-                </span>
-              </div>
-              {isOwner && (
-                <form action={removeMemberAction}>
-                  <input type="hidden" name="userId" value={m.id} />
-                  <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
-                    Remove
-                  </button>
-                </form>
-              )}
-            </li>
-          ))}
-        </ul>
-
-        {isOwner && (
-          <form action={inviteMemberAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-            <input
-              name="email"
-              type="email"
-              placeholder="teammate@example.com"
-              required
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            />
-            <input
-              name="name"
-              placeholder="Name (optional)"
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            />
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Invite
-            </button>
-          </form>
-        )}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Plan &amp; billing</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Base plan includes a yearly bundle of full audits; additional audits are batched onto your
-          next monthly invoice, never charged one-by-one. Tier A checks are always
-          unmetered. Only the account owner can change the plan.
-        </p>
-
-        {!billingConfigured ? (
-          <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Billing isn&apos;t configured on this deployment yet (no Stripe keys) — everything runs
-            without limits. Plans appear here once it is.
-          </p>
-        ) : (
-          <>
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                {billingAccount?.plan ? PLAN_LABELS[billingAccount.plan] : "No plan"}
-              </span>
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  billingAccount?.status === "ACTIVE"
-                    ? "bg-emerald-50 text-emerald-700"
-                    : billingAccount?.status === "PAST_DUE"
-                      ? "bg-amber-50 text-amber-800"
-                      : "bg-slate-100 text-slate-600"
-                }`}
-              >
-                {billingAccount?.status ?? "NONE"}
-              </span>
-              <span className="text-slate-600">
-                Audit credits: <span className="font-medium text-slate-900">{creditBalance}</span>
-              </span>
-              {!isEnforcementEnabled() && (
-                <span className="text-xs text-slate-400">(enforcement off — nothing is blocked yet)</span>
-              )}
-            </div>
-
-            {isOwner && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {billingAccount?.stripeSubscriptionId && billingAccount.status !== "CANCELED" ? (
-                  // Any live-or-past-due subscription is managed in the portal — showing checkout
-                  // buttons for a PAST_DUE org would let it open a second subscription (startCheckout
-                  // refuses this too; the UI just shouldn't offer it).
-                  <form action={openBillingPortalAction}>
-                    <button
-                      type="submit"
-                      className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Manage subscription &amp; invoices
-                    </button>
-                  </form>
-                ) : (
-                  Object.values(BillingPlan).map((plan) => (
-                    <form key={plan} action={startCheckoutAction}>
-                      <input type="hidden" name="plan" value={plan} />
-                      <button
-                        type="submit"
-                        className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                          plan.endsWith("ANNUAL")
-                            ? "bg-slate-900 text-white hover:bg-slate-800"
-                            : "border border-slate-300 text-slate-700 hover:bg-slate-50"
-                        }`}
-                      >
-                        {PLAN_LABELS[plan]}
-                      </button>
-                    </form>
-                  ))
+          DOM order is also read order, and the browser suites depend on it: the firm-name input must
+          stay the page's first input[name="name"], and the invite temp password the first .font-mono
+          — so the columns are ordered containers, never reflowed. */}
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+        <div className="min-w-0 space-y-6">
+          {/* Side by side where the row has the full container, stacked again once it is one column
+              of two — two 260px cards is worse than one of each. */}
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-1">
+            <Card key={`${org.name}-${org.brandColorHex}`} as="section">
+              <CardHeader title="Firm name and color" />
+              {/* Firm-scoped (spec.md §3): this rewrites the branding on every report the firm has ever
+                  issued. Enforced server-side — rendering the form to a member anyway would be a control
+                  that presents itself and then refuses, which is the same failure as a message telling
+                  someone to do what only an owner can. The values stay visible, because a member needs to
+                  know what is on the reports they produce; only the control is owner-only. */}
+              <CardBody>
+                {!isOwner && (
+                  <div>
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink-900">
+                      {org.name}
+                      {org.brandColorHex && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md border border-ink-200 bg-ink-50 px-2 py-0.5 text-xs font-normal text-ink-600">
+                          <span
+                            className="inline-block h-3 w-3 rounded-full border border-ink-300"
+                            style={{ backgroundColor: org.brandColorHex }}
+                          />
+                          {org.brandColorHex}
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-2 text-xs text-ink-500">
+                      Your account owner sets the firm&apos;s name and colour.
+                    </p>
+                  </div>
                 )}
-              </div>
-            )}
+                {isOwner && (
+                  <form action={updateOrgBrandingAction} className="space-y-4">
+                    <Field label="Firm name" htmlFor="name">
+                      <input
+                        id="name"
+                        name="name"
+                        defaultValue={org.name}
+                        required
+                        className={inputClass()}
+                      />
+                    </Field>
+                    <Field label="Brand color" htmlFor="brandColorHex" hint="Blank = default (#0f172a).">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="h-9 w-9 shrink-0 rounded-md border border-ink-300 shadow-xs"
+                          style={{ backgroundColor: org.brandColorHex || "#0f172a" }}
+                        />
+                        <input
+                          id="brandColorHex"
+                          name="brandColorHex"
+                          defaultValue={org.brandColorHex ?? ""}
+                          placeholder="#0f172a"
+                          className={inputClass()}
+                        />
+                      </div>
+                    </Field>
+                    <Button type="submit" variant="secondary">
+                      Save
+                    </Button>
+                  </form>
+                )}
+              </CardBody>
+            </Card>
 
-            {recentLedger.length > 0 && (
-              <ul className="mt-3 divide-y divide-slate-100 text-xs text-slate-600">
-                {recentLedger.map((entry) => (
-                  <li key={entry.id} className="flex items-center justify-between py-1.5">
-                    <span>
-                      {entry.reason}
-                      {entry.note ? ` — ${entry.note}` : ""}
-                    </span>
-                    <span className="font-mono">
-                      {entry.delta > 0 ? `+${entry.delta}` : entry.delta} ·{" "}
-                      {entry.createdAt.toISOString().slice(0, 10)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Email delivery</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Every system email (invites, portal links, receipts) is recorded here.{" "}
-          <span className="font-medium">LOGGED</span> means no email provider is configured yet — the
-          message was recorded instead of delivered, and the in-app relay (e.g. the invite temp
-          password above) is the delivery path.
-        </p>
-        {recentEmails.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-400">No emails yet.</p>
-        ) : (
-          <ul className="mt-3 divide-y divide-slate-100 text-xs">
-            {recentEmails.map((m) => (
-              <li key={m.id} className="flex items-center justify-between gap-2 py-1.5">
-                <span className="truncate text-slate-700">
-                  <span className="font-medium">{m.template}</span> → {m.to} — {m.subject}
-                </span>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 font-medium ${
-                    m.status === "SENT"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : m.status === "LOGGED"
-                        ? "bg-slate-100 text-slate-600"
-                        : "bg-red-50 text-red-700"
-                  }`}
-                  title={m.error ?? undefined}
-                >
-                  {m.status}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">API keys</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Read-only access to this firm&apos;s engagements, audits, and report metadata for your own
-          tooling. Pass a key as{" "}
-          <code className="rounded bg-slate-100 px-1">Authorization: Bearer cc_live_...</code> to{" "}
-          <code className="rounded bg-slate-100 px-1">/api/v1/engagements</code>. Only the account
-          owner can create or revoke keys.
-        </p>
-
-        {/* Always mounted: it keeps the secret in client state across the refresh its own
-            consume() triggers (see RevealOnce). */}
-        <RevealOnce
-          title="Your new API key"
-          value={newApiKey ?? null}
-          hint="Shown once — store it now. CloseCheck keeps only a hash and cannot show it again."
-          consume={consumeSecretReveals}
-        />
-
-        {apiKeys.length > 0 && (
-          <ul className="mt-3 divide-y divide-slate-100 text-sm">
-            {apiKeys.map((k) => (
-              <li key={k.id} className="flex items-center justify-between py-2">
-                <div>
-                  <span className="font-medium text-slate-900">{k.name}</span>
-                  <span className="ml-2 font-mono text-xs text-slate-500">{k.tokenPrefix}…</span>
-                  {k.revokedAt ? (
-                    <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-xs text-red-700">
-                      revoked {k.revokedAt.toISOString().slice(0, 10)}
-                    </span>
+            <Card as="section">
+              <CardHeader title="Logo" />
+              <CardBody className="space-y-4">
+                <div className="flex min-w-0 flex-wrap items-center gap-4">
+                  {org.brandLogoUrl ? (
+                    // Cache-busted with updatedAt so the preview reflects a just-replaced logo immediately —
+                    // /api/branding/logo itself is always served no-store, but the <img> tag's src is
+                    // otherwise identical across uploads and the browser's own image cache can still short-
+                    // circuit the request without a query-string change.
+                    // eslint-disable-next-line @next/next/no-img-element -- external-route-served, not a static/optimizable asset
+                    <img
+                      src={`/api/branding/logo?t=${org.updatedAt.getTime()}`}
+                      alt="Firm logo"
+                      className="h-16 w-auto max-w-full rounded-md border border-ink-200 bg-white p-1.5"
+                    />
                   ) : (
-                    <span className="ml-2 text-xs text-slate-400">
-                      {k.lastUsedAt
-                        ? `last used ${k.lastUsedAt.toISOString().slice(0, 10)}`
-                        : "never used"}
-                    </span>
+                    <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border border-dashed border-ink-300 bg-ink-50 text-xs text-ink-400">
+                      No logo
+                    </div>
                   )}
-                </div>
-                {isOwner && !k.revokedAt && (
-                  <form action={revokeApiKeyAction}>
-                    <input type="hidden" name="apiKeyId" value={k.id} />
-                    <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
-                      Revoke
-                    </button>
-                  </form>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {isOwner && (
-          <form action={createApiKeyAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-            <input
-              name="name"
-              placeholder="Key name (e.g. deal-tracker sync)"
-              required
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            />
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Create key
-            </button>
-          </form>
-        )}
-      </div>
-
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-medium text-slate-900">Webhooks</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          CloseCheck POSTs signed <code className="rounded bg-slate-100 px-1">audit.completed</code>{" "}
-          and <code className="rounded bg-slate-100 px-1">report.generated</code> events to each
-          endpoint. Payloads carry identifiers and status only — use the API
-          above for detail. Verify the{" "}
-          <code className="rounded bg-slate-100 px-1">X-CloseCheck-Signature</code> header
-          (HMAC-SHA256 of the raw body with your signing secret). Only the account owner can manage
-          endpoints.
-        </p>
-
-        <RevealOnce
-          title="Signing secret for your new endpoint"
-          value={newWebhookSecret ?? null}
-          hint="Shown once — configure it in your receiver now to verify delivery signatures."
-          consume={consumeSecretReveals}
-        />
-
-        {webhookEndpoints.length > 0 && (
-          <ul className="mt-3 divide-y divide-slate-100 text-sm">
-            {webhookEndpoints.map((w) => (
-              <li key={w.id} className="flex items-center justify-between py-2">
-                <div>
-                  <span className="break-all font-mono text-xs text-slate-900">{w.url}</span>
-                  {w.lastSuccessAt && (
-                    <span className="ml-2 text-xs text-emerald-700">
-                      last delivered {w.lastSuccessAt.toISOString().slice(0, 10)}
-                    </span>
+                  {!isOwner && (
+                    <p className="text-xs text-ink-500">Your account owner sets the firm&apos;s logo.</p>
                   )}
-                  {w.lastFailureAt && (
-                    <span className="ml-2 text-xs text-red-700" title={w.lastFailureReason ?? undefined}>
-                      last failure {w.lastFailureAt.toISOString().slice(0, 10)}
-                    </span>
+                  {isOwner && org.brandLogoUrl && (
+                    <form action={removeOrgLogoAction}>
+                      <Button type="submit" variant="ghost" size="sm">
+                        Remove
+                      </Button>
+                    </form>
                   )}
                 </div>
                 {isOwner && (
-                  <form action={deleteWebhookEndpointAction}>
-                    <input type="hidden" name="webhookEndpointId" value={w.id} />
-                    <button type="submit" className="text-xs text-slate-500 underline hover:text-slate-700">
-                      Delete
-                    </button>
+                  <form
+                    action={uploadOrgLogoAction}
+                    className="flex min-w-0 flex-wrap items-center gap-2 border-t border-ink-100 pt-4"
+                  >
+                    {/* min-w-0/max-w-full: a native file input reports a wide intrinsic width and was one
+                        of the controls that overflowed a 400px viewport. */}
+                    <input
+                      type="file"
+                      name="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      required
+                      className="min-w-0 max-w-full text-sm text-ink-600 file:mr-3 file:rounded-md file:border file:border-ink-300 file:bg-white file:px-2.5 file:py-1.5 file:text-xs file:font-medium file:text-ink-800 hover:file:bg-ink-50"
+                    />
+                    <Button type="submit" variant="secondary" size="sm">
+                      Upload
+                    </Button>
                   </form>
                 )}
-              </li>
-            ))}
-          </ul>
-        )}
+              </CardBody>
+            </Card>
+          </div>
 
-        {isOwner && (
-          <form action={addWebhookEndpointAction} className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
-            <input
-              name="url"
-              type="url"
-              placeholder="https://your-tool.example.com/webhooks/closecheck"
-              required
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+          {/* The one firm-wide switch on this page: until it is accepted, nobody in the firm can
+              generate a report. Styled as a gate, not as a form field. */}
+          <Card as="section" className={cn(!disclaimerAcknowledged && "border-sev-amber-border")}>
+            <CardHeader
+              title="Report disclaimer"
+              description={
+                <>
+                  Every generated report includes this language. It has to be accepted once, on the
+                  firm&apos;s behalf, before any report can be generated.
+                </>
+              }
             />
-            <button
-              type="submit"
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Add endpoint
-            </button>
-          </form>
-        )}
+            <CardBody className="space-y-4">
+              <blockquote className="rounded-md border-l-2 border-ink-300 bg-ink-50 px-4 py-3 text-sm leading-relaxed text-ink-700">
+                {REPORT_DISCLAIMER_TEXT}
+              </blockquote>
+              {org.disclaimerAcknowledgedAt ? (
+                <Callout tone="success">
+                  Reviewed on {org.disclaimerAcknowledgedAt.toISOString().slice(0, 10)}.
+                </Callout>
+              ) : !isOwner ? (
+                <Callout tone="warning">
+                  Your account owner needs to accept this language before anyone in the firm can generate
+                  a report.
+                </Callout>
+              ) : (
+                <Callout tone="warning">
+                  <form action={acknowledgeDisclaimerAction}>
+                    <Button type="submit">
+                      I&apos;ve reviewed this language — enable report generation
+                    </Button>
+                  </form>
+                </Callout>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card as="section">
+            <CardHeader
+              title="Team"
+              description={
+                <>
+                  Everyone listed here shares this firm&apos;s engagements, templates, and branding Only
+                  the account owner can invite or remove teammates.
+                </>
+              }
+            />
+            <CardBody className="space-y-4">
+              {invitedEmail && invitedTempPassword && (
+                // Same one-time-secret treatment as RevealOnce: the only moment this password exists on
+                // screen. The .font-mono element holds nothing but the password — a browser suite reads
+                // the page's first .font-mono to sign the new member in.
+                <div className="overflow-hidden rounded-md border border-sev-amber-border bg-sev-amber-bg">
+                  <p className="border-b border-sev-amber-border/70 px-3.5 py-2 text-sm font-semibold text-sev-amber">
+                    Temporary password for {invitedEmail}
+                  </p>
+                  <div className="px-3.5 py-3">
+                    <p className="rounded-md border border-sev-amber-border bg-white px-3 py-2 font-mono text-xs break-all text-ink-900 select-all">
+                      {invitedTempPassword}
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-sev-amber">
+                      Shown here for one minute, in this browser only — relay it to them yourself. There is no invite-email sending yet (Phase 2
+                      placeholder); this password won&apos;t be shown again after you leave this page.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <ul className="divide-y divide-ink-100">
+                {members.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 first:pt-0 last:pb-0"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="text-sm font-medium text-ink-900">{m.name || m.email}</span>
+                      {m.name && <span className="text-sm text-ink-500">{m.email}</span>}
+                      {/* Not <Badge>: owner and member need two different surfaces, and overriding the
+                          primitive's own background utility is a class-order coin toss. */}
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold tracking-wide whitespace-nowrap uppercase",
+                          m.role === "OWNER"
+                            ? "bg-accent-50 text-accent-800"
+                            : "border border-ink-200 bg-white text-ink-600",
+                        )}
+                      >
+                        {m.role}
+                      </span>
+                    </div>
+                    {isOwner && (
+                      <form action={removeMemberAction}>
+                        <input type="hidden" name="userId" value={m.id} />
+                        <Button type="submit" variant="danger" size="sm">
+                          Remove
+                        </Button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              {isOwner && (
+                <form
+                  action={inviteMemberAction}
+                  className="grid grid-cols-1 gap-2 border-t border-ink-100 pt-4 sm:grid-cols-[1fr_1fr_auto]"
+                >
+                  <input
+                    name="email"
+                    type="email"
+                    placeholder="teammate@example.com"
+                    required
+                    className={inputClass()}
+                  />
+                  <input name="name" placeholder="Name (optional)" className={inputClass()} />
+                  <Button type="submit" variant="secondary">
+                    Invite
+                  </Button>
+                </form>
+              )}
+            </CardBody>
+          </Card>
+        </div>
+
+        <div className="min-w-0 space-y-6">
+          <Card as="section">
+            <CardHeader
+              title={<>Plan &amp; billing</>}
+              description="Base plan includes a yearly bundle of full audits; additional audits are batched onto your next monthly invoice, never charged one-by-one. Tier A checks are always unmetered. Only the account owner can change the plan."
+            />
+            <CardBody className="space-y-4">
+              {!billingConfigured ? (
+                <Callout tone="neutral">
+                  Billing isn&apos;t configured on this deployment yet (no Stripe keys) — everything runs
+                  without limits. Plans appear here once it is.
+                </Callout>
+              ) : (
+                <>
+                  <div className="rounded-md border border-ink-200 bg-ink-50 px-3.5 py-3">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+                      <span className="rounded-md border border-ink-200 bg-white px-2 py-0.5 text-xs font-semibold text-ink-800">
+                        {billingAccount?.plan ? PLAN_LABELS[billingAccount.plan] : "No plan"}
+                      </span>
+                      <span
+                        className={cn(
+                          "rounded-md border px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase",
+                          billingAccount?.status === "ACTIVE"
+                            ? "sev-green"
+                            : billingAccount?.status === "PAST_DUE"
+                              ? "sev-amber"
+                              : "sev-none",
+                        )}
+                      >
+                        {billingAccount?.status ?? "NONE"}
+                      </span>
+                      <span className="text-ink-600">
+                        Audit credits:{" "}
+                        <span className="font-semibold text-ink-900">{creditBalance}</span>
+                      </span>
+                    </div>
+                    {!isEnforcementEnabled() && (
+                      <p className="mt-2 text-xs text-ink-500">
+                        (enforcement off — nothing is blocked yet)
+                      </p>
+                    )}
+                  </div>
+
+                  {isOwner && (
+                    <div className="flex flex-wrap gap-2">
+                      {billingAccount?.stripeSubscriptionId && billingAccount.status !== "CANCELED" ? (
+                        // Any live-or-past-due subscription is managed in the portal — showing checkout
+                        // buttons for a PAST_DUE org would let it open a second subscription (startCheckout
+                        // refuses this too; the UI just shouldn't offer it).
+                        <form action={openBillingPortalAction}>
+                          <Button type="submit" variant="secondary">
+                            Manage subscription &amp; invoices
+                          </Button>
+                        </form>
+                      ) : (
+                        Object.values(BillingPlan).map((plan) => (
+                          <form key={plan} action={startCheckoutAction}>
+                            <input type="hidden" name="plan" value={plan} />
+                            {/* Annual leads (docs/research pricing pass): it is the dark button, the
+                                monthly equivalents are the quiet ones beside it. */}
+                            <Button type="submit" variant={plan.endsWith("ANNUAL") ? "primary" : "secondary"}>
+                              {PLAN_LABELS[plan]}
+                            </Button>
+                          </form>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {recentLedger.length > 0 && (
+                    <ul className="divide-y divide-ink-100 border-t border-ink-100 text-xs text-ink-600">
+                      {recentLedger.map((entry) => (
+                        <li
+                          key={entry.id}
+                          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-2"
+                        >
+                          <span className="min-w-0">
+                            {entry.reason}
+                            {entry.note ? ` — ${entry.note}` : ""}
+                          </span>
+                          <span className="font-mono text-ink-500">
+                            {entry.delta > 0 ? `+${entry.delta}` : entry.delta} ·{" "}
+                            {entry.createdAt.toISOString().slice(0, 10)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card as="section">
+            <CardHeader
+              title="API keys"
+              description={
+                <>
+                  Read-only access to this firm&apos;s engagements, audits, and report metadata for your
+                  own tooling. Pass a key as{" "}
+                  <code className="rounded bg-ink-100 px-1 text-ink-700">
+                    Authorization: Bearer cc_live_...
+                  </code>{" "}
+                  to <code className="rounded bg-ink-100 px-1 text-ink-700">/api/v1/engagements</code>.
+                  Only the account owner can create or revoke keys.
+                </>
+              }
+            />
+            <CardBody className="space-y-4">
+              {/* Always mounted: it keeps the secret in client state across the refresh its own
+                  consume() triggers (see RevealOnce). */}
+              <RevealOnce
+                title="Your new API key"
+                value={newApiKey ?? null}
+                hint="Shown once — store it now. CloseCheck keeps only a hash and cannot show it again."
+                consume={consumeSecretReveals}
+              />
+
+              {apiKeys.length > 0 && (
+                <ul className="divide-y divide-ink-100">
+                  {apiKeys.map((k) => (
+                    <li
+                      key={k.id}
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                        <StatusDot tone={k.revokedAt ? "idle" : "live"} />
+                        <span
+                          className={cn(
+                            "text-sm font-medium",
+                            k.revokedAt ? "text-ink-500" : "text-ink-900",
+                          )}
+                        >
+                          {k.name}
+                        </span>
+                        <span className="font-mono text-xs text-ink-500">{k.tokenPrefix}…</span>
+                        {k.revokedAt ? (
+                          <span className="rounded-md border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap sev-red">
+                            revoked {k.revokedAt.toISOString().slice(0, 10)}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-ink-400">
+                            {k.lastUsedAt
+                              ? `last used ${k.lastUsedAt.toISOString().slice(0, 10)}`
+                              : "never used"}
+                          </span>
+                        )}
+                      </div>
+                      {isOwner && !k.revokedAt && (
+                        <form action={revokeApiKeyAction}>
+                          <input type="hidden" name="apiKeyId" value={k.id} />
+                          <Button type="submit" variant="danger" size="sm">
+                            Revoke
+                          </Button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {isOwner && (
+                <form
+                  action={createApiKeyAction}
+                  className="grid grid-cols-1 gap-2 border-t border-ink-100 pt-4 sm:grid-cols-[1fr_auto]"
+                >
+                  <input
+                    name="name"
+                    placeholder="Key name (e.g. deal-tracker sync)"
+                    required
+                    className={inputClass()}
+                  />
+                  <Button type="submit" variant="secondary">
+                    Create key
+                  </Button>
+                </form>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card as="section">
+            <CardHeader
+              title="Webhooks"
+              description={
+                <>
+                  CloseCheck POSTs signed{" "}
+                  <code className="rounded bg-ink-100 px-1 text-ink-700">audit.completed</code> and{" "}
+                  <code className="rounded bg-ink-100 px-1 text-ink-700">report.generated</code> events
+                  to each endpoint. Payloads carry identifiers and status only — use the API above for
+                  detail. Verify the{" "}
+                  <code className="rounded bg-ink-100 px-1 text-ink-700">X-CloseCheck-Signature</code>{" "}
+                  header (HMAC-SHA256 of the raw body with your signing secret). Only the account owner
+                  can manage endpoints.
+                </>
+              }
+            />
+            <CardBody className="space-y-4">
+              <RevealOnce
+                title="Signing secret for your new endpoint"
+                value={newWebhookSecret ?? null}
+                hint="Shown once — configure it in your receiver now to verify delivery signatures."
+                consume={consumeSecretReveals}
+              />
+
+              {webhookEndpoints.length > 0 && (
+                <ul className="divide-y divide-ink-100">
+                  {webhookEndpoints.map((w) => (
+                    <li
+                      key={w.id}
+                      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 first:pt-0 last:pb-0"
+                    >
+                      <div className="flex min-w-0 items-start gap-2">
+                        <span className="mt-1.5">
+                          <StatusDot
+                            tone={w.lastFailureAt ? "failed" : w.lastSuccessAt ? "live" : "idle"}
+                          />
+                        </span>
+                        <div className="min-w-0">
+                          <span className="block break-all font-mono text-xs text-ink-900">{w.url}</span>
+                          {w.lastSuccessAt && (
+                            <span className="mt-0.5 block text-xs text-sev-green">
+                              last delivered {w.lastSuccessAt.toISOString().slice(0, 10)}
+                            </span>
+                          )}
+                          {w.lastFailureAt && (
+                            <span
+                              className="mt-0.5 block text-xs text-sev-red"
+                              title={w.lastFailureReason ?? undefined}
+                            >
+                              last failure {w.lastFailureAt.toISOString().slice(0, 10)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isOwner && (
+                        <form action={deleteWebhookEndpointAction}>
+                          <input type="hidden" name="webhookEndpointId" value={w.id} />
+                          <Button type="submit" variant="danger" size="sm">
+                            Delete
+                          </Button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {isOwner && (
+                <form
+                  action={addWebhookEndpointAction}
+                  className="grid grid-cols-1 gap-2 border-t border-ink-100 pt-4 sm:grid-cols-[1fr_auto]"
+                >
+                  <input
+                    name="url"
+                    type="url"
+                    placeholder="https://your-tool.example.com/webhooks/closecheck"
+                    required
+                    className={inputClass()}
+                  />
+                  <Button type="submit" variant="secondary">
+                    Add endpoint
+                  </Button>
+                </form>
+              )}
+            </CardBody>
+          </Card>
+
+          <Card as="section">
+            <CardHeader
+              title="Email delivery"
+              description={
+                <>
+                  Every system email (invites, portal links, receipts) is recorded here.{" "}
+                  <span className="font-medium text-ink-700">LOGGED</span> means no email provider is
+                  configured yet — the message was recorded instead of delivered, and the in-app relay
+                  (e.g. the invite temp password above) is the delivery path.
+                </>
+              }
+            />
+            {recentEmails.length === 0 ? (
+              <EmptyState title="No emails yet." />
+            ) : (
+              <CardBody>
+                <ul className="divide-y divide-ink-100 text-xs">
+                  {recentEmails.map((m) => (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 py-2 first:pt-0 last:pb-0"
+                    >
+                      <span className="truncate text-ink-600">
+                        <span className="font-medium text-ink-900">{m.template}</span> → {m.to} —{" "}
+                        {m.subject}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-medium",
+                          m.status === "SENT" ? "sev-green" : m.status === "LOGGED" ? "sev-none" : "sev-red",
+                        )}
+                        title={m.error ?? undefined}
+                      >
+                        {m.status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </CardBody>
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   );

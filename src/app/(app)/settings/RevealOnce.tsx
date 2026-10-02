@@ -42,10 +42,19 @@ export function RevealOnce({
 
   if (!shown) return null;
   return (
-    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-      <p className="font-medium">{title}</p>
-      <p className="mt-1 break-all font-mono text-xs">{shown}</p>
-      <p className="mt-1 text-xs text-amber-700">{hint}</p>
+    // The only moment this secret exists on screen, so it is drawn as a deliberate panel rather than
+    // a note: amber frame, the value alone in a monospace well. The title stays a DIRECT child <p>
+    // and the value the panel's only `.font-mono` — both are how the browser suite finds them.
+    <div className="overflow-hidden rounded-md border border-sev-amber-border bg-sev-amber-bg shadow-xs">
+      <p className="border-b border-sev-amber-border/70 px-3.5 py-2 text-sm font-semibold text-sev-amber">
+        {title}
+      </p>
+      <div className="px-3.5 py-3">
+        <p className="rounded-md border border-sev-amber-border bg-white px-3 py-2 font-mono text-xs break-all text-ink-900 select-all">
+          {shown}
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-sev-amber">{hint}</p>
+      </div>
     </div>
   );
 }

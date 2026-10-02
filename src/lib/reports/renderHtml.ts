@@ -102,11 +102,23 @@ const SEVERITY_LABEL: Record<Severity, string> = {
   [Severity.RED]: "Red",
 };
 
+/**
+ * The validated severity palette (.claude/skills/consultant-ux-design/SKILL.md, which defers the
+ * colour methodology to `dataviz`). These four hues are the product's, not this file's: do not
+ * invent a new severity colour here and do not re-tune these to taste. Each clears 4.5:1 against
+ * white for the glyph-on-paper case and carries white text at 5:1 or better inside a badge, which
+ * is what lets the same hex serve as both a text colour and a fill.
+ */
 const SEVERITY_COLOR: Record<Severity, string> = {
-  [Severity.GREEN]: "#15803d",
-  [Severity.YELLOW]: "#b45309",
-  [Severity.RED]: "#b91c1c",
+  [Severity.GREEN]: "#067647",
+  [Severity.YELLOW]: "#b54708",
+  [Severity.RED]: "#b42318",
 };
+
+/** The fourth member of that palette: the "nothing rated here" mark, used wherever a severity
+ * colour would be if there were one. A grey with a trace of blue in it, so a row of glyphs reads as
+ * one family rather than as three colours and a smudge. */
+const SEVERITY_NEUTRAL = "#6b7589";
 
 /**
  * The non-color channel for severity. A traffic-light system printed in greyscale, photocopied, or
@@ -135,6 +147,72 @@ const TIER_LABEL: Record<Tier, string> = {
 };
 
 const TIER_SHORT: Record<Tier, string> = { A: "Tier A", B: "Tier B", C: "Tier C" };
+
+/**
+ * Tier identity, matching the app's own tier colours so a consultant reading the audit screen and a
+ * buyer reading the PDF are looking at the same three things.
+ *
+ * Deliberately used ONLY as a type colour on the words "Tier A"/"Tier B"/"Tier C" themselves — never
+ * as a fill, a band or a rule. Two reasons, both product decisions rather than taste. First, the
+ * firm's accent is the document's only structural colour (spec.md §6 whitelabel): a tier-coloured
+ * band would be a second brand competing with the consultant's. Second, Tier B's amber is the same
+ * hue as Yellow severity, so anything larger than a word of it starts reading as a rating.
+ */
+const TIER_COLOR: Record<Tier, string> = { A: "#1f47dc", B: "#b54708", C: "#6938ef" };
+
+/**
+ * The tier label, split at the point where its own prefix ends, so "Tier A" can carry the tier
+ * colour and the rest of the sentence cannot. Concatenated this is byte-for-byte TIER_LABEL — the
+ * label is client-facing text and nothing here may reword it.
+ */
+function tierHeadingHtml(tier: Tier): string {
+  const prefix = TIER_SHORT[tier];
+  const rest = TIER_LABEL[tier].slice(prefix.length);
+  return `<span style="color:${TIER_COLOR[tier]}">${escapeHtml(prefix)}</span>${escapeHtml(rest)}`;
+}
+
+// ---------------------------------------------------------------------------
+// The document's print scale
+//
+// One scale, declared once, rather than a size and a margin chosen per block. A diligence
+// deliverable is read beside a QoE report and a legal memo, and what makes those documents look
+// competent is not any individual choice but the fact that the same four or five measurements
+// recur on every page.
+//
+// TYPE. A4 at 14mm side margins gives a 688px measure, which at 12.5px body type is ~95 characters
+// a line — slightly wide, so the leading is correspondingly generous (1.55) to keep the eye's
+// return accurate. Every size below is a step on that scale; nothing in this file should introduce
+// a size between two of them.
+//
+// SPACE. A 4px unit, used in multiples. The rhythm that matters in print is the one BETWEEN blocks,
+// so the gaps are the scale's coarse end (8/12/16/24/32) and the padding inside a block its fine
+// end (4/6/8/12).
+// ---------------------------------------------------------------------------
+const TYPE = {
+  /** The business name on the cover, and nothing else. */
+  coverTitle: 34,
+  /** "Executive summary". */
+  section: 17,
+  /** A tier heading, the appendix heading. */
+  subsection: 14.5,
+  /** A finding title, a cover fact value. */
+  lead: 13,
+  /** Running body text. */
+  body: 12.5,
+  /** Supporting prose: a finding's description, a table cell, the disclaimer. */
+  support: 11.5,
+  /** Column heads, eyebrows, provenance lines. */
+  micro: 10.5,
+  /** Table column labels, the smallest thing on the page that is still meant to be read. */
+  label: 10,
+} as const;
+
+const SPACE = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+
+/** Hairlines. Print rules should separate, not enclose: a 1px rule two steps lighter than the text
+ * it divides reads as structure, and a 1px rule at full strength reads as a box. */
+const RULE = "#dfe4ea";
+const RULE_STRONG = "#c3cbd6";
 
 // spec.md §6: "each finding showing status, severity, note, evidence" — status alone (not just
 // severity) is what tells a reader *why* something has no rating: not started yet, actively blocked
@@ -436,14 +514,25 @@ export function statusContradictsSeverity(status: string, severity: Severity | n
   return false;
 }
 
+/**
+ * A severity chip. Rectangular with a 3px radius rather than a full pill: a pill is the house style
+ * of a product dashboard, and this document is read beside a QoE report and a legal memo. The
+ * geometry is the only thing that changed — glyph, word and colour are the three encodings
+ * SEVERITY_GLYPH's note requires and all three are still here.
+ *
+ * Widths are load-bearing, not cosmetic: the chip sits in the tier table's fixed 150px status
+ * column (STATUS_COLUMN_PX), so its padding and type size cannot grow without re-measuring that.
+ */
 function badge(severity: Severity, size: "sm" | "md" = "sm"): string {
-  const pad = size === "md" ? "4px 14px" : "2px 10px";
-  const font = size === "md" ? "15px" : "12px";
-  return `<span style="display:inline-block;padding:${pad};border-radius:999px;font-size:${font};font-weight:600;color:#fff;background:${SEVERITY_COLOR[severity]};white-space:nowrap"><span style="font-size:${size === "md" ? "13px" : "11px"};vertical-align:1px">${SEVERITY_GLYPH[severity]}</span> ${SEVERITY_LABEL[severity]}</span>`;
+  const pad = size === "md" ? "5px 13px" : "2px 9px";
+  const font = size === "md" ? 14.5 : 12;
+  return `<span style="display:inline-block;padding:${pad};border-radius:3px;font-size:${font}px;line-height:1.35;font-weight:600;letter-spacing:0.01em;color:#fff;background:${SEVERITY_COLOR[severity]};white-space:nowrap"><span style="font-size:${size === "md" ? 13 : 11}px;vertical-align:1px">${SEVERITY_GLYPH[severity]}</span> ${SEVERITY_LABEL[severity]}</span>`;
 }
 
+/** The same chip for the two "nothing to rate here" states: outlined rather than filled, so a
+ * reader scanning for solid colour never stops on one by mistake. */
 function neutralBadge(label: string): string {
-  return `<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;color:${NEUTRAL_TEXT};background:#e2e8f0;white-space:nowrap"><span style="font-size:11px;vertical-align:1px">${UNRATED_GLYPH}</span> ${escapeHtml(label)}</span>`;
+  return `<span style="display:inline-block;padding:1px 8px;border:1px solid ${RULE_STRONG};border-radius:3px;font-size:12px;line-height:1.35;font-weight:600;color:${SEVERITY_NEUTRAL};background:#f6f7f9;white-space:nowrap"><span style="font-size:11px;vertical-align:1px">${UNRATED_GLYPH}</span> ${escapeHtml(label)}</span>`;
 }
 
 /**
@@ -462,7 +551,15 @@ function badgeWithCoverage(severity: Severity, coverage: Coverage, size: "sm" | 
     coverage.provisional > 0
       ? `, ${coverage.provisional} awaiting confirmation`
       : "";
-  const coverageNote = `<span style="color:${MUTED_TEXT};font-size:11.5px;font-weight:400"> (${coverage.rated}/${coverage.total} rated${awaiting})</span>`;
+  // Set at body size beside the overall rating rather than as fine print. A green rating on an
+  // unrated audit must never read as "verified safe" (spec.md §6 coverage honesty), and a coverage
+  // figure typeset two steps smaller than the badge it qualifies is a coverage figure a
+  // time-pressured reader does not read. Beside a per-tier badge it stays supporting type: the
+  // overall line is the one that carries the claim.
+  const coverageNote =
+    size === "md"
+      ? `<span style="color:${NEUTRAL_TEXT};font-size:${TYPE.body}px;font-weight:500;white-space:nowrap"> (${coverage.rated}/${coverage.total} rated${awaiting})</span>`
+      : `<span style="color:${MUTED_TEXT};font-size:11.5px;font-weight:400"> (${coverage.rated}/${coverage.total} rated${awaiting})</span>`;
   // total === 0 means every item here was marked NOT_APPLICABLE (computeSeverityRollup excludes
   // them from the denominator entirely) — that's a resolved state, not pending work, so it must
   // read differently from "Not yet rated" (total > 0, rated === 0) even though both cases have
@@ -544,6 +641,23 @@ const PRINT_STYLES = `
   h2, h3 { break-after: avoid; page-break-after: avoid; }
   section { break-inside: auto; }
 
+  /* Print orphan/widow control. Chromium's default is 2, which permits a single line of a
+     scope paragraph or a finding note to sit alone at the top or foot of a page — the thing that
+     most reliably makes a long document look like a web page someone printed. */
+  p, li, td, th, div { orphans: 3; widows: 3; }
+
+  /* A heading must never be the last thing on a page, and the rule above it must not be either:
+     "break-after: avoid" on the heading is not enough on its own, because the heading's own
+     introductory block (the tier badge line) can take the break instead. */
+  .section-head { break-inside: avoid; page-break-inside: avoid; break-after: avoid; page-break-after: avoid; }
+
+  /* Lining figures wherever a reader compares numbers down a column rather than reading them in a
+     sentence. Deliberately NOT applied to the structured field tables: their column widths are
+     computed from a per-character width estimate (charWidthEm) measured against the proportional
+     figures the system stack actually renders, and changing the figure set under that estimate is
+     how a measured column stops being wide enough for its own value. */
+  .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
   /* The two rules that stop one long token from deleting other findings' data — see the "TABLE
      WIDTH IS NOT NEGOTIABLE" note above this constant, which is where the reasoning lives. */
   body { overflow-wrap: anywhere; }
@@ -595,22 +709,26 @@ export function renderReportHtml(data: ReportData): string {
       const rows = items.map((f) => findingRow(f, accent)).join("");
 
       return `
-      <section style="margin-top:26px">
-        <h3 class="keep-together" style="font-size:16px;margin:0 0 10px 0;padding-left:10px;border-left:4px solid ${accent};line-height:1.45">
-          <span style="display:block">${TIER_LABEL[tier]}</span>
-          <span style="display:block;margin-top:4px;font-weight:400">${badgeWithCoverage(rollup.perTier[tier], rollup.perTierCoverage[tier])}</span>
-        </h3>
-        <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
+      <section style="margin-top:${SPACE.xl + 2}px">
+        <!-- Heading and its rating line are one unit for pagination: a tier heading stranded at the
+             foot of a page, with its own rating at the top of the next, is the break this document
+             can least afford. "break-after: avoid" on the h3 alone does not achieve it — the gap
+             between the heading and the badge beneath it is a legal break point. -->
+        <div class="section-head" style="margin:0 0 ${SPACE.md}px 0;padding-left:${SPACE.md}px;border-left:3px solid ${accent}">
+          <h3 style="font-size:${TYPE.subsection}px;font-weight:700;letter-spacing:-0.005em;line-height:1.35;margin:0">${tierHeadingHtml(tier)}</h3>
+          <div style="margin-top:${SPACE.sm - 2}px">${badgeWithCoverage(rollup.perTier[tier], rollup.perTierCoverage[tier])}</div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;border:1px solid ${RULE}">
           <thead>
             <tr style="background:${accent};color:${accentText}">
-              <th style="text-align:left;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600">${escapeHtml(TIER_SHORT[tier])} finding</th>
+              <th style="text-align:left;padding:7px 12px;font-size:${TYPE.label}px;letter-spacing:0.09em;text-transform:uppercase;font-weight:700">${escapeHtml(TIER_SHORT[tier])} finding</th>
               <!-- A fixed ${STATUS_COLUMN_PX}px rather than the previous 28%: the status column holds a status
                    word and a badge and never needs more, while the finding column holds the
                    structured registers, which were being laid out in 466px of a 688px page and
                    breaking their own column labels for want of the 100px sitting empty beside
                    them. Fixed layout gives the declared width to this column and the remainder to
                    the one left auto. See FIELD_TABLE_WIDTH_PX. -->
-              <th style="width:${STATUS_COLUMN_PX}px;text-align:right;padding:6px 12px;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;font-weight:600;white-space:nowrap">Status &amp; rating</th>
+              <th style="width:${STATUS_COLUMN_PX}px;text-align:right;padding:7px 12px;font-size:${TYPE.label}px;letter-spacing:0.09em;text-transform:uppercase;font-weight:700;white-space:nowrap">Status &amp; rating</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -626,7 +744,7 @@ export function renderReportHtml(data: ReportData): string {
 <title>Technology Due-Diligence Report — ${escapeHtml(data.businessName)}</title>
 <style>${PRINT_STYLES}</style>
 </head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color:#0f172a; margin:0; padding:0; font-size:13px; line-height:1.5">
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color:#0f172a; margin:0; padding:0; font-size:${TYPE.body}px; line-height:1.55; text-rendering:optimizeLegibility">
 ${pdfHeaderTemplate(data, accent, logo)}
 ${pdfFooterTemplate(data, accent)}
 ${coverPage(data, accent, accentText, logo, rollup.overall, rollup.overallCoverage)}
@@ -652,50 +770,74 @@ function coverPage(
   overall: Severity,
   coverage: Coverage,
 ): string {
+  // A fact block, not a layout table: a hairline above each row and a label column of fixed width
+  // give the four facts a single left edge and a single value edge, which is what makes a reader
+  // take them as the document's particulars rather than as the start of its content. The value is
+  // `tnum` so the two dates align digit for digit under each other.
   const metaRow = (label: string, value: string): string => `
     <tr>
-      <td style="padding:5px 0;font-size:12px;color:${MUTED_TEXT};text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap;vertical-align:top;width:170px">${escapeHtml(label)}</td>
-      <td style="padding:5px 0;font-size:14px;color:#0f172a;vertical-align:top">${escapeHtml(value)}</td>
+      <td style="padding:${SPACE.sm}px ${SPACE.lg}px ${SPACE.sm}px 0;font-size:${TYPE.micro}px;font-weight:600;color:${MUTED_TEXT};text-transform:uppercase;letter-spacing:0.1em;white-space:nowrap;vertical-align:top;width:180px;border-top:1px solid ${RULE}">${escapeHtml(label)}</td>
+      <td class="tnum" style="padding:${SPACE.sm}px 0;font-size:${TYPE.lead}px;color:#0f172a;vertical-align:top;border-top:1px solid ${RULE}">${escapeHtml(value)}</td>
     </tr>`;
 
   return `
-  <section class="page-break-after" style="min-height:235mm;padding:6mm 0 0 0;display:flex;flex-direction:column">
+  <section class="page-break-after" style="min-height:235mm;padding:4mm 0 0 0;display:flex;flex-direction:column">
+    <!-- MASTHEAD. The firm's identity is the first thing on the page and the largest thing above
+         the title, and the rule under it is the firm's accent at full strength. spec.md §6's
+         whitelabel rule is not a credit line at the bottom — it is who the document appears to be
+         from, which on a cover is decided in the top 40mm. -->
     <div style="flex:0 0 auto">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:24px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:${SPACE.xl}px">
         <div>
-          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.14em;color:${MUTED_TEXT}">Prepared by</div>
-          <div style="font-weight:700;font-size:20px;margin-top:4px">${escapeHtml(data.org.name)}</div>
+          <div style="font-size:${TYPE.micro}px;font-weight:600;text-transform:uppercase;letter-spacing:0.16em;color:${MUTED_TEXT}">Prepared by</div>
+          <div style="font-weight:700;font-size:21px;letter-spacing:-0.005em;line-height:1.25;margin-top:${SPACE.xs + 1}px">${escapeHtml(data.org.name)}</div>
         </div>
-        ${logo ? `<img src="${escapeAttr(logo)}" alt="${escapeAttr(data.org.name)} logo" style="max-height:64px;max-width:220px;object-fit:contain" />` : ""}
+        ${logo ? `<img src="${escapeAttr(logo)}" alt="${escapeAttr(data.org.name)} logo" style="max-height:66px;max-width:230px;object-fit:contain" />` : ""}
       </div>
-      <div style="height:6px;background:${accent};margin:18px 0 0 0"></div>
+      <!-- A thick rule in the firm's accent over a hairline: the oldest trick in document design for
+           making a masthead read as a masthead, and the one place the brand colour is allowed to be
+           the loudest thing on the page. -->
+      <div style="height:5px;background:${accent};margin-top:${SPACE.lg}px"></div>
+      <div style="height:1px;background:${RULE};margin-top:2px"></div>
     </div>
 
-    <div style="flex:1 1 auto;padding-top:44px">
-      <div style="font-size:13px;text-transform:uppercase;letter-spacing:0.18em;color:${accent === DEFAULT_ACCENT ? MUTED_TEXT : pageTextAccent(accent)};font-weight:600">Technology Due-Diligence Report</div>
-      <h1 style="margin:12px 0 0 0;font-size:38px;line-height:1.15;letter-spacing:-0.01em">${escapeHtml(data.businessName)}</h1>
+    <div style="flex:1 1 auto;padding-top:${SPACE.xxl + SPACE.lg}px">
+      <div style="font-size:11.5px;text-transform:uppercase;letter-spacing:0.2em;color:${accent === DEFAULT_ACCENT ? MUTED_TEXT : pageTextAccent(accent)};font-weight:700">Technology Due-Diligence Report</div>
+      <h1 style="margin:${SPACE.md}px 0 0 0;font-size:${TYPE.coverTitle}px;font-weight:700;line-height:1.12;letter-spacing:-0.018em;max-width:16em">${escapeHtml(data.businessName)}</h1>
 
-      <div class="keep-together" style="margin-top:28px;display:inline-block;padding:12px 18px;border:1px solid #cbd5e1;border-left:6px solid ${accent};background:#f8fafc">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:${MUTED_TEXT}">Overall rating (computed from the findings)</div>
-        <div style="margin-top:6px">${badgeWithCoverage(overall, coverage, "md")}</div>
+      <div class="keep-together" style="margin-top:${SPACE.xl + SPACE.xs}px;display:inline-block;padding:${SPACE.md}px ${SPACE.xl}px ${SPACE.md + 2}px;border-left:4px solid ${accent};background:${accentWash(accent, 0.06)}">
+        <div style="font-size:${TYPE.micro}px;font-weight:600;text-transform:uppercase;letter-spacing:0.12em;color:${MUTED_TEXT}">Overall rating (computed from the findings)</div>
+        <div style="margin-top:${SPACE.sm}px">${badgeWithCoverage(overall, coverage, "md")}</div>
         ${
           data.overallRatingOverride
-            ? `<div style="margin-top:8px;font-size:12px;color:${NEUTRAL_TEXT}">Consultant override: ${badge(data.overallRatingOverride)} <span style="color:${MUTED_TEXT}">— see the executive summary for the consultant's reasoning.</span></div>`
+            ? // spec.md §6: an override is never a substitution. On the cover that means the computed
+              // rating above stays exactly where it is and the override is stated beneath it, with a
+              // pointer to the reasoning rather than a restatement of it.
+              `<div style="margin-top:${SPACE.md}px;padding-top:${SPACE.sm + 2}px;border-top:1px solid ${RULE_STRONG};font-size:${TYPE.support}px;color:${NEUTRAL_TEXT}">Consultant override: ${badge(data.overallRatingOverride)} <span style="color:${MUTED_TEXT}">— see the executive summary for the consultant's reasoning.</span></div>`
             : ""
         }
       </div>
 
-      <table style="width:100%;margin-top:34px;border-collapse:collapse">
-        ${data.engagementDate ? metaRow("Engagement date", formatDate(data.engagementDate)) : ""}
-        ${data.dealStage ? metaRow("Deal stage", data.dealStage) : ""}
-        ${metaRow("Audit template", data.templateName)}
-        ${metaRow("Report generated", formatDate(data.generatedAt))}
+      <!-- A rule above every row and one under the last of them, so the block is closed at both
+           ends; an open-ended list of facts reads as the start of the document's content rather
+           than as its particulars. -->
+      <table class="keep-together" style="width:100%;max-width:520px;margin-top:${SPACE.xxl + SPACE.sm}px;border-collapse:collapse;border-bottom:1px solid ${RULE}">
+        <tbody>
+          ${data.engagementDate ? metaRow("Engagement date", formatDate(data.engagementDate)) : ""}
+          ${data.dealStage ? metaRow("Deal stage", data.dealStage) : ""}
+          ${metaRow("Audit template", data.templateName)}
+          ${metaRow("Report generated", formatDate(data.generatedAt))}
+        </tbody>
       </table>
     </div>
 
-    <div class="keep-together" style="flex:0 0 auto;margin-top:32px;padding:12px 16px;border-top:1px solid #cbd5e1;background:${accentWash(accent, 0.05)}">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:${MUTED_TEXT};font-weight:600">Scope &amp; limitations</div>
-      <p style="margin:6px 0 0 0;font-size:11.5px;line-height:1.6;color:${NEUTRAL_TEXT}">${escapeHtml(REPORT_DISCLAIMER_TEXT)}</p>
+    <!-- Legal content (spec.md §6): placement and prominence are design decisions, the sentences are
+         not. Set at support size on a tinted ground at the foot of the cover — the position a
+         professional-services deliverable puts its basis-of-preparation note in, below the facts and
+         above nothing. -->
+    <div class="keep-together" style="flex:0 0 auto;margin-top:${SPACE.xxl}px;padding:${SPACE.md}px ${SPACE.lg}px ${SPACE.md + 2}px;border-top:2px solid ${accent};background:#f7f8fa">
+      <div style="font-size:${TYPE.micro}px;text-transform:uppercase;letter-spacing:0.12em;color:${MUTED_TEXT};font-weight:700">Scope &amp; limitations</div>
+      <p style="margin:${SPACE.sm}px 0 0 0;font-size:${TYPE.support}px;line-height:1.65;color:${NEUTRAL_TEXT};max-width:46em">${escapeHtml(REPORT_DISCLAIMER_TEXT)}</p>
     </div>
   </section>`;
 }
@@ -716,10 +858,15 @@ function executiveSummary(
   counts: SeverityCounts,
   overrideBlock: string,
 ): string {
-  const countCell = (label: string, value: number, color: string, glyph: string): string => `
-    <td style="padding:10px 6px;text-align:center;border:1px solid #cbd5e1;background:#ffffff;width:20%">
-      <div style="font-size:22px;font-weight:700;color:${color};line-height:1.1">${value}</div>
-      <div style="margin-top:3px;font-size:11.5px;color:${NEUTRAL_TEXT};white-space:nowrap"><span style="color:${color}">${glyph}</span> ${escapeHtml(label)}</div>
+  // Five tallies read as one instrument, so they are divided by hairlines rather than boxed
+  // individually — five bordered boxes read as five separate things and make the eye stop four
+  // times crossing a row it should take in at once. The figure is set large and in the severity's
+  // own colour, with the glyph repeated beside the word beneath it so the row still works in
+  // greyscale (SEVERITY_GLYPH's note).
+  const countCell = (label: string, value: number, color: string, glyph: string, first = false): string => `
+    <td style="padding:${SPACE.sm + 2}px ${SPACE.sm}px;text-align:center;width:20%;${first ? "" : `border-left:1px solid ${RULE_STRONG};`}vertical-align:top">
+      <div class="tnum" style="font-size:26px;font-weight:700;color:${color};line-height:1.05;letter-spacing:-0.02em">${value}</div>
+      <div style="margin-top:${SPACE.xs + 1}px;font-size:${TYPE.support}px;font-weight:600;color:${NEUTRAL_TEXT};white-space:nowrap"><span style="color:${color}">${glyph}</span> ${escapeHtml(label)}</div>
     </td>`;
 
   const tierRow = (tier: Tier): string => {
@@ -733,16 +880,17 @@ function executiveSummary(
       tierFindings.length === 0
         ? `${neutralBadge("No items")}<span style="color:${MUTED_TEXT};font-size:11.5px"> (not in this template)</span>`
         : badgeWithCoverage(rollup.perTier[tier], rollup.perTierCoverage[tier]);
+    const cell = `padding:${SPACE.sm + 1}px 12px;border-bottom:1px solid ${RULE};vertical-align:middle`;
     return `
     <tr>
-      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;white-space:nowrap">${escapeHtml(TIER_SHORT[tier])}</td>
-      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:12px;color:${NEUTRAL_TEXT}">${escapeHtml(TIER_LABEL[tier].replace(/^Tier [ABC] — /, ""))}</td>
-      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${tierCounts.red} ${SEVERITY_GLYPH.RED} · ${tierCounts.yellow} ${SEVERITY_GLYPH.YELLOW} · ${tierCounts.green} ${SEVERITY_GLYPH.GREEN}</td>
+      <td style="${cell};font-size:${TYPE.body}px;font-weight:700;color:${TIER_COLOR[tier]};white-space:nowrap">${escapeHtml(TIER_SHORT[tier])}</td>
+      <td style="${cell};font-size:${TYPE.support}px;color:${NEUTRAL_TEXT}">${escapeHtml(TIER_LABEL[tier].replace(/^Tier [ABC] — /, ""))}</td>
+      <td class="tnum" style="${cell};font-size:${TYPE.support}px;color:${NEUTRAL_TEXT};white-space:nowrap">${tierCounts.red} <span style="color:${SEVERITY_COLOR.RED}">${SEVERITY_GLYPH.RED}</span> · ${tierCounts.yellow} <span style="color:${SEVERITY_COLOR.YELLOW}">${SEVERITY_GLYPH.YELLOW}</span> · ${tierCounts.green} <span style="color:${SEVERITY_COLOR.GREEN}">${SEVERITY_GLYPH.GREEN}</span></td>
       <!-- Not nowrap: the badge holds itself on one line, but the coverage note beside it
            ("(20/20 rated)", "(not in this template)") is prose and must be allowed onto a second
            line. Under table-layout:fixed a nowrap cell does not widen its column, it is clipped —
            seen in a rendered PDF as a Rating column reading "(not in this te". -->
-      <td style="padding:7px 12px;border-bottom:1px solid #e2e8f0;text-align:right">${rating}</td>
+      <td style="${cell};text-align:right">${rating}</td>
     </tr>`;
   };
 
@@ -751,9 +899,10 @@ function executiveSummary(
   const risksBlock =
     risks.length > 0
       ? `
-    <div class="keep-together" style="margin-top:18px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:${MUTED_TEXT};font-weight:600">What drove the rating — ${totalRed} Red ${totalRed === 1 ? "item" : "items"}</div>
-      <table style="width:100%;border-collapse:collapse;margin-top:8px">
+    <div class="keep-together" style="margin-top:${SPACE.md + 2}px;padding-top:${SPACE.sm + 2}px;border-top:1px solid ${RULE_STRONG}">
+      <div style="font-size:${TYPE.micro}px;text-transform:uppercase;letter-spacing:0.12em;color:${MUTED_TEXT};font-weight:700">What drove the rating — ${totalRed} Red ${totalRed === 1 ? "item" : "items"}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:${SPACE.sm}px">
+        <tbody>
         ${risks
           .map(
             (f) => `
@@ -761,28 +910,29 @@ function executiveSummary(
           <!-- 20px, not 18: under fixed layout the declared width is the whole width, and 18px
                less 10px of padding left the 13px severity glyph 8px of content box to sit in — so
                it overflowed into the tier label beside it by ~2px. Measured, not guessed. -->
-          <td style="padding:6px 8px 6px 0;vertical-align:top;width:20px;color:${SEVERITY_COLOR.RED};font-size:13px">${SEVERITY_GLYPH.RED}</td>
-          <td style="padding:6px 8px 6px 0;vertical-align:top;font-size:12px;color:${MUTED_TEXT};white-space:nowrap;width:56px">${escapeHtml(TIER_SHORT[f.templateItem.tier])}</td>
-          <td style="padding:6px 0;vertical-align:top;font-size:13px;font-weight:600">${escapeHtml(f.templateItem.title)}${
+          <td style="padding:${SPACE.sm - 1}px ${SPACE.sm}px ${SPACE.sm - 1}px 0;vertical-align:top;width:20px;color:${SEVERITY_COLOR.RED};font-size:${TYPE.lead}px;line-height:1.4">${SEVERITY_GLYPH.RED}</td>
+          <td style="padding:${SPACE.sm - 1}px ${SPACE.sm}px ${SPACE.sm - 1}px 0;vertical-align:top;font-size:${TYPE.support}px;font-weight:700;color:${TIER_COLOR[f.templateItem.tier]};white-space:nowrap;width:56px;line-height:1.5">${escapeHtml(TIER_SHORT[f.templateItem.tier])}</td>
+          <td style="padding:${SPACE.sm - 1}px 0;vertical-align:top;font-size:${TYPE.lead}px;font-weight:600;line-height:1.4">${escapeHtml(f.templateItem.title)}${
             statusContradictsSeverity(f.status, f.severity)
               ? // Named here too, not only on the detail row: this panel sits on the page some
                 // readers are the only ones to open, and a Red entry whose own note reads benign
                 // ("Expires 2029-04-01 (925 days out)") is unexplainable without it.
-                `<span style="font-weight:400;font-size:11.5px;color:${MUTED_TEXT}"> — recorded status: ${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}, which disagrees with this rating</span>`
+                `<span style="font-weight:400;font-size:${TYPE.support}px;color:${MUTED_TEXT}"> — recorded status: ${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}, which disagrees with this rating</span>`
               : ""
           }${
             f.note
-              ? `<div style="margin-top:2px;font-size:12px;font-weight:400;color:${NEUTRAL_TEXT}">${escapeHtml(truncate(f.note, 160))}</div>`
+              ? `<div style="margin-top:${SPACE.xs - 1}px;font-size:${TYPE.support}px;font-weight:400;line-height:1.5;color:${NEUTRAL_TEXT}">${escapeHtml(truncate(f.note, 160))}</div>`
               : ""
           }</td>
         </tr>`,
           )
           .join("")}
+        </tbody>
       </table>
-      ${totalRed > risks.length ? `<div style="margin-top:6px;font-size:12px;color:${MUTED_TEXT}">+ ${totalRed - risks.length} further Red ${totalRed - risks.length === 1 ? "item" : "items"} in the detail section.</div>` : ""}
+      ${totalRed > risks.length ? `<div style="margin-top:${SPACE.sm}px;font-size:${TYPE.support}px;color:${MUTED_TEXT}">+ ${totalRed - risks.length} further Red ${totalRed - risks.length === 1 ? "item" : "items"} in the detail section.</div>` : ""}
     </div>`
       : `
-    <div class="keep-together" style="margin-top:18px;font-size:12.5px;color:${NEUTRAL_TEXT}">
+    <div class="keep-together" style="margin-top:${SPACE.md + 2}px;padding-top:${SPACE.sm + 2}px;border-top:1px solid ${RULE_STRONG};font-size:${TYPE.body}px;line-height:1.55;color:${NEUTRAL_TEXT}">
       ${
         counts.red === 0 && rollup.overallCoverage.rated > 0
           ? "No Red items were identified in this audit."
@@ -794,35 +944,49 @@ function executiveSummary(
       }
     </div>`;
 
-  return `
-  <section style="margin-top:0">
-    <h2 style="font-size:18px;margin:0 0 12px 0;padding-left:10px;border-left:4px solid ${accent}">Executive summary</h2>
+  const legendItem = (color: string, glyph: string, text: string): string =>
+    `<span style="white-space:nowrap;margin-right:${SPACE.lg}px"><span style="color:${color}">${glyph}</span> ${text}</span>`;
 
-    <div class="keep-together" style="padding:16px 18px;border:1px solid #cbd5e1;background:${accentWash(accent, 0.05)}">
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <span style="font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:${NEUTRAL_TEXT}">Overall</span>
-        ${badgeWithCoverage(rollup.overall, rollup.overallCoverage, "md")}
+  // A PAGE OF ITS OWN, deliberately. The consultant-ux-design skill's rule for this section is to
+  // design it as if it is the only page some readers open — and a reader who only opens one page
+  // needs that page to be a whole page: a summary that trails off into the first two rows of Tier A
+  // is a summary a buyer's advisor cannot forward, print or hand across a table on its own. It also
+  // removes the alternative, which is worse: the detail section starting in whatever fraction of the
+  // page is left over, which looks like a layout accident rather than a decision.
+  return `
+  <section class="page-break-after" style="margin-top:0">
+    <h2 class="section-head" style="font-size:${TYPE.section}px;font-weight:700;letter-spacing:-0.01em;margin:0 0 ${SPACE.md}px 0;padding-left:${SPACE.md}px;border-left:3px solid ${accent}">Executive summary</h2>
+
+    <!-- THE PAGE SOME READERS NEVER LEAVE (.claude/skills/consultant-ux-design/SKILL.md). Read top
+         to bottom it answers, in order: what is the rating, how much of the audit is actually behind
+         it, how the items fall out, and which items drove it. Nothing else belongs in this panel. -->
+    <div class="keep-together" style="padding:${SPACE.md + 2}px ${SPACE.lg + 4}px ${SPACE.lg}px;border:1px solid ${RULE_STRONG};border-top:3px solid ${accent};background:${accentWash(accent, 0.05)}">
+      <div style="display:flex;align-items:baseline;gap:${SPACE.md}px;flex-wrap:wrap">
+        <span style="font-size:${TYPE.support}px;font-weight:700;text-transform:uppercase;letter-spacing:0.14em;color:${MUTED_TEXT}">Overall</span>
+        <span>${badgeWithCoverage(rollup.overall, rollup.overallCoverage, "md")}</span>
       </div>
       ${overrideBlock}
-      <table style="width:100%;border-collapse:collapse;margin-top:14px">
+      <table style="width:100%;border-collapse:collapse;margin-top:${SPACE.md + 2}px;border-top:1px solid ${RULE_STRONG};border-bottom:1px solid ${RULE_STRONG}">
+        <tbody>
         <tr>
-          ${countCell("Red", counts.red, SEVERITY_COLOR.RED, SEVERITY_GLYPH.RED)}
+          ${countCell("Red", counts.red, SEVERITY_COLOR.RED, SEVERITY_GLYPH.RED, true)}
           ${countCell("Yellow", counts.yellow, SEVERITY_COLOR.YELLOW, SEVERITY_GLYPH.YELLOW)}
           ${countCell("Green", counts.green, SEVERITY_COLOR.GREEN, SEVERITY_GLYPH.GREEN)}
-          ${countCell("Unrated", counts.unrated, NEUTRAL_TEXT, UNRATED_GLYPH)}
-          ${countCell("N/A", counts.notApplicable, NEUTRAL_TEXT, "—")}
+          ${countCell("Unrated", counts.unrated, SEVERITY_NEUTRAL, UNRATED_GLYPH)}
+          ${countCell("N/A", counts.notApplicable, SEVERITY_NEUTRAL, "—")}
         </tr>
+        </tbody>
       </table>
       ${risksBlock}
     </div>
 
-    <table style="width:100%;border-collapse:collapse;margin-top:16px;border:1px solid #cbd5e1">
+    <table style="width:100%;border-collapse:collapse;margin-top:${SPACE.lg + 2}px;border:1px solid ${RULE}">
       <thead>
         <tr style="background:${accent};color:${accentText}">
-          <th style="width:12%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
-          <th style="width:41%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">What it covers</th>
-          <th style="width:21%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap">${SEVERITY_GLYPH.RED} / ${SEVERITY_GLYPH.YELLOW} / ${SEVERITY_GLYPH.GREEN}</th>
-          <th style="width:26%;text-align:right;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Rating</th>
+          <th style="width:12%;text-align:left;padding:7px 12px;font-size:${TYPE.label}px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em">Tier</th>
+          <th style="width:41%;text-align:left;padding:7px 12px;font-size:${TYPE.label}px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em">What it covers</th>
+          <th style="width:21%;text-align:left;padding:7px 12px;font-size:${TYPE.label}px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em;white-space:nowrap">${SEVERITY_GLYPH.RED} / ${SEVERITY_GLYPH.YELLOW} / ${SEVERITY_GLYPH.GREEN}</th>
+          <th style="width:26%;text-align:right;padding:7px 12px;font-size:${TYPE.label}px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em">Rating</th>
         </tr>
       </thead>
       <tbody>
@@ -830,13 +994,16 @@ function executiveSummary(
       </tbody>
     </table>
 
-    <div class="keep-together" style="margin-top:10px;font-size:11.5px;color:${NEUTRAL_TEXT}">
-      <strong style="color:#0f172a">How to read the ratings:</strong>
-      <span style="white-space:nowrap;margin-left:6px"><span style="color:${SEVERITY_COLOR.RED}">${SEVERITY_GLYPH.RED}</span> Red — material issue</span>
-      <span style="white-space:nowrap;margin-left:12px"><span style="color:${SEVERITY_COLOR.YELLOW}">${SEVERITY_GLYPH.YELLOW}</span> Yellow — needs attention</span>
-      <span style="white-space:nowrap;margin-left:12px"><span style="color:${SEVERITY_COLOR.GREEN}">${SEVERITY_GLYPH.GREEN}</span> Green — no issue found</span>
-      <span style="white-space:nowrap;margin-left:12px"><span style="color:${NEUTRAL_TEXT}">${UNRATED_GLYPH}</span> not yet rated</span>.
-      A tier is rated by its worst item: one Red item makes the tier Red regardless of how many Greens surround it.
+    <!-- The legend is a key, so it is set as one: the label on its own line, the four marks on a
+         line of their own where they sit under each other rather than running into the prose, and
+         the roll-up rule as a closing sentence. The words are unchanged — only the line breaks
+         between them are a design decision. -->
+    <div class="keep-together" style="margin-top:${SPACE.sm + 2}px;padding:${SPACE.sm + 2}px ${SPACE.md + 2}px;background:#f7f8fa;border-left:3px solid ${RULE_STRONG};font-size:${TYPE.support}px;line-height:1.6;color:${NEUTRAL_TEXT}">
+      <strong style="color:#0f172a;text-transform:uppercase;letter-spacing:0.1em;font-size:${TYPE.micro}px">How to read the ratings:</strong>
+      <div style="margin-top:${SPACE.xs + 1}px">
+      ${legendItem(SEVERITY_COLOR.RED, SEVERITY_GLYPH.RED, "Red — material issue")}${legendItem(SEVERITY_COLOR.YELLOW, SEVERITY_GLYPH.YELLOW, "Yellow — needs attention")}${legendItem(SEVERITY_COLOR.GREEN, SEVERITY_GLYPH.GREEN, "Green — no issue found")}<span style="white-space:nowrap"><span style="color:${SEVERITY_NEUTRAL}">${UNRATED_GLYPH}</span> not yet rated</span>.
+      </div>
+      <div style="margin-top:${SPACE.xs + 1}px">A tier is rated by its worst item: one Red item makes the tier Red regardless of how many Greens surround it.</div>
     </div>
   </section>`;
 }
@@ -866,14 +1033,28 @@ function overrideSection(
 
   const agrees = override === rollup.overall && rollup.overallCoverage.rated > 0;
 
-  return `<div class="keep-together" style="margin-top:12px;padding:10px 14px;border:1px solid #cbd5e1;border-left:4px solid ${accent};background:#ffffff;font-size:13px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:${MUTED_TEXT};font-weight:600">Consultant override${agrees ? " (matches the computed rating)" : ""}</div>
-      <div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="color:${NEUTRAL_TEXT}">Consultant's rating:</span> ${badge(override)}
-        <span style="color:${NEUTRAL_TEXT}">Computed from the findings:</span> ${badgeWithCoverage(rollup.overall, rollup.overallCoverage)}
-      </div>
-      <div style="margin-top:4px;font-size:11.5px;color:${MUTED_TEXT}">Both values are shown deliberately — the consultant's judgement does not replace the computed roll-up.</div>
-      ${data.overallRatingOverrideNote ? `<div style="margin-top:6px;color:#334155">${escapeHtml(data.overallRatingOverrideNote)}</div>` : ""}
+  // The two ratings are set as a two-column pair rather than as a sentence, so neither can be read
+  // as qualifying the other: same label treatment, same size, side by side, both chips at full
+  // strength. A design in which one of them is smaller, greyer or second in a sentence is the
+  // silent substitution spec.md §6 forbids, arrived at by styling rather than by code.
+  const ratingPair = (label: string, value: string): string => `
+        <td style="padding:0 ${SPACE.xl}px ${SPACE.xs}px 0;vertical-align:top;width:50%">
+          <div style="font-size:${TYPE.micro}px;font-weight:600;color:${MUTED_TEXT};letter-spacing:0.04em">${label}</div>
+          <div style="margin-top:${SPACE.xs + 1}px">${value}</div>
+        </td>`;
+
+  return `<div class="keep-together" style="margin-top:${SPACE.lg}px;padding:${SPACE.md}px ${SPACE.lg}px ${SPACE.md + 2}px;border:1px solid ${RULE_STRONG};border-left:4px solid ${accent};background:#fcfdfd;font-size:${TYPE.body}px">
+      <div style="font-size:${TYPE.micro}px;text-transform:uppercase;letter-spacing:0.12em;color:${MUTED_TEXT};font-weight:700">Consultant override${agrees ? " (matches the computed rating)" : ""}</div>
+      <table style="width:100%;border-collapse:collapse;margin-top:${SPACE.sm}px">
+        <tbody>
+          <tr>
+            ${ratingPair("Consultant&#39;s rating:", badge(override))}
+            ${ratingPair("Computed from the findings:", badgeWithCoverage(rollup.overall, rollup.overallCoverage))}
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:${SPACE.sm}px;font-size:${TYPE.support}px;color:${MUTED_TEXT}">Both values are shown deliberately — the consultant's judgement does not replace the computed roll-up.</div>
+      ${data.overallRatingOverrideNote ? `<div style="margin-top:${SPACE.sm}px;padding-top:${SPACE.sm}px;border-top:1px solid ${RULE};color:#334155;font-size:${TYPE.body}px;line-height:1.55">${escapeHtml(data.overallRatingOverrideNote)}</div>` : ""}
     </div>`;
 }
 
@@ -945,7 +1126,10 @@ function citationHtml(citations: ResolvedCitation[] | undefined): string {
   return citations
     .map(
       (citation) =>
-        `<div style="font-size:11px;color:${NEUTRAL_TEXT};margin-top:2px">${escapeHtml(formatCitation(citation))}</div>`,
+        // Indented under the value and set a step down, the way a source note sits under a figure
+        // in an exhibit — close enough to belong to the value, quiet enough not to be read as part
+        // of it.
+        `<div style="font-size:${TYPE.micro}px;line-height:1.5;color:${MUTED_TEXT};margin-top:${SPACE.xs - 1}px;padding-left:${SPACE.sm}px;border-left:1px solid ${RULE}">${escapeHtml(formatCitation(citation))}</div>`,
     )
     .join("");
 }
@@ -1032,13 +1216,16 @@ function definitionList(fields: RenderedField[]): string {
     .map(
       (f) => `
               <tr>
-                <th scope="row" style="text-align:left;padding:3px 12px 3px 0;font-size:11.5px;font-weight:600;color:${MUTED_TEXT};vertical-align:top;width:38%">${escapeHtml(f.label)}</th>
-                <td style="padding:3px 0;font-size:12.5px;color:#334155;vertical-align:top">${f.html}</td>
+                <th scope="row" style="text-align:left;padding:5px ${SPACE.lg}px 5px 0;font-size:${TYPE.support}px;font-weight:600;line-height:1.5;color:${MUTED_TEXT};vertical-align:top;width:38%;border-top:1px solid ${RULE}">${escapeHtml(f.label)}</th>
+                <td style="padding:5px 0;font-size:${TYPE.body}px;line-height:1.55;color:#334155;vertical-align:top;border-top:1px solid ${RULE}">${f.html}</td>
               </tr>`,
     )
     .join("");
+  // A hairline above each pair rather than a box around the list: the rules give the labels and the
+  // values each a single edge to hang from, which is what makes a run of six fields read as one
+  // schedule instead of six loose lines.
   return `
-            <table style="width:100%;border-collapse:collapse;margin-top:6px">
+            <table style="width:100%;border-collapse:collapse;margin-top:${SPACE.sm + 2}px">
               <tbody>${rows}</tbody>
             </table>`;
 }
@@ -1078,8 +1265,14 @@ function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: str
       // effect on min-content width, which is what auto table layout sizes columns from — inside a
       // table whose widths are declared, that effect is not wanted and not needed.
       const wrapRule = col.headerWordFits ? "overflow-wrap:normal;" : "overflow-wrap:break-word;";
+      // The weight stays 600 deliberately. computeFieldTableLayout sizes this column from
+      // UPPERCASE_EM, whose metrics carry ~8% headroom over a semibold system face; a true 700 is
+      // wider than that headroom on macOS's SF, and the column would stop fitting its own label —
+      // which is the "MONT"/"HLY COST" defect, reintroduced by a typographic preference.
+      // `vertical-align: bottom` sits a one-line label on the same baseline as a label that wrapped
+      // to three, so the rule under the header row is the only straight edge the eye needs.
       return `
-                <th style="width:${col.widthPct.toFixed(2)}%;text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.headerFontPx}px;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid #cbd5e1">${escapeHtml(c.label)}</th>`;
+                <th style="width:${col.widthPct.toFixed(2)}%;text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.headerFontPx}px;line-height:1.3;letter-spacing:0.04em;text-transform:uppercase;font-weight:600;color:${NEUTRAL_TEXT};border-bottom:1px solid ${RULE_STRONG};vertical-align:bottom">${escapeHtml(c.label)}</th>`;
     })
     .join("");
 
@@ -1100,17 +1293,22 @@ function fieldTable(field: FieldDef, rows: Record<string, string>[], accent: str
           // breaking inside a word where it has to, but by `break-word` rather than `anywhere` —
           // see the header above for why the distinction is worth making.
           const wrapRule = col.sized ? "overflow-wrap:normal;" : "overflow-wrap:break-word;";
-          return `<td style="text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.fontPx}px;color:#334155;border-bottom:1px solid #e2e8f0;vertical-align:top">${value}</td>`;
+          return `<td style="text-align:${align(c)};${wrapRule}padding:4px ${layout.padPx}px;font-size:${layout.fontPx}px;line-height:1.45;color:#334155;border-bottom:1px solid ${RULE};vertical-align:top">${value}</td>`;
         })
         .join("");
       return `<tr>${cells}</tr>`;
     })
     .join("");
 
+  // `margin-top: 4px` on the table is not a spacing preference — tests/integration/report-layout
+  // .itest.ts finds the structured table by it in order to measure the width it is laid out in.
   return `
-            <div style="margin-top:8px">
-              <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${MUTED_TEXT};font-weight:600">${escapeHtml(field.label)}</div>
-              <table style="width:100%;border-collapse:collapse;margin-top:4px;border:1px solid #cbd5e1">
+            <div style="margin-top:${SPACE.md}px">
+              <!-- Deliberately NOT keep-together: a 40-row register cannot fit on one page, and an
+                   unsatisfiable avoid makes Chromium break wherever it likes (see tr.allow-break in
+                   PRINT_STYLES). The <thead> repeats instead, which is the honest fix. -->
+              <div style="font-size:${TYPE.micro}px;text-transform:uppercase;letter-spacing:0.1em;color:${MUTED_TEXT};font-weight:700;padding-bottom:${SPACE.xs}px">${escapeHtml(field.label)}</div>
+              <table style="width:100%;border-collapse:collapse;margin-top:4px;border:1px solid ${RULE}">
                 <thead><tr style="background:${accentWash(accent, 0.07)}">${head}</tr></thead>
                 <tbody>${body}</tbody>
               </table>
@@ -1488,22 +1686,27 @@ function findingRow(f: ReportFinding, accent: string): string {
   const rowClass = structuredTableRowCount(f) > KEEP_TOGETHER_MAX_TABLE_ROWS ? "allow-break" : "keep-together";
 
   return `
-        <tr class="${rowClass}" style="border-bottom:1px solid #e2e8f0">
-          <td style="padding:9px 12px;vertical-align:top;border-left:4px solid ${rail}">
-            <div style="font-weight:600">${escapeHtml(f.templateItem.title)}</div>
-            ${f.templateItem.description ? `<div style="color:${NEUTRAL_TEXT};font-size:12.5px;margin-top:2px">${escapeHtml(f.templateItem.description)}</div>` : ""}
-            ${f.note ? `<div style="margin-top:6px;font-size:12.5px;color:#334155"><em>Finding:</em> ${escapeHtml(f.note)}</div>` : ""}
-            ${structuredBlock}
-            ${f.evidenceCount ? `<div style="margin-top:4px;font-size:12px;color:#0369a1">${f.evidenceCount} document${f.evidenceCount === 1 ? "" : "s"} attached</div>` : ""}
-          </td>
-          <td style="padding:9px 12px;text-align:right;vertical-align:top">
-            <div style="font-size:11.5px;color:${MUTED_TEXT};margin-bottom:4px;white-space:nowrap">${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}</div>
-            ${severity ? badge(severity) : neutralBadge(suppressSeverity ? "Not applicable" : "Not rated")}
+        <tr class="${rowClass}" style="border-bottom:1px solid ${RULE}">
+          <td style="padding:${SPACE.sm + 2}px 12px;vertical-align:top;border-left:4px solid ${rail}">
+            <div style="font-size:${TYPE.lead}px;font-weight:600;line-height:1.4;letter-spacing:-0.005em">${escapeHtml(f.templateItem.title)}</div>
+            ${f.templateItem.description ? `<div style="color:${MUTED_TEXT};font-size:${TYPE.support}px;line-height:1.55;margin-top:${SPACE.xs - 1}px">${escapeHtml(f.templateItem.description)}</div>` : ""}
+            ${f.note ? `<div style="margin-top:${SPACE.sm}px;font-size:${TYPE.body}px;line-height:1.55;color:#334155"><em style="color:${MUTED_TEXT};font-style:normal;font-weight:600">Finding:</em> ${escapeHtml(f.note)}</div>` : ""}
             ${
               contradiction
-                ? `<div style="margin-top:5px;font-size:10.5px;line-height:1.45;color:${NEUTRAL_TEXT};font-weight:600;text-align:right">Recorded status and rating disagree. The rating shown is the one this report&#39;s roll-up used.</div>`
+                ? // Moved out of the status column and into the body of the row. In the 150px column
+                  // this sentence set as a six-line ragged stack beside a one-word badge — the
+                  // least legible thing on the page, which for a sentence whose whole purpose is to
+                  // stop a reader misreading a contradiction is the wrong way round. It stays
+                  // inside the same <tr>, immediately under the finding it is about.
+                  `<div class="keep-together" style="margin-top:${SPACE.sm}px;padding:${SPACE.sm - 2}px ${SPACE.md}px;border-left:3px solid ${SEVERITY_NEUTRAL};background:#f7f8fa;font-size:${TYPE.support}px;line-height:1.5;color:${NEUTRAL_TEXT};font-weight:600">Recorded status and rating disagree. The rating shown is the one this report&#39;s roll-up used.</div>`
                 : ""
             }
+            ${structuredBlock}
+            ${f.evidenceCount ? `<div style="margin-top:${SPACE.sm}px;font-size:${TYPE.micro}px;letter-spacing:0.02em;color:${MUTED_TEXT}">${f.evidenceCount} document${f.evidenceCount === 1 ? "" : "s"} attached</div>` : ""}
+          </td>
+          <td style="padding:${SPACE.sm + 2}px 12px;text-align:right;vertical-align:top">
+            <div style="font-size:${TYPE.micro}px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:${MUTED_TEXT};margin-bottom:${SPACE.sm - 2}px;white-space:nowrap">${escapeHtml(STATUS_LABEL[f.status] ?? f.status)}</div>
+            ${severity ? badge(severity) : neutralBadge(suppressSeverity ? "Not applicable" : "Not rated")}
           </td>
         </tr>`;
 }
@@ -1543,32 +1746,46 @@ function appendixSection(
       const attachedOn = `<span style="white-space:nowrap">${escapeHtml(d.attachedAt.toISOString().slice(0, 10))}</span>`;
       const provenance = d.attributedTo ? `${escapeHtml(d.attributedTo)}, ${attachedOn}` : attachedOn;
 
+      // `vertical-align: top` on every cell, not the browser default of middle. Observed in a
+      // rendered PDF: a two-line Document cell centred its neighbours against its own middle, so
+      // "Excel workbook · 47 KB" sat halfway down beside "Recurring SaaS inventory" and the row read
+      // as two half-rows. An exhibit's rows hang from one baseline.
+      const cell = `padding:${SPACE.sm - 1}px 12px;font-size:${TYPE.support}px;color:${NEUTRAL_TEXT};vertical-align:top;line-height:1.5`;
       return `
-    <tr class="keep-together" style="border-bottom:1px solid #e2e8f0">
-      <td style="padding:6px 12px;font-size:12.5px">
+    <tr class="keep-together" style="border-bottom:1px solid ${RULE}">
+      <td style="${cell};font-size:${TYPE.body}px;color:#0f172a">
         ${escapeHtml(d.label ?? d.filename)}
-        ${d.label ? `<div style="font-size:11px;color:${NEUTRAL_TEXT}">${escapeHtml(d.filename)}</div>` : ""}
+        ${d.label ? `<div style="font-size:${TYPE.micro}px;color:${MUTED_TEXT};margin-top:1px">${escapeHtml(d.filename)}</div>` : ""}
       </td>
-      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">${escapeHtml(descriptors.join(" · "))}</td>
-      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT}">${escapeHtml(d.findingTitle)}</td>
-      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT};white-space:nowrap">Tier ${d.tier}</td>
-      <td style="padding:6px 12px;font-size:12px;color:${NEUTRAL_TEXT}">${provenance}</td>
+      <!-- NOT nowrap. "Excel workbook · 47 KB" is 22 characters in a 15% column with 79px of content
+           box: under table-layout:fixed a nowrap cell that does not fit is painted over the column
+           beside it, which is exactly what this descriptor was doing to "Evidence for". It is two
+           facts joined by a separator and it may wrap between them. -->
+      <td style="${cell}">${escapeHtml(descriptors.join(" · "))}</td>
+      <td style="${cell}">${escapeHtml(d.findingTitle)}</td>
+      <td style="${cell};white-space:nowrap">Tier ${d.tier}</td>
+      <td style="${cell}">${provenance}</td>
     </tr>`;
     })
     .join("");
 
+  const headCell = (width: string, label: string): string =>
+    `<th style="width:${width};text-align:left;padding:7px 12px;font-size:${TYPE.label}px;font-weight:700;text-transform:uppercase;letter-spacing:0.09em">${label}</th>`;
+
   return `
-  <section style="margin-top:26px">
-    <h3 style="font-size:16px;margin:0 0 10px 0;padding-left:10px;border-left:4px solid ${accent}">Appendix — Documents relied on</h3>
-    <p style="font-size:12px;color:${NEUTRAL_TEXT};margin:0 0 10px 0">${escapeHtml(retentionSentence)}</p>
-    <table style="width:100%;border-collapse:collapse;border:1px solid #cbd5e1">
+  <section style="margin-top:${SPACE.xl + 2}px">
+    <div class="section-head" style="margin:0 0 ${SPACE.md}px 0;padding-left:${SPACE.md}px;border-left:3px solid ${accent}">
+      <h3 style="font-size:${TYPE.subsection}px;font-weight:700;letter-spacing:-0.005em;line-height:1.35;margin:0">Appendix — Documents relied on</h3>
+      <p style="font-size:${TYPE.support}px;line-height:1.6;color:${NEUTRAL_TEXT};margin:${SPACE.xs + 1}px 0 0 0;max-width:46em">${escapeHtml(retentionSentence)}</p>
+    </div>
+    <table style="width:100%;border-collapse:collapse;border:1px solid ${RULE}">
       <thead>
         <tr style="background:${accent};color:${accentText}">
-          <th style="width:30%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Document</th>
-          <th style="width:15%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Type</th>
-          <th style="width:24%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Evidence for</th>
-          <th style="width:9%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Tier</th>
-          <th style="width:22%;text-align:left;padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.06em">Provided by</th>
+          ${headCell("30%", "Document")}
+          ${headCell("15%", "Type")}
+          ${headCell("24%", "Evidence for")}
+          ${headCell("9%", "Tier")}
+          ${headCell("22%", "Provided by")}
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -1581,14 +1798,17 @@ function appendixSection(
  * enters the document at the detail section may never see the cover. */
 function closingBlock(data: ReportData, accent: string, logo: string | null): string {
   return `
-  <section class="keep-together" style="margin-top:34px;padding-top:14px;border-top:3px solid ${accent}">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      ${logo ? `<img src="${escapeAttr(logo)}" alt="" style="height:18px;width:auto;object-fit:contain" />` : ""}
-      <span style="font-weight:700;font-size:13px">${escapeHtml(data.org.name)}</span>
-      <span style="color:${MUTED_TEXT};font-size:11.5px">· ${escapeHtml(data.businessName)} · ${formatDate(data.generatedAt)}</span>
+  <section class="keep-together" style="margin-top:${SPACE.lg + 4}px;padding-top:${SPACE.md}px;border-top:3px solid ${accent}">
+    <div style="display:flex;align-items:center;gap:${SPACE.sm + 2}px;margin-bottom:${SPACE.sm + 2}px">
+      ${logo ? `<img src="${escapeAttr(logo)}" alt="" style="height:20px;width:auto;object-fit:contain" />` : ""}
+      <span style="font-weight:700;font-size:${TYPE.lead}px;letter-spacing:-0.005em">${escapeHtml(data.org.name)}</span>
+      <span class="tnum" style="color:${MUTED_TEXT};font-size:${TYPE.support}px">· ${escapeHtml(data.businessName)} · ${formatDate(data.generatedAt)}</span>
     </div>
-    <p style="margin:0;font-size:11.5px;line-height:1.6;color:${NEUTRAL_TEXT}">${escapeHtml(REPORT_DISCLAIMER_TEXT)}</p>
-    <p style="margin:8px 0 0 0;font-size:10.5px;color:${MUTED_TEXT}">Prepared using CloseCheck.</p>
+    <p style="margin:0;font-size:${TYPE.support}px;line-height:1.6;color:${NEUTRAL_TEXT};max-width:46em">${escapeHtml(REPORT_DISCLAIMER_TEXT)}</p>
+    <!-- CloseCheck's entire presence in the deliverable: one line, at the smallest size on the page,
+         below the firm's own sign-off. spec.md §6's whitelabel rule is what sets this ceiling —
+         anything more competes with the firm whose name is on the cover. -->
+    <p style="margin:${SPACE.sm + 2}px 0 0 0;font-size:9.5px;letter-spacing:0.02em;color:${MUTED_TEXT}">Prepared using CloseCheck.</p>
   </section>`;
 }
 
@@ -1603,13 +1823,17 @@ function closingBlock(data: ReportData, accent: string, logo: string | null): st
  * inlined styles, the explicit font-size on every element, and the data-URI-only logo.
  */
 function pdfHeaderTemplate(data: ReportData, accent: string, logo: string | null): string {
+  // Quiet by design: a 1px rule rather than a 2px band, the firm's name in the document's ink rather
+  // than in the accent, and the title in supporting grey. Running chrome is wayfinding, not a second
+  // masthead — on pages 2..N the reader is reading findings, and anything heavier here competes with
+  // the severity marks that are the only thing on the page that should catch the eye.
   return `<template id="closecheck-pdf-header"><div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:8px;color:#64748b;padding:0 14mm;box-sizing:border-box;">
-  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid ${accent};padding-bottom:3px;">
+  <div style="display:flex;align-items:flex-end;justify-content:space-between;border-bottom:1px solid ${accent};padding-bottom:4px;">
     <div style="display:flex;align-items:center;">
-      ${logo ? `<img src="${escapeAttr(logo)}" style="height:10px;width:auto;object-fit:contain;margin-right:5px;" />` : ""}
-      <span style="font-size:8px;font-weight:700;color:#334155;">${escapeHtml(data.org.name)}</span>
+      ${logo ? `<img src="${escapeAttr(logo)}" style="height:11px;width:auto;object-fit:contain;margin-right:6px;" />` : ""}
+      <span style="font-size:8px;font-weight:700;letter-spacing:0.04em;color:#0f172a;">${escapeHtml(data.org.name)}</span>
     </div>
-    <span style="font-size:8px;color:#64748b;">${escapeHtml(truncate(data.businessName, 48))} — Technology Due-Diligence Report</span>
+    <span style="font-size:7.5px;letter-spacing:0.03em;color:#64748b;">${escapeHtml(truncate(data.businessName, 48))} — Technology Due-Diligence Report</span>
   </div>
 </div></template>`;
 }
@@ -1621,9 +1845,9 @@ function pdfHeaderTemplate(data: ReportData, accent: string, logo: string | null
  */
 function pdfFooterTemplate(data: ReportData, accent: string): string {
   return `<template id="closecheck-pdf-footer"><div style="-webkit-print-color-adjust:exact;print-color-adjust:exact;width:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:8px;color:#64748b;padding:0 14mm;box-sizing:border-box;">
-  <div style="border-top:2px solid ${accent};padding-top:3px;display:flex;align-items:center;justify-content:space-between;">
-    <span style="font-size:8px;color:#64748b;">${escapeHtml(data.org.name)} · Confidential — prepared for the recipient of this report</span>
-    <span style="font-size:8px;color:#334155;font-weight:600;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+  <div style="border-top:1px solid ${accent};padding-top:4px;display:flex;align-items:baseline;justify-content:space-between;">
+    <span style="font-size:7.5px;letter-spacing:0.03em;color:#64748b;">${escapeHtml(data.org.name)} · Confidential — prepared for the recipient of this report</span>
+    <span style="font-size:7.5px;color:#334155;font-weight:600;letter-spacing:0.04em;white-space:nowrap;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
   </div>
 </div></template>`;
 }

@@ -10,7 +10,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 font-sans">
+      {/* The column is load-bearing, not cosmetic: /login, /signup, the portal shell and the
+          not-found boundary all size themselves with flex-1 against this body. */}
+      <body className="flex min-h-full flex-col bg-ink-50 font-sans text-ink-900 selection:bg-accent-100 selection:text-accent-900">
         {children}
       </body>
     </html>

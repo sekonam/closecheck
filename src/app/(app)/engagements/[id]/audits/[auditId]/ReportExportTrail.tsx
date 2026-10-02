@@ -24,6 +24,8 @@
  * Keeping them apart is what keeps each caveat attached to the rows it is true of.
  */
 
+import { DISCLOSURE_CARET_INLINE } from "./FindingGuidance";
+
 const TRAIL_BEGAN = new Date("2026-09-24T09:00:00Z");
 
 export type ReportExport = {
@@ -41,17 +43,18 @@ export function ReportExportTrail({ exports }: { exports: ReportExport[] }) {
   const chronological = [...exports].sort((a, b) => a.exportedAt.getTime() - b.exportedAt.getTime());
 
   return (
-    <details className="mt-1 text-xs">
-      <summary className="cursor-pointer text-slate-500 hover:text-slate-800">
+    <details className="group mt-1.5 text-xs">
+      <summary className="text-ink-500 hover:text-ink-800">
+        <span aria-hidden="true" className={DISCLOSURE_CARET_INLINE} />
         {chronological.length === 0
           ? "Exports — none recorded"
           : `Exports — ${chronological.length} by this firm`}
       </summary>
 
-      <ol className="mt-1.5 space-y-1 border-l-2 border-slate-300 pl-3">
+      <ol className="mt-1.5 space-y-1 border-l-2 border-ink-300 pl-3">
         {chronological.map((e) => (
-          <li key={e.id} className="text-slate-500">
-            <span className="font-medium text-slate-600">
+          <li key={e.id} className="text-ink-500">
+            <span className="font-medium text-ink-700">
               {/* A removed teammate leaves the export standing but unattributed. Saying "someone at
                   this firm" rather than omitting the row keeps the count honest: the export
                   happened, and who did it is what was lost. */}
@@ -62,14 +65,14 @@ export function ReportExportTrail({ exports }: { exports: ReportExport[] }) {
         ))}
 
         {chronological.length === 0 && (
-          <li className="text-slate-400">
+          <li className="text-ink-400">
             No one has downloaded this report through the product since exports began being recorded
             on {formatTimestamp(TRAIL_BEGAN)}.
           </li>
         )}
       </ol>
 
-      <p className="mt-1.5 text-slate-400">
+      <p className="mt-1.5 leading-relaxed text-ink-400">
         {/* The two honesty constraints this list must carry, because a consultant may repeat what it
             says to a client's advisory team. */}
         This records downloads through CloseCheck by people in your firm, and nothing else — a report
