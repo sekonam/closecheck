@@ -142,11 +142,10 @@ export default async function SettingsPage({
             ← Engagements
           </Link>
         }
-        title="Firm branding"
+        title="Firm settings"
         description={
           <>
-            Your logo, name, and brand color appear on the cover and footer of every generated report
-            — never CloseCheck&apos;s.
+            Branding, the report disclaimer, your team, plan and integrations.
           </>
         }
       />
@@ -171,7 +170,13 @@ export default async function SettingsPage({
               of two — two 260px cards is worse than one of each. */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-1">
             <Card key={`${org.name}-${org.brandColorHex}`} as="section">
-              <CardHeader title="Firm name and color" />
+              {/* This sentence used to be the page's own description, back when the page was titled
+                  "Firm branding". It explains why this one card matters rather than what the page
+                  is, so it moved down here with the rename instead of being dropped. */}
+              <CardHeader
+                title="Firm name and color"
+                description="Your logo, name, and brand color appear on the cover and footer of every generated report — never CloseCheck's."
+              />
               {/* Firm-scoped (spec.md §3): this rewrites the branding on every report the firm has ever
                   issued. Enforced server-side — rendering the form to a member anyway would be a control
                   that presents itself and then refuses, which is the same failure as a message telling
@@ -328,7 +333,7 @@ export default async function SettingsPage({
               title="Team"
               description={
                 <>
-                  Everyone listed here shares this firm&apos;s engagements, templates, and branding Only
+                  Everyone listed here shares this firm&apos;s engagements, templates, and branding. Only
                   the account owner can invite or remove teammates.
                 </>
               }
@@ -376,7 +381,12 @@ export default async function SettingsPage({
                         {m.role}
                       </span>
                     </div>
-                    {isOwner && (
+                    {/* Never offered on the viewer's own row. Removing a user is a hard delete, so
+                        for a sole owner the control was permanently dead (the action always refuses
+                        with "Can't remove the only owner on the account.") and for a two-owner firm
+                        it was one unconfirmed click to delete your own account. A control whose only
+                        outcomes are a refusal or self-destruction should not be rendered. */}
+                    {isOwner && m.id !== userId && (
                       <form action={removeMemberAction}>
                         <input type="hidden" name="userId" value={m.id} />
                         <Button type="submit" variant="danger" size="sm">

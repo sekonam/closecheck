@@ -61,6 +61,7 @@ function ScalarInput({
   placeholder,
   value,
   dense,
+  ariaLabel,
 }: {
   name: string;
   kind: ScalarFieldKind;
@@ -68,13 +69,20 @@ function ScalarInput({
   placeholder?: string;
   value: string;
   dense?: boolean;
+  /**
+   * Only for controls with no wrapping label — i.e. table cells, which are labelled visually by
+   * their column header and would otherwise announce as "edit text, blank". Scalar fields are
+   * wrapped in their own <label> and must NOT pass this: a second name would override the visible
+   * one and the two could drift apart.
+   */
+  ariaLabel?: string;
 }) {
   const textClass = dense ? CELL_BASE : inputClass();
   const pickerClass = dense ? CELL_SELECT : selectClass();
 
   if (kind === "enum") {
     return (
-      <select name={name} defaultValue={value} className={pickerClass}>
+      <select name={name} aria-label={ariaLabel} defaultValue={value} className={pickerClass}>
         <option value="">Not recorded</option>
         {options?.map((option) => (
           <option key={option} value={option}>
@@ -87,7 +95,7 @@ function ScalarInput({
 
   if (kind === "boolean") {
     return (
-      <select name={name} defaultValue={value} className={pickerClass}>
+      <select name={name} aria-label={ariaLabel} defaultValue={value} className={pickerClass}>
         <option value="">Not recorded</option>
         <option value="true">Yes</option>
         <option value="false">No</option>
@@ -99,6 +107,7 @@ function ScalarInput({
     return (
       <textarea
         name={name}
+        aria-label={ariaLabel}
         defaultValue={value}
         placeholder={placeholder}
         rows={3}
@@ -111,6 +120,7 @@ function ScalarInput({
   return (
     <input
       name={name}
+      aria-label={ariaLabel}
       type={attrs.type}
       inputMode={attrs.inputMode}
       defaultValue={value}
@@ -138,6 +148,7 @@ function TableField({ field, rows }: { field: FieldDef; rows: Record<string, str
               {columns.map((column) => (
                 <th
                   key={column.key}
+                  scope="col"
                   className="border-b border-ink-200 px-2 py-1.5 text-[11px] font-semibold tracking-wide text-ink-600 uppercase"
                 >
                   {column.label}
@@ -159,6 +170,12 @@ function TableField({ field, rows }: { field: FieldDef; rows: Record<string, str
                       placeholder={column.placeholder}
                       value={rows[rowIndex]?.[column.key] ?? ""}
                       dense
+                      // A sighted user reads the column header and the row they are on; a screen
+                      // reader gets neither for a bare cell input, so each cell carries its own
+                      // name. aria-labelledby pointing at the real <th> would be better, but these
+                      // headers can't hold stable unique ids for the reason in the LABEL_TEXT note
+                      // above: field and column keys repeat across checklist items on one page.
+                      ariaLabel={`${column.label}, row ${rowIndex + 1}, ${field.label}`}
                     />
                   </td>
                 ))}

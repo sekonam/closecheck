@@ -65,9 +65,14 @@ export async function getOnboardingStatus(
     {
       key: "branding",
       title: "Set your firm branding",
+      // The copy says what `brandingSet` actually checks. It used to promise "logo and brand color"
+      // while the condition below is an OR, so setting a colour alone ticked the step off — a
+      // checklist whose whole job is stopping an unbranded first report, clearing itself on half
+      // the work. A logo is genuinely optional (plenty of firms have only a wordmark); the colour
+      // is what always applies, so the sentence now leads with it.
       detail: isOwner
-        ? "Add your logo and brand color on Settings — every report goes out under your name, not CloseCheck's."
-        : "Your account owner sets the firm's logo and color. Reports go out under the firm's name once they have.",
+        ? "Add your brand color on Settings, and a logo if you have one — every report goes out under your name, not CloseCheck's."
+        : "Your account owner sets the firm's color and logo. Reports go out under the firm's name once they have.",
       done: brandingSet,
       ownerOnly: true,
       waitingOnOwner: !isOwner && !brandingSet,
@@ -76,7 +81,10 @@ export async function getOnboardingStatus(
       key: "disclaimer",
       title: "Review the report disclaimer",
       detail: isOwner
-        ? "A one-time review on Settings unlocks report generation (spec.md §6)."
+        // Customer-facing copy: no internal document references. These sentences are the first
+        // thing a paying consultant reads, and a citation to a spec they cannot open reads as
+        // unfinished software (spec.md §6 is the rule behind it, recorded here instead).
+        ? "A one-time review on Settings unlocks report generation."
         : "Report generation is blocked for the whole firm until your account owner reviews the disclaimer once.",
       done: !!org.disclaimerAcknowledgedAt,
       ownerOnly: true,
@@ -101,7 +109,12 @@ export async function getOnboardingStatus(
     {
       key: "tier-a",
       title: "Run the Tier A automated checks",
-      detail: "Domain, DNS, SSL, email auth, and HTTPS checks run from public info — no seller cooperation needed.",
+      // Names its precondition. The audit page states it well and adjacently ("Set a primary domain
+      // on the engagement to enable Tier A automation", with the button genuinely disabled), but a
+      // consultant who created an engagement without a domain reads THIS list to find out why they
+      // are stuck, and it was the one place that did not mention the requirement.
+      detail:
+        "Domain, DNS, SSL, email auth, and HTTPS checks run from public info — no seller cooperation needed. Needs a primary domain on the engagement.",
       done: !!tierAFinding,
       ownerOnly: false,
       waitingOnOwner: false,
@@ -117,7 +130,9 @@ export async function getOnboardingStatus(
     {
       key: "share",
       title: "Share it with a client portal link",
-      detail: "Optional: a revocable, no-account link the buyer can open directly (spec.md §7).",
+      // No internal document reference in customer-facing copy — see the note on the disclaimer
+      // step above. The rule behind this one is spec.md §7.
+      detail: "Optional: a revocable, no-account link the buyer can open directly.",
       done: portalLinkCount > 0,
       ownerOnly: false,
       waitingOnOwner: false,

@@ -147,22 +147,36 @@ describe("area D — page sweeps: console, viewport, not-found", () => {
   }, 240_000);
 
   it("D7: bogus ids and tokens render the branded not-found page, never a stack trace", async () => {
+    // Two audiences, two correct answers. A consultant who mistypes an id should get the app's own
+    // "Not found". A BUYER holding a dead or revoked portal link must not: this row used to require
+    // the consultant copy everywhere, and that is what let the portal 404 ship its only control as
+    // "Back to Engagements" — walking the buyer into "Sign in to your consultant account", which is
+    // precisely what spec.md §2 principle 4 forbids. The portal case now asserts buyer-appropriate
+    // copy AND that there is no route into the product and no CloseCheck branding.
     const cases = [
-      { ctx: context, url: `${BASE_URL}/engagements/does-not-exist-${suffix}` },
-      { ctx: context, url: `${BASE_URL}/engagements/${engagementId}/audits/does-not-exist-${suffix}` },
+      { ctx: context, url: `${BASE_URL}/engagements/does-not-exist-${suffix}`, audience: "consultant" as const },
+      { ctx: context, url: `${BASE_URL}/engagements/${engagementId}/audits/does-not-exist-${suffix}`, audience: "consultant" as const },
       // A real audit id under the wrong engagement must not resolve either.
-      { ctx: context, url: `${BASE_URL}/engagements/${fixture.engagementId}/audits/${auditId}` },
-      { ctx: context, url: `${BASE_URL}/portal/not-a-real-token-${suffix}` },
+      { ctx: context, url: `${BASE_URL}/engagements/${fixture.engagementId}/audits/${auditId}`, audience: "consultant" as const },
+      { ctx: context, url: `${BASE_URL}/portal/not-a-real-token-${suffix}`, audience: "buyer" as const },
     ];
     for (const c of cases) {
       const page = await c.ctx.newPage();
       const response = await page.goto(c.url, { waitUntil: "domcontentloaded", timeout: 120_000 });
+      const expected = c.audience === "buyer" ? "This link is no longer available" : "Not found";
       // The not-found boundary renders after the RSC payload streams in; read the body once it has.
-      await page.getByText("Not found").first().waitFor({ state: "visible", timeout: 120_000 }).catch(() => {});
+      await page.getByText(expected).first().waitFor({ state: "visible", timeout: 120_000 }).catch(() => {});
       const body = await page.innerText("body");
       expect(response?.status(), `${c.url} status`).toBe(404);
-      expect(body, `${c.url} branded copy`).toContain("Not found");
+      expect(body, `${c.url} branded copy`).toContain(expected);
       expect(body, `${c.url} leaks internals`).not.toMatch(/at \w+ \(|node_modules|\.tsx?:\d+|Unhandled Runtime Error|Application error/);
+      if (c.audience === "buyer") {
+        expect(body, "a buyer's dead link must not name the product").not.toMatch(/closecheck/i);
+        expect(
+          await page.locator('a[href^="/engagements"], a[href^="/login"], a[href^="/signup"]').count(),
+          "a buyer's dead link must offer no route into the consultant app",
+        ).toBe(0);
+      }
       await page.close();
     }
   }, 120_000);

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db/client";
 import { createAudit } from "@/lib/actions/audits";
 import { updateEngagement } from "@/lib/actions/engagements";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
+import { computeSeverityRollup } from "@/lib/reports/rollup";
 import {
   Badge,
   Button,
@@ -15,7 +16,9 @@ import {
   CardHeader,
   EmptyState,
   Field,
+  Meter,
   PageHeader,
+  SeverityBadge,
   cn,
   inputClass,
   selectClass,
@@ -23,8 +26,37 @@ import {
 
 const DEAL_STAGES = ["PRE_LOI", "POST_LOI", "CLOSING", "CLOSED", "DEAD"] as const;
 
+/**
+ * The consultant's spelling of each stage, kept identical to the list page's map so the same deal
+ * does not change name between the two screens. Duplicated for the same reason TERMINAL_STAGES
+ * below is: both pages are page modules, and a shared vocabulary needs its own module to live in.
+ *
+ * This header used to render `engagement.dealStage` straight from the database, so the chip read
+ * `PRE_LOI` — a storage identifier, shown to the customer, one line above a select spelling the
+ * same value differently again.
+ */
+const DEAL_STAGE_LABEL: Record<string, string> = {
+  PRE_LOI: "Pre-LOI",
+  POST_LOI: "Post-LOI",
+  CLOSING: "Closing",
+  CLOSED: "Closed",
+  DEAD: "Dead",
+};
+
 /** Terminal stages read as muted/finished work, active ones as live. See the list page for why. */
 const TERMINAL_STAGES = new Set<string>(["CLOSED", "DEAD"]);
+
+/**
+ * Same three-way split as the audit page's `coverageStatus`: an all-NOT_APPLICABLE audit (total 0,
+ * because computeSeverityRollup drops those from the denominator) is RESOLVED work, not pending
+ * work, so it must not read as "not yet rated". Duplicated rather than shared because the audit
+ * page's copy is page-local; if a third surface needs it, it belongs in @/lib/reports/rollup.
+ */
+function coverageStatus(rated: number, total: number): "not-applicable" | "not-yet-rated" | "rated" {
+  if (total === 0) return "not-applicable";
+  if (rated === 0) return "not-yet-rated";
+  return "rated";
+}
 
 export default async function EngagementPage({
   params,
@@ -47,10 +79,24 @@ export default async function EngagementPage({
     await runOrRedirect(() => createAudit(formData), backPath);
   }
 
+  // The audits' findings ride along with the audits rather than being counted per row: Prisma loads
+  // a nested relation in one batched query keyed by parent id, so the audit list costs the same
+  // whether the engagement has one audit or ten. Only the three fields computeSeverityRollup reads
+  // are selected — notes and structured data never reach this page.
   const engagement = await withOrgScope(orgId, (tx) =>
     tx.engagement.findUnique({
       where: { id },
-      include: { audits: { include: { template: true }, orderBy: { createdAt: "desc" } } },
+      include: {
+        audits: {
+          include: {
+            template: true,
+            findings: {
+              select: { severity: true, status: true, templateItem: { select: { tier: true } } },
+            },
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
     }),
   );
   if (!engagement) notFound();
@@ -86,7 +132,7 @@ export default async function EngagementPage({
                 terminalStage ? "border border-ink-400" : "bg-accent-500",
               )}
             />
-            {engagement.dealStage}
+            {DEAL_STAGE_LABEL[engagement.dealStage]}
           </span>
         }
       />
@@ -190,25 +236,60 @@ export default async function EngagementPage({
               <EmptyState title="No audits started yet." />
             </li>
           )}
-          {engagement.audits.map((a) => (
-            <li key={a.id}>
-              <Link
-                href={`/engagements/${engagement.id}/audits/${a.id}`}
-                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50"
-              >
-                <span className="min-w-0 flex-1 truncate font-medium text-ink-900 group-hover:text-accent-700">
-                  {a.template.name} v{a.template.version}
-                </span>
-                <Badge tone="outline">{a.status}</Badge>
-                <span
-                  aria-hidden="true"
-                  className="shrink-0 text-ink-300 transition-colors group-hover:text-ink-500"
+          {engagement.audits.map((a) => {
+            // One pass over the findings already loaded above — no query per row. Run through
+            // computeSeverityRollup rather than counted here so this row and the audit's own page
+            // cannot disagree about what "rated" means (NOT_APPLICABLE excluded) or about the
+            // worst-item tier rule (spec.md §6).
+            const rollup = computeSeverityRollup(a.findings);
+            const coverage = rollup.overallCoverage;
+            const status = coverageStatus(coverage.rated, coverage.total);
+            return (
+              <li key={a.id}>
+                <Link
+                  href={`/engagements/${engagement.id}/audits/${a.id}`}
+                  className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50 focus-visible:bg-ink-50 focus-visible:-outline-offset-2"
                 >
-                  →
-                </span>
-              </Link>
-            </li>
-          ))}
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-ink-900 group-hover:text-accent-700 group-focus-visible:text-accent-700">
+                      {a.template.name} v{a.template.version}
+                    </span>
+                    {/* Where the consultant left off, so coming back to a deal does not mean
+                        scrolling the whole audit to find out. Inside the flexible column, never as
+                        its own fixed track: the row has to survive 400px next to the status badge. */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {status === "rated" ? (
+                        <SeverityBadge severity={rollup.overall} label={rollup.overall} size="sm" />
+                      ) : (
+                        <SeverityBadge
+                          severity={null}
+                          label={status === "not-applicable" ? "Not applicable" : "Not yet rated"}
+                          size="sm"
+                        />
+                      )}
+                      <span className="text-xs text-ink-500">
+                        {coverage.rated}/{coverage.total} rated
+                      </span>
+                      <Meter
+                        value={coverage.rated}
+                        total={coverage.total}
+                        className="w-full max-w-[12rem]"
+                      />
+                    </div>
+                  </div>
+                  <Badge tone="outline">{a.status}</Badge>
+                  {/* Same reasoning as the engagements list's chevron: decorative, but the only
+                      standing cue that the row is a link, and ink-300 on white was 1.61:1. */}
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 text-ink-400 transition-colors group-hover:text-ink-700 group-focus-visible:text-ink-700"
+                  >
+                    →
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </Card>
     </div>

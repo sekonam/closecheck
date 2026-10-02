@@ -20,8 +20,15 @@
   --color-ink-100: #eef0f4;
   --color-ink-200: #dfe3ea;
   --color-ink-300: #c6ccd8;
-  --color-ink-400: #98a1b3;
-  --color-ink-500: #6b7589;
+  /* 400 and 500 are contrast-tuned, not picked by eye. The app's page ground is ink-50, not white,
+     which is the case that was failing: the old ink-500 (#6b7589) measured 4.63:1 on white but only
+     4.36:1 on ink-50, so every secondary sentence in the product missed AA by a hair. 500 is the
+     token for real secondary TEXT and now clears 4.5:1 on both grounds (4.90 / 4.61).
+     400 is for decoration and UI furniture only — chevrons, disabled states, hairline marks — and
+     targets WCAG 1.4.11's 3:1 for non-text (3.72 / 3.50). Do not set body copy in it; that is what
+     made placeholders and the EVIDENCE label unreadable at 2.44:1. */
+  --color-ink-400: #7b8598;
+  --color-ink-500: #687185;
   --color-ink-600: #4d5768;
   --color-ink-700: #3a4354;
   --color-ink-800: #252d3c;
@@ -51,7 +58,9 @@
   --color-sev-green: #067647;
   --color-sev-green-bg: #ecfdf3;
   --color-sev-green-border: #abefc6;
-  --color-sev-none: #6b7589;
+  /* Tracks ink-500 so an unrated marker reads as the same "neutral" as every other secondary text,
+     and clears AA on the ink-50 page ground for the same reason. */
+  --color-sev-none: #687185;
   --color-sev-none-bg: #f7f8fa;
   --color-sev-none-border: #dfe3ea;
 

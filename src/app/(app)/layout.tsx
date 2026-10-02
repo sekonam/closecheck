@@ -12,9 +12,12 @@ import { buttonClass } from "@/components/ui";
  */
 const NAV_ITEMS = [
   { href: "/engagements", label: "Engagements" },
-  // "Branding" rather than "Settings": the destination's own heading is "Firm branding", and the
-  // label is asserted as-is by the browser suites.
-  { href: "/settings", label: "Branding" },
+  // "Settings", not "Branding". The destination holds branding, the report disclaimer, the team,
+  // the plan, API keys, webhooks and email delivery — so labelling it after one of its seven
+  // sections left a consultant looking for Team or API keys with no signpost anywhere in the
+  // chrome. (An earlier pass kept "Branding" on the stated grounds that the browser suites assert
+  // it; they do not — neither "Branding" nor "Firm branding" appears anywhere in tests/.)
+  { href: "/settings", label: "Settings" },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -27,6 +30,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen flex-col bg-ink-50">
+      {/* First focusable element on every signed-in page, and deliberately so: measured with a
+          keyboard, reaching the first working control on the audit page took 22 tab stops — five of
+          them this chrome (brand, two nav links, the sign-out form), the rest the audit's own
+          preamble. Hidden until focused, then an ordinary visible control. Fixed rather than
+          absolute while focused so it cannot be scrolled out of sight on a long page. */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:border focus:border-accent-500 focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-accent-700 focus:shadow-md"
+      >
+        Skip to main content
+      </a>
       <header className="border-b border-ink-200 bg-white">
         {/* Wraps rather than hides at narrow widths: the chrome has to stay whole at 400px, and
             every page is swept for horizontal overflow at that viewport. */}
@@ -90,7 +104,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">{children}</main>
+      {/* tabIndex -1 so the skip link actually MOVES focus here rather than only scrolling: Safari
+          and older WebKit do not move focus to a fragment target that is not focusable, which makes
+          the next Tab start from the top of the chrome again — the exact penalty the link removes.
+          The outline is suppressed because the target is the whole content region, not a control;
+          the affordance the user needs next is the first real control inside it. */}
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 focus:outline-none sm:px-6"
+      >
+        {children}
+      </main>
     </div>
   );
 }

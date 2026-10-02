@@ -115,9 +115,15 @@ function FieldCitation({
         </summary>
         <form action={citeAction} className="mt-1.5 space-y-1.5 rounded-md border border-ink-200 bg-ink-50 p-2">
           <input type="hidden" name="fieldKey" value={fieldKey} />
+          {/*
+            These three controls have no visible label of their own — the field name above the
+            disclosure is their only visual context, and a placeholder is not an accessible name.
+            Each therefore names itself and says which answer it is sourcing, because one page
+            carries a dozen of these forms with identical control names.
+          */}
           <select
             name="evidenceId"
-            aria-label="Source document"
+            aria-label={`Source document for ${label}`}
             defaultValue={citations[0]?.evidenceId ?? documents[0].id}
             className={CITE_CONTROL}
           >
@@ -129,6 +135,7 @@ function FieldCitation({
           </select>
           <input
             name="locator"
+            aria-label={`Where in the source — ${label}`}
             defaultValue={citations[0]?.locator ?? ""}
             // Free text, not a page number: consultants cite what the document gives them, and
             // "§14.2" is far more common than "page 7" in an executed agreement.
@@ -137,6 +144,7 @@ function FieldCitation({
           />
           <textarea
             name="excerpt"
+            aria-label={`Quoted excerpt — ${label}`}
             defaultValue={citations[0]?.excerpt ?? ""}
             rows={2}
             placeholder="Quote the words that support this — a reader should be able to judge without opening the file"

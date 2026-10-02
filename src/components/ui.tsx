@@ -265,11 +265,18 @@ export function Button({
   return <button {...props} className={buttonClass(variant, size, className)} />;
 }
 
+/**
+ * NOTE: no `focus:outline-none` here, deliberately. It was here, and it silently defeated the one
+ * focus treatment globals.css sets for every control — measured: a nav link and a <summary> drew a
+ * 2px accent outline while every text input and select drew none, leaving a 1px border recolour
+ * (3.03:1) as the only indicator. That is the worst possible place to lose a focus ring: the audit
+ * page is a 23-item keyboard-driven form built almost entirely out of these two helpers.
+ */
 export const inputClass = (className?: string) =>
   cn(
     "block w-full rounded-md border border-ink-300 bg-white px-3 py-2 text-sm text-ink-900",
-    "placeholder:text-ink-400",
-    "hover:border-ink-400 focus:border-accent-500 focus:outline-none",
+    "placeholder:text-ink-500",
+    "hover:border-ink-400 focus:border-accent-500",
     "disabled:bg-ink-50 disabled:text-ink-500",
     className,
   );
@@ -277,7 +284,8 @@ export const inputClass = (className?: string) =>
 export const selectClass = (className?: string) =>
   cn(
     "block w-full appearance-none rounded-md border border-ink-300 bg-white px-3 py-2 pr-8 text-sm text-ink-900",
-    "hover:border-ink-400 focus:border-accent-500 focus:outline-none",
+    // See inputClass above for why there is no focus:outline-none here.
+    "hover:border-ink-400 focus:border-accent-500",
     // Chevron drawn in CSS so the control needs no icon component and stays server-renderable.
     "bg-[length:16px] bg-[right_0.5rem_center] bg-no-repeat",
     "bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 fill=%22none%22 viewBox=%220 0 24 24%22 stroke=%22%236b7589%22 stroke-width=%222%22%3E%3Cpath stroke-linecap=%22round%22 stroke-linejoin=%22round%22 d=%22M6 9l6 6 6-6%22/%3E%3C/svg%3E')]",

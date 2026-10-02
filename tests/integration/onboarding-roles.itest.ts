@@ -66,7 +66,15 @@ describe("onboarding tells a member what is theirs and what is not", () => {
   it("still gives an owner the actionable instruction", async () => {
     const owner = await statusFor("OWNER");
     const branding = owner.steps.find((s) => s.key === "branding");
-    expect(branding?.detail).toMatch(/Add your logo/);
+    // Asserts the SHAPE of the copy — an imperative aimed at the reader — not its exact wording.
+    // It used to require /Add your logo/, which pinned the sentence to an order that turned out to
+    // be wrong: `done` for this step is `brandLogoUrl || brandColorHex`, so a firm that set only a
+    // colour ticked the step off while the copy was still promising "logo and brand color". The
+    // sentence now leads with the colour, because that is the part that always applies.
+    expect(branding?.detail).toMatch(/^Add your/);
+    expect(branding?.detail.toLowerCase(), "an owner is told to act, not who to ask").not.toContain(
+      "account owner",
+    );
     expect(branding?.waitingOnOwner, "an owner is never waiting on themselves").toBe(false);
   });
 

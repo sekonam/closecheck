@@ -107,11 +107,16 @@ export default async function LoginPage({
           </Link>
         </p>
 
-        {/* A local-dev affordance, not product copy — kept verbatim, demoted to a footnote so it
-            never reads as something a real signing-in consultant is meant to act on. */}
-        <p className="mt-6 border-t border-ink-200 pt-4 font-mono text-[11px] leading-relaxed text-ink-400">
-          Local dev seed: dev@closecheck.local / devpassword123 (see prisma/seed.ts)
-        </p>
+        {/* A local-dev affordance, not product copy. Rendered ONLY outside production: this is an
+            unauthenticated page, and a buyer can reach it — a dead portal link lands on a 404 whose
+            only control used to point here — so in a deployed build it would advertise a working
+            credential pair and an internal source path to anyone who followed that path. The
+            typographic demotion below is not a substitute for not shipping it. */}
+        {process.env.NODE_ENV !== "production" && (
+          <p className="mt-6 border-t border-ink-200 pt-4 font-mono text-[11px] leading-relaxed text-ink-400">
+            Local dev seed: dev@closecheck.local / devpassword123 (see prisma/seed.ts)
+          </p>
+        )}
       </div>
     </div>
   );

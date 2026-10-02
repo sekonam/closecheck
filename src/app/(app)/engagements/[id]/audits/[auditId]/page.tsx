@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getCreditBalance } from "@/lib/billing/credits";
 import { isBillingConfigured, isEnforcementEnabled } from "@/lib/billing/config";
-import { notFound } from "next/navigation";
+import { notFound, redirect, unstable_rethrow } from "next/navigation";
 import { Tier } from "@prisma/client";
 import { requireOrgSession } from "@/lib/auth/session";
 import { withOrgScope } from "@/lib/db/scoped";
@@ -30,6 +30,8 @@ import {
   selectClass,
 } from "@/components/ui";
 import { VendorRecall } from "./VendorRecall";
+import { FindingDraftKeeper } from "./FindingDraftKeeper";
+import { PendingSubmit } from "./PendingSubmit";
 import { StructuredFields } from "./StructuredFields";
 import { FieldSources } from "./FieldCitations";
 import { BlockingChip, EvidenceChip, FindingGuidance } from "./FindingGuidance";
@@ -39,7 +41,8 @@ import { attributionFor, describeEvidence } from "@/lib/storage/describeEvidence
 import { unavailableReason } from "@/lib/audit/blocking";
 import { computeEvidenceCoverage, isEvidenceSatisfied } from "@/lib/reports/evidenceCoverage";
 import { createPortalLink, revokePortalLink, emailPortalLink } from "@/lib/actions/portal";
-import { runOrRedirect } from "@/lib/actions/errorRedirect";
+import { runOrRedirect, userFacingMessage } from "@/lib/actions/errorRedirect";
+import { recordError } from "@/lib/metrics/record";
 
 const TIER_LABEL: Record<Tier, string> = {
   A: "Tier A — External (no seller cooperation needed)",
@@ -48,6 +51,98 @@ const TIER_LABEL: Record<Tier, string> = {
 };
 
 const TIERS = Object.keys(TIER_LABEL) as Tier[];
+
+/** In-page jump targets, shared by the header tiles and the sections they point at. */
+const TIER_ANCHOR: Record<Tier, string> = { A: "tier-a", B: "tier-b", C: "tier-c" };
+
+/** The anchor on a finding card, shared by the jump links and by the post-save redirects. */
+const findingAnchorId = (findingId: string) => `finding-${findingId}`;
+
+/**
+ * The file picker's filter, mirroring ALLOWED_EVIDENCE_MIME_TYPES in
+ * src/lib/storage/uploadPolicy.ts. A hint only — the server stays the authority and still refuses
+ * on declared type AND on the file's own leading bytes — but without it the control a consultant
+ * uses 20+ times an audit offered no filter at all while the once-per-firm logo upload did.
+ * Spelled out here rather than imported because that list is not exported; exporting it (and
+ * deriving this) is the tidier fix and belongs in that file's own change.
+ */
+const EVIDENCE_ACCEPT = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/heic",
+  "image/heif",
+  "text/plain",
+  "text/csv",
+  "application/csv",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/rtf",
+  "text/rtf",
+].join(",");
+
+/**
+ * Reads the finding a submission belongs to, so the redirect can come back to its card.
+ *
+ * Whitelisted rather than merely escaped: this value reaches a redirect target, and the only thing
+ * that ever legitimately sits in it is a cuid. (b-engagements-audits row B11 rewrites this field in
+ * the DOM on purpose, so "it comes from our own markup" is not an assumption this code may make.)
+ */
+function findingAnchor(formData: FormData): string | null {
+  const value = formData.get("findingId");
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
+}
+
+/**
+ * The finding-scoped twin of runOrRedirect: identical error handling, plus it carries WHICH finding
+ * the consultant was working on through both outcomes. Without it, every one of the ~24 saves on
+ * this page lands the browser at y=0 of a 17-screen document and the consultant has to find their
+ * place again — measured, not supposed.
+ *
+ * Not expressed by handing runOrRedirect a path that already ends in `#finding-…`: it builds its
+ * failure URL as `${path}?error=…`, and everything after the first `#` is the fragment, so the
+ * query string would end up INSIDE the fragment and the error banner would never render at all
+ * (b-findings-evidence row B5 drives exactly that refusal). Hence the query first and the fragment
+ * appended last, on each branch.
+ *
+ * The id also travels as a search param because a fragment is never sent to the server, and the
+ * page needs it server-side to mark the card that failed and the card that saved.
+ *
+ * Module scope, NOT a local function inside the component, even though it only has one caller
+ * there: the inline `"use server"` actions below would then CLOSE OVER it, and Next serialises an
+ * inline action's captured variables — a captured function is not serialisable, so every render of
+ * this page threw "Functions cannot be passed directly to Client Components" and the whole audit
+ * page fell to the error boundary. An imported or module-level function is a module reference
+ * instead, which is why runOrRedirect itself was always fine.
+ */
+async function runForFinding(
+  action: () => Promise<void>,
+  backPath: string,
+  findingId: string | null,
+) {
+  if (!findingId) {
+    await runOrRedirect(action, backPath);
+    return;
+  }
+  try {
+    await action();
+  } catch (err) {
+    unstable_rethrow(err);
+    // Fire-and-forget, as in runOrRedirect: recording must never delay or alter the redirect.
+    void recordError("server-action", err);
+    redirect(
+      `${backPath}?error=${encodeURIComponent(userFacingMessage(err))}` +
+        `&finding=${findingId}#${findingAnchorId(findingId)}`,
+    );
+  }
+  redirect(`${backPath}?saved=${findingId}#${findingAnchorId(findingId)}`);
+}
 
 /** Small meta chip on a finding card (method, and alongside the blocking/evidence chips). */
 const META_CHIP =
@@ -93,10 +188,10 @@ export default async function AuditPage({
   searchParams,
 }: {
   params: Promise<{ id: string; auditId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; finding?: string }>;
 }) {
   const { id: engagementId, auditId } = await params;
-  const { error } = await searchParams;
+  const { error, saved: savedFindingId, finding: failedFindingId } = await searchParams;
   const { orgId, userId } = await requireOrgSession();
   const backPath = `/engagements/${engagementId}/audits/${auditId}`;
   // The "this audit is now billable" moment a consultant should see coming (spec.md §9): Tier A
@@ -139,12 +234,15 @@ export default async function AuditPage({
   }
   async function updateFindingAction(formData: FormData) {
     "use server";
-    await runOrRedirect(() => updateFinding(formData), backPath);
+    await runForFinding(() => updateFinding(formData), backPath, findingAnchor(formData));
   }
   async function attachEvidenceAction(formData: FormData) {
     "use server";
-    await runOrRedirect(() => attachEvidence(formData), backPath);
+    await runForFinding(() => attachEvidence(formData), backPath, findingAnchor(formData));
   }
+  // Evidence removal and citation stay on the plain path: neither form carries a findingId (they
+  // are addressed by evidenceId / fieldKey), and adding one would be adding a form control to a
+  // page whose controls the browser suites address by name.
   async function deleteEvidenceAction(formData: FormData) {
     "use server";
     await runOrRedirect(() => deleteEvidence(formData), backPath);
@@ -249,9 +347,32 @@ export default async function AuditPage({
   // presents that identically to one backed by an executed agreement.
   const evidenceCoverage = computeEvidenceCoverage(audit.findings);
   const gated = !audit.engagement.primaryDomain || !org.disclaimerAcknowledgedAt;
+  // "Where did I get to?" answered as a link rather than left to scrolling. Same definition of
+  // rated the roll-up uses (severity set; NOT_APPLICABLE is resolved, not outstanding —
+  // src/lib/reports/rollup.ts), and walked in tier order so it matches the order of the sections
+  // below rather than the database's.
+  const firstUnrated = TIERS.flatMap((tier) => byTier[tier]).find(
+    (f) => f.severity === null && f.status !== "NOT_APPLICABLE",
+  );
 
   return (
     <div>
+      {/* Mounted once for the whole page: holds typed values across a refused save. Renders
+          nothing, and every form above it keeps working if it never loads. */}
+      <FindingDraftKeeper />
+      {/*
+        The save confirmation fades itself out. CSS rather than a timer in FindingDraftKeeper,
+        because a save redirects through a CLIENT-SIDE navigation — a mounted effect does not re-run
+        for one, so a JS timer would only ever fire on a full page load, which is not the path a
+        save takes. The animation plays whenever the element is rendered, which is exactly when a
+        save has just happened. `visibility` and not `display`, so the line does not reflow the card
+        out from under a cursor already heading for the next control.
+      */}
+      <style>{
+        "@keyframes cc-saved-out{0%,70%{opacity:1}100%{opacity:0;visibility:hidden}}" +
+        ".cc-saved{animation:cc-saved-out 6s ease-out forwards}" +
+        "@media (prefers-reduced-motion:reduce){.cc-saved{animation-duration:6s;animation-timing-function:step-end}}"
+      }</style>
       {/*
         The audit's instrument panel: what this audit currently says, how much of it is real work,
         what is runnable versus waiting on somebody else, and the three actions that move it on.
@@ -312,11 +433,24 @@ export default async function AuditPage({
             const tierStatus = coverageStatus(coverage.rated, coverage.total);
             const evidence = evidenceCoverage.perTier[tier];
             return (
-              <div key={tier} className="bg-white px-3.5 py-3">
+              // Each tile jumps to its own section. The panel already reads as a map of the page;
+              // this makes it one, instead of a summary you then scroll past three tier headings
+              // to reach. An anchor, not script: nothing here depends on hydration.
+              <a key={tier} href={`#${TIER_ANCHOR[tier]}`} className="block bg-white px-3.5 py-3 transition-colors hover:bg-ink-50">
                 <div className="flex items-center gap-2">
                   <span aria-hidden="true" className={cn("h-4 w-1 rounded-full", TIER_META[tier].rail)} />
                   <TierChip tier={tier}>Tier {tier}</TierChip>
-                  {tierStatus === "rated" && <SeverityDot severity={rollup.perTier[tier]} />}
+                  {/* The glyph is aria-hidden inside SeverityDot, so without a title the tier's
+                      rating was simply absent to a screen reader: "TIER A, 7 of 11, Runnable now"
+                      and nothing about Red or Green. The title also gives a sighted first-time
+                      reader a way to find out what ▲/◆/● mean, which the strip has no room to
+                      spell out beside three tiles of counts. */}
+                  {tierStatus === "rated" && (
+                    <SeverityDot
+                      severity={rollup.perTier[tier]}
+                      title={`Tier ${tier}: ${rollup.perTier[tier]}`}
+                    />
+                  )}
                 </div>
                 <div className="mt-2 flex items-baseline justify-between gap-2">
                   <span className="text-sm font-semibold text-ink-900">
@@ -330,7 +464,7 @@ export default async function AuditPage({
                 </div>
                 <Meter value={coverage.rated} total={coverage.total} className="mt-1.5" />
                 <div className="mt-1.5 text-[11px] text-ink-500">{TIER_META[tier].blocker}</div>
-              </div>
+              </a>
             );
           })}
         </div>
@@ -351,15 +485,19 @@ export default async function AuditPage({
                 three forms, a checkbox between two buttons reads as belonging to either. */}
             <form action={generateReportAction} className="flex flex-col items-start gap-1.5">
               <input type="hidden" name="auditId" value={audit.id} />
-              <button
-                type="submit"
+              {/* Report generation is the one action here that takes seconds and that CANNOT be
+                  undone twice over — there is no way to delete a report once generated. See
+                  PendingSubmit for why this one and nothing else on the page. */}
+              <PendingSubmit
                 disabled={!org.disclaimerAcknowledgedAt}
                 // Transparent border only so the filled button matches the height of the bordered
                 // ones beside it; the primary variant carries no border of its own.
                 className={buttonClass("primary", "md", "border border-transparent")}
+                pendingLabel="Generating…"
+                pendingClassName="text-[11px] text-ink-500"
               >
                 Generate report
-              </button>
+              </PendingSubmit>
               <label className="flex items-center gap-1.5 text-[11px] text-ink-600">
                 <input type="checkbox" name="includeAppendix" className="accent-accent-600" />
                 Include uploaded documents as an appendix
@@ -384,6 +522,21 @@ export default async function AuditPage({
             </div>
           </div>
 
+          {/* The one piece of wayfinding a consultant actually asks for mid-deal: not "how much is
+              left" (the meters say that) but "take me to it". Absent once nothing is outstanding —
+              a link to nowhere is worse than no link. */}
+          {firstUnrated && (
+            <div className="mt-2.5 text-xs">
+              <a
+                href={`#${findingAnchorId(firstUnrated.id)}`}
+                className="font-medium text-accent-700 underline hover:text-accent-900"
+              >
+                Jump to the next item not yet rated
+              </a>
+              <span className="ml-1.5 text-ink-500">({firstUnrated.templateItem.title})</span>
+            </div>
+          )}
+
           {gated && (
             <div className="mt-2.5 space-y-1 text-xs leading-relaxed text-sev-amber">
               {!audit.engagement.primaryDomain && (
@@ -400,7 +553,7 @@ export default async function AuditPage({
                     <>
                       Accept the report disclaimer on the{" "}
                       <Link href="/settings" className="underline">
-                        Branding
+                        Settings
                       </Link>{" "}
                       page to enable report generation.
                     </>
@@ -491,8 +644,13 @@ export default async function AuditPage({
               <option value="YELLOW">Yellow</option>
               <option value="RED">Red</option>
             </select>
+            {/* Named, not left to the placeholder: a placeholder is not an accessible name, and it
+                also disappears the moment there is a value — so a consultant returning to an
+                existing override, by keyboard or by screen reader, had no way to tell what the
+                field was for. */}
             <input
               name="overallRatingOverrideNote"
+              aria-label="Why the override — required context for the report reader"
               defaultValue={audit.overallRatingOverrideNote ?? ""}
               placeholder="Why the override — required context for the report reader"
               className={inputClass()}
@@ -604,10 +762,14 @@ export default async function AuditPage({
                           {isLive && (
                             <form action={emailPortalLinkAction} className="mt-2 flex items-center gap-2">
                               <input type="hidden" name="linkId" value={link.id} />
+                              {/* One of these renders per live link, so the name carries the report
+                                  it belongs to — "Buyer's email address" alone would repeat
+                                  identically down a page listing several shareable links. */}
                               <input
                                 name="recipientEmail"
                                 type="email"
                                 required
+                                aria-label={`Buyer's email address to send this report link to (link ending ${link.token.slice(-6)})`}
                                 placeholder="buyer@example.com"
                                 className={cn(DENSE_INPUT, "w-48 max-w-full")}
                               />
@@ -632,7 +794,7 @@ export default async function AuditPage({
         const tierStatus = coverageStatus(rollup.perTierCoverage[tier].rated, rollup.perTierCoverage[tier].total);
         const meta = TIER_META[tier];
         return (
-        <section key={tier} className="mt-8">
+        <section key={tier} id={TIER_ANCHOR[tier]} className="mt-8 scroll-mt-4">
           {/* The tier's identity, repeated from the header panel and carried into every card's rail
               so a consultant scrolling the checklist never loses track of who has to act next. */}
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b-2 border-ink-200 pb-2">
@@ -717,12 +879,22 @@ export default async function AuditPage({
                 audit.engagement.dealStage,
               );
 
+              // Which card the last submission concerned, carried back by runForFinding. The
+              // error banner above says WHAT was refused; without this the consultant still has to
+              // work out WHICH of 24 findings it was about.
+              const justFailed = Boolean(error) && failedFindingId === finding.id;
+              const justSaved = !error && savedFindingId === finding.id;
+
               return (
                 // Stays a `div.rounded-lg`: the browser suites address a finding card by exactly
                 // that selector plus its title text.
                 <div
                   key={finding.id}
-                  className="relative overflow-hidden rounded-lg border border-ink-200 bg-white shadow-xs"
+                  id={findingAnchorId(finding.id)}
+                  className={cn(
+                    "relative overflow-hidden rounded-lg border bg-white shadow-xs scroll-mt-4",
+                    justFailed ? "border-sev-red-border ring-2 ring-sev-red-border" : "border-ink-200",
+                  )}
                 >
                   <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", meta.rail)} />
                   <div className="py-3.5 pr-4 pl-5">
@@ -812,6 +984,12 @@ export default async function AuditPage({
                         </select>
                         <input
                           name="note"
+                          // The placeholder is the only thing naming this control, and a
+                          // placeholder is not an accessible name — 23 identical "Finding note"
+                          // boxes on one page were indistinguishable to a screen reader and to
+                          // voice control. The title disambiguates them; the visible text is
+                          // untouched (the suites assert on the placeholder).
+                          aria-label={`Finding note — ${finding.templateItem.title}`}
                           defaultValue={finding.note ?? ""}
                           placeholder="Finding note"
                           className={inputClass()}
@@ -823,6 +1001,15 @@ export default async function AuditPage({
 
                       {schema && <StructuredFields schema={schema} values={structured} />}
                     </form>
+
+                    {/* The acknowledgement this page had none of: 24 saves, no confirmation of any
+                        kind. Server-rendered so it works with no JS; FindingDraftKeeper hides it
+                        after a few seconds so it does not become permanent furniture. */}
+                    {justSaved && (
+                      <p data-saved-marker className="cc-saved mt-1.5 text-[11px] font-medium text-sev-green">
+                        Saved
+                      </p>
+                    )}
 
                     {vendorProfile && recalled.length > 0 && (
                       <VendorRecall
@@ -863,9 +1050,21 @@ export default async function AuditPage({
                                   {describeEvidence(e)}
                                 </div>
                               </div>
+                              {/* This control hard-deletes the stored object: unrecoverable, and
+                                  the seller may not send the document again. It used to be the
+                                  weakest-looking thing on the card — 45×16px of #98a1b3 (2.60:1,
+                                  below AA) that only turned red once you were already hovering it.
+                                  Now it reads as what it is, is big enough to hit on purpose
+                                  (WCAG 2.5.8), and NAMES the file in its accessible name so
+                                  "remove" from a screen reader or a voice command is never
+                                  ambiguous between a card's several documents. */}
                               <form action={deleteEvidenceAction}>
                                 <input type="hidden" name="evidenceId" value={e.id} />
-                                <button type="submit" className="text-xs text-ink-400 hover:text-sev-red">
+                                <button
+                                  type="submit"
+                                  aria-label={`Remove ${e.label ?? e.text ?? "document"} — deletes the file permanently`}
+                                  className={buttonClass("danger", "sm", "shrink-0")}
+                                >
                                   Remove
                                 </button>
                               </form>
@@ -873,15 +1072,30 @@ export default async function AuditPage({
                           ))}
                         </ul>
                       )}
+                      {/* States the consequence BEFORE the click, which is the part a consultant
+                          cannot get back. A real two-step confirmation is the better answer and is
+                          not here on purpose: b-findings-evidence row B7 clicks "Remove" once and
+                          waits for the delete, so gating it behind a reveal would hang that row —
+                          it needs the test changed in the same commit. */}
+                      {finding.evidence.length > 0 && (
+                        <p className="mt-1.5 text-[11px] text-ink-500">
+                          Removing a document deletes the stored file permanently.
+                        </p>
+                      )}
                       <form action={attachEvidenceAction} className="mt-2 flex flex-wrap items-center gap-2">
                         <input type="hidden" name="findingId" value={finding.id} />
+                        {/* Same reason as the note input: 23 unnamed file pickers and 23 unnamed
+                            label boxes, told apart only by where they sit on the page. */}
                         <input
                           type="file"
                           name="file"
+                          accept={EVIDENCE_ACCEPT}
+                          aria-label={`Attach a document — ${finding.templateItem.title}`}
                           className="min-w-0 max-w-full text-xs text-ink-500 file:mr-2 file:rounded-md file:border file:border-ink-300 file:bg-white file:px-2 file:py-1 file:text-xs file:font-medium file:text-ink-700 hover:file:bg-ink-100"
                         />
                         <input
                           name="label"
+                          aria-label={`Document label — ${finding.templateItem.title}`}
                           placeholder="Label (optional) — e.g. Toast MSA, executed"
                           className={cn(DENSE_INPUT, "w-full max-w-full sm:w-64")}
                         />

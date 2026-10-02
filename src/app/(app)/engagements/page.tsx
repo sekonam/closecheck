@@ -4,6 +4,7 @@ import { withOrgScope } from "@/lib/db/scoped";
 import { createEngagement } from "@/lib/actions/engagements";
 import { runOrRedirect } from "@/lib/actions/errorRedirect";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
+import { computeSeverityRollup } from "@/lib/reports/rollup";
 import {
   Button,
   Callout,
@@ -14,6 +15,7 @@ import {
   Field,
   Meter,
   PageHeader,
+  SeverityBadge,
   buttonClass,
   cn,
   inputClass,
@@ -33,6 +35,18 @@ const DEAL_STAGE_LABEL: Record<string, string> = {
  * mixing finished and in-flight deals still answers "what am I working on" at a glance.
  */
 const TERMINAL_STAGES = new Set(["CLOSED", "DEAD"]);
+
+/**
+ * Same three-way split as the audit page's `coverageStatus`: an all-NOT_APPLICABLE audit (total 0,
+ * because computeSeverityRollup drops those from the denominator) is RESOLVED work, not pending
+ * work, so it must not read as "not yet rated". Duplicated rather than shared because the audit
+ * page's copy is page-local; if a third surface needs it, it belongs in @/lib/reports/rollup.
+ */
+function coverageStatus(rated: number, total: number): "not-applicable" | "not-yet-rated" | "rated" {
+  if (total === 0) return "not-applicable";
+  if (rated === 0) return "not-yet-rated";
+  return "rated";
+}
 
 function DealStageChip({ stage }: { stage: string }) {
   const terminal = TERMINAL_STAGES.has(stage);
@@ -70,10 +84,24 @@ export default async function EngagementsPage({
     await runOrRedirect(() => createEngagement(formData), "/engagements");
   }
 
+  // Findings come down with the audits rather than being counted per row: Prisma resolves a nested
+  // select in a fixed number of batched queries (engagements, then their audits, then those audits'
+  // findings and template items keyed by parent id), so this stays constant-cost as the list grows
+  // instead of one count per audit. Only the three fields computeSeverityRollup reads are selected —
+  // notes and structured data never reach this page.
   const engagements = await withOrgScope(orgId, (tx) =>
     tx.engagement.findMany({
       orderBy: { createdAt: "desc" },
-      include: { audits: { select: { id: true } } },
+      include: {
+        audits: {
+          select: {
+            id: true,
+            findings: {
+              select: { severity: true, status: true, templateItem: { select: { tier: true } } },
+            },
+          },
+        },
+      },
     }),
   );
   // The viewer's own role: the first two onboarding steps are firm setup only an owner can do
@@ -134,7 +162,14 @@ export default async function EngagementsPage({
                         step.done ? "text-ink-400" : isNext ? "text-ink-900" : "text-ink-500",
                       )}
                     >
+                      {/* Marker, not an ordinal. This rendered `i + 1` for every incomplete step,
+                          so finishing out of order — which the product positively invites, since
+                          creating an engagement needs no firm setup — produced the sequence
+                          "1, 2, ✓, ✓, 5, 6, 7". A number that skips is a number that is lying about
+                          position; the state (done / yours next / not yet) is the only thing this
+                          marker ever needed to carry. */}
                       <span
+                        aria-hidden="true"
                         className={cn(
                           "mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold",
                           step.done
@@ -144,15 +179,18 @@ export default async function EngagementsPage({
                               : "bg-ink-100 text-ink-400",
                         )}
                       >
-                        {step.done ? "✓" : i + 1}
+                        {step.done ? "✓" : isNext ? "→" : "•"}
                       </span>
                       <span className="min-w-0">
                         <span className={cn("block", isNext && "font-medium")}>{step.title}</span>
-                        {/* Also shown for a step that is someone else's to do: detail used to render
-                            only for the call-to-action, so making owner-only steps non-actionable for
-                            a member hid the very sentence explaining why. The member would have seen
-                            "Set your firm branding" with no indication it was not theirs. */}
-                        {(isNext || step.waitingOnOwner) && (
+                        {/* Shown for every step that is still outstanding, not only the call-to-
+                            action. These sentences carry the preconditions — that Tier A needs a
+                            primary domain, that report generation is blocked firm-wide until an
+                            owner reviews the disclaimer — and hiding them until a step became "next"
+                            meant the consultant read the explanation only after they were already
+                            stuck on it. Done steps drop their detail: it is instruction, and the
+                            instruction is spent. */}
+                        {!step.done && (
                           <span className="mt-0.5 block text-xs leading-relaxed text-ink-500">
                             {step.detail}
                           </span>
@@ -211,43 +249,82 @@ export default async function EngagementsPage({
               <EmptyState title="No engagements yet." />
             </li>
           )}
-          {engagements.map((e) => (
-            <li key={e.id}>
-              {/* The whole row is the target: mid-deal, this list is navigated at speed and a
-                  name-sized hit area is the slowest part of it. */}
-              <Link
-                href={`/engagements/${e.id}`}
-                className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50"
-                title={e.businessName}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="min-w-0 truncate font-medium text-ink-900 group-hover:text-accent-700">
-                      {e.businessName}
-                    </span>
-                    <DealStageChip stage={e.dealStage} />
-                  </div>
-                  <div
-                    className={cn(
-                      "mt-1 truncate text-xs",
-                      e.primaryDomain ? "font-mono text-ink-500" : "text-ink-400",
-                    )}
-                  >
-                    {e.primaryDomain ?? "no domain set"}
-                  </div>
-                </div>
-                <span className="shrink-0 text-xs text-ink-500">
-                  {e.audits.length} audit{e.audits.length === 1 ? "" : "s"}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="shrink-0 text-ink-300 transition-colors group-hover:text-ink-500"
+          {engagements.map((e) => {
+            // Every audit on the deal, rolled up as one: the denominator then moves with the audit
+            // count already on the row, so "3 audits · 20/69 rated" cannot be misread as the
+            // progress of a single one. Which audit to resume is the engagement page's answer —
+            // this list only has to say whether the deal still has open work. Fed through
+            // computeSeverityRollup rather than counted here so the "a tier is its worst item"
+            // rule and the NOT_APPLICABLE exclusion stay in one place (spec.md §6).
+            const rollup = computeSeverityRollup(e.audits.flatMap((a) => a.findings));
+            const coverage = rollup.overallCoverage;
+            const status = coverageStatus(coverage.rated, coverage.total);
+            return (
+              <li key={e.id}>
+                {/* The whole row is the target: mid-deal, this list is navigated at speed and a
+                    name-sized hit area is the slowest part of it. */}
+                <Link
+                  href={`/engagements/${e.id}`}
+                  className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-ink-50 focus-visible:bg-ink-50 focus-visible:-outline-offset-2"
+                  title={e.businessName}
                 >
-                  →
-                </span>
-              </Link>
-            </li>
-          ))}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span className="min-w-0 truncate font-medium text-ink-900 group-hover:text-accent-700 group-focus-visible:text-accent-700">
+                        {e.businessName}
+                      </span>
+                      <DealStageChip stage={e.dealStage} />
+                    </div>
+                    <div
+                      className={cn(
+                        "mt-1 truncate text-xs",
+                        e.primaryDomain ? "font-mono text-ink-500" : "text-ink-400",
+                      )}
+                    >
+                      {e.primaryDomain ?? "no domain set"}
+                    </div>
+                    {/* Inside the flexible column, never as its own fixed track: the row has to
+                        survive 400px, where a rating chip plus a count plus a bar is wider than
+                        the space left beside the name. */}
+                    {e.audits.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {status === "rated" ? (
+                          <SeverityBadge severity={rollup.overall} label={rollup.overall} size="sm" />
+                        ) : (
+                          <SeverityBadge
+                            severity={null}
+                            label={status === "not-applicable" ? "Not applicable" : "Not yet rated"}
+                            size="sm"
+                          />
+                        )}
+                        <span className="text-xs text-ink-500">
+                          {coverage.rated}/{coverage.total} rated
+                        </span>
+                        <Meter
+                          value={coverage.rated}
+                          total={coverage.total}
+                          className="w-full max-w-[10rem]"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs text-ink-500">
+                    {e.audits.length} audit{e.audits.length === 1 ? "" : "s"}
+                  </span>
+                  {/* Decorative, so no contrast minimum applies — but it is the ONLY standing cue
+                      that the whole row is a link, and at ink-300 it measured 1.61:1 against the
+                      card, i.e. invisible until hover. One step darker at rest, two on
+                      hover/focus. */}
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 text-ink-400 transition-colors group-hover:text-ink-700 group-focus-visible:text-ink-700"
+                  >
+                    →
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </Card>
     </div>
